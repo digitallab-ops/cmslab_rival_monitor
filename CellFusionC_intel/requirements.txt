@@ -1,4 +1,5 @@
 openai>=1.0.0
+anthropic>=0.25.0
 feedparser>=6.0.11
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.9
@@ -8,3 +9,4 @@ python-dotenv>=1.0.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 click>=8.1.7
+praw>=7.7.1

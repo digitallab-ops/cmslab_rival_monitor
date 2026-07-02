@@ -5,6 +5,16 @@ from sqlalchemy.engine import URL
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# Naver News Search API (https://developers.naver.com)
+NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
+
+# Reddit API (https://www.reddit.com/prefs/apps)
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "kbeauty-monitor/1.0")
+
 DB_SCHEMA = "rival_intel"
 
 # DB 연결 — 비밀번호 특수문자 문제를 피하기 위해 SQLAlchemy URL.create() 사용

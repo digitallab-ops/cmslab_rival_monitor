@@ -1,6 +1,9 @@
 """
 뷰티 전문 미디어 RSS 수집기
-- BeautyMatter, WWD Beauty, Glossy (미국 뷰티 업계지)
+- 글로벌 뷰티 업계지: BeautyMatter, WWD Beauty, Glossy
+- 글로벌 뷰티 전문: Global Cosmetics News, CosmeticsDesign Asia/Europe
+- 보도자료 서비스: PR Newswire, BusinessWire Cosmetics
+- 지역 미디어: WWD Japan, Korea Herald, SCMP Lifestyle, Nikkei Asia
 - 각 피드에서 최신 기사를 가져와 브랜드명 언급 여부로 필터링
 - 국가 비종속적 글로벌 미디어 → country는 GPT가 기사 내용에서 판단
 """
@@ -18,6 +21,7 @@ from config.settings import RSS_REQUEST_DELAY
 logger = logging.getLogger(__name__)
 
 MEDIA_FEEDS = [
+    # ── 기존: 미국 뷰티 업계지 ──────────────────────────────────────────
     {
         "key": "beautymatter",
         "name": "BeautyMatter",
@@ -34,6 +38,63 @@ MEDIA_FEEDS = [
         "key": "glossy",
         "name": "Glossy",
         "url": "https://www.glossy.co/feed/",
+        "language": "en",
+    },
+    # ── 글로벌 뷰티 전문 미디어 ────────────────────────────────────────
+    {
+        "key": "global_cosmetics_news",
+        "name": "Global Cosmetics News",
+        "url": "https://www.globalcosmeticsnews.com/feed/",
+        "language": "en",
+    },
+    {
+        "key": "cosmeticsdesign_asia",
+        "name": "CosmeticsDesign Asia",
+        "url": "https://www.cosmeticsdesign-asia.com/Info/CosmeticsDesign-Asia-RSS",
+        "language": "en",
+    },
+    {
+        "key": "cosmeticsdesign_europe",
+        "name": "CosmeticsDesign Europe",
+        "url": "https://www.cosmeticsdesign-europe.com/Info/CosmeticsDesign-Europe-RSS",
+        "language": "en",
+    },
+    # ── 글로벌 보도자료 서비스 ─────────────────────────────────────────
+    {
+        "key": "prnewswire",
+        "name": "PR Newswire",
+        "url": "https://www.prnewswire.com/rss/news-releases-list.rss",
+        "language": "en",
+    },
+    {
+        "key": "businesswire_cosmetics",
+        "name": "BusinessWire Cosmetics",
+        "url": "https://feed.businesswire.com/rss/home/?rss=G1&rssid=1080",
+        "language": "en",
+    },
+    # ── 지역 미디어 ────────────────────────────────────────────────────
+    {
+        "key": "wwdjapan",
+        "name": "WWD Japan Beauty",
+        "url": "https://www.wwdjapan.com/category/beauty/feed",
+        "language": "ja",
+    },
+    {
+        "key": "korea_herald",
+        "name": "Korea Herald",
+        "url": "https://www.koreaherald.com/common/rss.php",
+        "language": "en",
+    },
+    {
+        "key": "scmp_lifestyle",
+        "name": "SCMP Lifestyle",
+        "url": "https://www.scmp.com/rss/91/feed",
+        "language": "en",
+    },
+    {
+        "key": "nikkei_asia",
+        "name": "Nikkei Asia",
+        "url": "https://asia.nikkei.com/rss/feed/nar",
         "language": "en",
     },
 ]
@@ -93,5 +154,5 @@ class MediaRSSCollector(BaseCollector):
             except Exception as e:
                 logger.warning("미디어 RSS 오류 (%s/%s): %s", feed_cfg["key"], brand, e)
 
-        logger.info("미디어 RSS 수집: %s → %d건 (BeautyMatter+WWD+Glossy)", brand, len(articles))
+        logger.info("미디어 RSS 수집: %s → %d건 (%d개 피드)", brand, len(articles), len(MEDIA_FEEDS))
         return articles

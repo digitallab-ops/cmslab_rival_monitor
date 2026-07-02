@@ -17,6 +17,8 @@ from collectors.google_rss import GoogleRSSCollector
 from collectors.media_rss import MediaRSSCollector
 from collectors.jangup import JangupCollector
 from collectors.prtimes import PRTimesCollector
+from collectors.naver_news import NaverNewsCollector
+from collectors.reddit_collector import RedditCollector
 from collectors.body_fetcher import fetch_body
 from classifier.claude_classifier import classify_articles
 from deduplication.url_hasher import url_hash, deduplicate_batch
@@ -32,6 +34,8 @@ _google = GoogleRSSCollector()
 _media = MediaRSSCollector()
 _jangup = JangupCollector()
 _prtimes = PRTimesCollector()
+_naver = NaverNewsCollector()
+_reddit = RedditCollector()
 
 
 @dataclass
@@ -135,10 +139,13 @@ def run_pipeline(brand: str, country: str) -> PipelineStats:
     t0 = time.time()
     session = get_session()
 
-    # 사용할 컬렉터 목록 (국가에 따라 PRTIMES는 JP만)
+    # 사용할 컬렉터 목록
     collectors: list[BaseCollector] = [_google, _media, _jangup]
     if country.upper() == "JP":
         collectors.append(_prtimes)
+    if country.upper() == "KR":
+        collectors.append(_naver)
+    collectors.append(_reddit)  # 글로벌 커뮤니티 — 모든 국가
 
     try:
         for collector in collectors:
