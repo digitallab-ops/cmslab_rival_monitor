@@ -1,105 +1,93 @@
 """
-Reddit 수집기 — 소비자 커뮤니티 신호
+Reddit RSS 수집기 — API 키 불필요
+- Reddit 서브레딧 검색 RSS 피드 사용 (공개 접근)
 - r/AsianBeauty, r/SkincareAddiction, r/KoreanBeauty
-- 언론 보도보다 빠른 소비자 반응 (입점 소식, 바이럴, 리뷰 트렌드)
+- 소비자 커뮤니티 신호 (입점 소식, 바이럴, 리뷰 트렌드)
 - 국가 비종속적 (country 무시, 글로벌 영어 커뮤니티)
-- API 등록: https://www.reddit.com/prefs/apps
-- .env: REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT
 """
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from urllib.parse import quote_plus
 
-import praw
-from praw.exceptions import PRAWException
+import feedparser
 
 from collectors.base_collector import BaseCollector, RawArticle
-from config.settings import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT
+from config.settings import RSS_REQUEST_DELAY
 
 logger = logging.getLogger(__name__)
 
 SUBREDDITS = ["AsianBeauty", "SkincareAddiction", "KoreanBeauty"]
-RESULTS_PER_SUBREDDIT = 5  # 서브레딧당 최대 수집 건수
+
+# Reddit 서브레딧 검색 RSS — 인증 불필요
+REDDIT_SEARCH_RSS = (
+    "https://www.reddit.com/r/{subreddit}/search.rss"
+    "?q={query}&sort=new&restrict_sr=1&t=month&limit=10"
+)
+
+HEADERS = {"User-Agent": "kbeauty-monitor/1.0 (RSS reader)"}
+
+
+def _parse_date(entry) -> datetime:
+    for field in ("published", "updated"):
+        val = getattr(entry, field, None)
+        if val:
+            try:
+                return parsedate_to_datetime(val).astimezone(timezone.utc).replace(tzinfo=None)
+            except Exception:
+                pass
+    return datetime.utcnow()
 
 
 class RedditCollector(BaseCollector):
-    """Reddit 커뮤니티 K-뷰티 언급 수집기."""
+    """Reddit 서브레딧 RSS 수집기 — API 키 불필요."""
 
     collector_type = "reddit"
-    _reddit: praw.Reddit | None = None
-
-    def _get_client(self) -> praw.Reddit | None:
-        if self._reddit is not None:
-            return self._reddit
-        if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET:
-            logger.warning("Reddit API 키 미설정 — REDDIT_CLIENT_ID/SECRET 확인")
-            return None
-        try:
-            self._reddit = praw.Reddit(
-                client_id=REDDIT_CLIENT_ID,
-                client_secret=REDDIT_CLIENT_SECRET,
-                user_agent=REDDIT_USER_AGENT or "kbeauty-monitor/1.0",
-            )
-            return self._reddit
-        except Exception as e:
-            logger.warning("Reddit 클라이언트 초기화 실패: %s", e)
-            return None
 
     def collect(self, brand: str, country: str) -> list[RawArticle]:
-        reddit = self._get_client()
-        if reddit is None:
-            return []
-
         articles: list[RawArticle] = []
-        seen_ids: set[str] = set()
+        seen_urls: set[str] = set()
         brand_lower = brand.lower()
 
-        for sub_name in SUBREDDITS:
+        for sub in SUBREDDITS:
+            url = REDDIT_SEARCH_RSS.format(
+                subreddit=sub,
+                query=quote_plus(brand),
+            )
             try:
-                subreddit = reddit.subreddit(sub_name)
-                results = subreddit.search(
-                    brand,
-                    sort="new",
-                    time_filter="month",
-                    limit=RESULTS_PER_SUBREDDIT,
-                )
+                feed = feedparser.parse(url, request_headers=HEADERS)
 
                 matched = 0
-                for post in results:
-                    if post.id in seen_ids:
+                for entry in feed.entries:
+                    link = getattr(entry, "link", "").strip()
+                    title = getattr(entry, "title", "").strip()
+                    summary = getattr(entry, "summary", "").strip()
+
+                    if not link or link in seen_urls:
+                        continue
+                    if brand_lower not in f"{title} {summary}".lower():
                         continue
 
-                    title = post.title or ""
-                    body = post.selftext or ""
-
-                    # 브랜드명 2차 필터 (검색 결과에서 관련 없는 글 제거)
-                    if brand_lower not in f"{title} {body}".lower():
-                        continue
-
-                    seen_ids.add(post.id)
-                    pub_dt = datetime.utcfromtimestamp(post.created_utc)
-                    summary = body[:300].strip() if body else f"[Reddit] {title}"
-
+                    seen_urls.add(link)
                     articles.append(RawArticle(
                         title=title,
-                        url=f"https://www.reddit.com{post.permalink}",
-                        published=pub_dt,
-                        summary=summary,
-                        source_name=f"Reddit r/{sub_name}",
+                        url=link,
+                        published=_parse_date(entry),
+                        summary=summary[:300],
+                        source_name=f"Reddit r/{sub}",
                         language="en",
                         brand_hint=brand,
                         country_hint=country,
                     ))
                     matched += 1
 
-                logger.debug("[%s] r/%s → %d건", brand, sub_name, matched)
-                time.sleep(1)  # Reddit rate limit 준수
+                logger.debug("[%s] r/%s → %d건", brand, sub, matched)
+                time.sleep(RSS_REQUEST_DELAY)
 
-            except PRAWException as e:
-                logger.warning("Reddit API 오류 (%s/r/%s): %s", brand, sub_name, e)
             except Exception as e:
-                logger.warning("Reddit 수집 오류 (%s/r/%s): %s", brand, sub_name, e)
+                logger.warning("Reddit RSS 오류 (%s/r/%s): %s", brand, sub, e)
 
-        logger.info("Reddit 수집: %s → %d건", brand, len(articles))
+        logger.info("Reddit RSS 수집: %s → %d건", brand, len(articles))
         return articles
