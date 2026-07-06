@@ -30,14 +30,31 @@ _dashboard_html: str = ""
 
 _LOADING_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
-<title>K-뷰티 인텔리전스 — 로딩 중</title>
-<style>body{display:flex;align-items:center;justify-content:center;height:100vh;margin:0;
-font-family:sans-serif;background:#0f172a;color:#94a3b8;}
-.box{text-align:center;}.spinner{width:40px;height:40px;border:3px solid #334155;
-border-top-color:#6366f1;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 20px;}
-@keyframes spin{to{transform:rotate(360deg);}}</style></head>
-<body><div class="box"><div class="spinner"></div>
-<p>대시보드 생성 중입니다...<br><small>5초마다 자동 새로고침</small></p></div></body></html>"""
+<title>K-BEAUTY INTEL</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{display:flex;align-items:center;justify-content:center;height:100vh;
+font-family:system-ui,-apple-system,"Segoe UI","Malgun Gothic",sans-serif;
+background:#08090f;color:#8891ab;}
+.wrap{text-align:center;}
+.brand{font-size:11px;font-weight:800;letter-spacing:0.22em;text-transform:uppercase;
+color:#eceef5;margin-bottom:32px;}
+.bar{width:3px;height:22px;background:linear-gradient(180deg,#c8a96e,transparent);
+border-radius:1px;margin:0 auto 10px;}
+.spinner{width:32px;height:32px;border:2px solid #1e2235;
+border-top-color:#c8a96e;border-radius:50%;
+animation:spin 0.9s linear infinite;margin:0 auto 18px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.msg{font-size:12px;color:#3e465c;letter-spacing:0.04em;}
+.sub{font-size:10px;color:#2a2f42;margin-top:6px;}
+</style></head>
+<body><div class="wrap">
+<div class="bar"></div>
+<div class="brand">K-Beauty Intel</div>
+<div class="spinner"></div>
+<div class="msg">데이터 처리 중</div>
+<div class="sub">5초마다 자동 새로고침</div>
+</div></body></html>"""
 
 
 def _build_dashboard() -> str:

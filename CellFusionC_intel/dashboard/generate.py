@@ -118,14 +118,15 @@ def _fmt_art_for_js(a: dict) -> dict:
 
 
 def _cell_color(value: int, max_value: int) -> str:
-    """히트맵 셀 배경색. 0=흰색, max=남색(#1a3a5c), 텍스트 색도 반환."""
+    """히트맵 셀 배경색. 0=어두운 베이스, max=골드, 다크 테마."""
     if max_value == 0 or value == 0:
-        return "background:#f8fafc;color:#cbd5e0;"
+        return "background:#161922;color:#3e465c;"
     norm = value / max_value
-    r = int(255 - norm * (255 - 26))
-    g = int(255 - norm * (255 - 58))
-    b = int(255 - norm * (255 - 92))
-    text = "#ffffff" if norm > 0.55 else "#1a3a5c"
+    # 0 → #161922 (dark elevated), 1 → #7a5f2a (deep gold)
+    r = int(22  + norm * (122 - 22))
+    g = int(25  + norm * (95  - 25))
+    b = int(34  + norm * (42  - 34))
+    text = "#eceef5" if norm > 0.35 else "#8891ab"
     return f"background:rgb({r},{g},{b});color:{text};"
 
 
@@ -135,10 +136,10 @@ def _cell_color(value: int, max_value: int) -> str:
 
 def _render_kpi_cards(stats: dict) -> str:
     items = [
-        ("총 수집",   stats["total"],             "건", "#2b6cb0", "kpi-total"),
-        ("HIGH",     stats["high"],              "건", "#c53030", "kpi-high"),
-        ("활성 브랜드", stats["brands_active"],   "개", "#276749", "kpi-brands"),
-        ("커버 국가",  stats["countries_active"], "개", "#744210", "kpi-countries"),
+        ("총 수집",   stats["total"],             "건", "#c8a96e", "kpi-total"),
+        ("HIGH",     stats["high"],              "건", "#e05353", "kpi-high"),
+        ("활성 브랜드", stats["brands_active"],   "개", "#4a8fd4", "kpi-brands"),
+        ("커버 국가",  stats["countries_active"], "개", "#8891ab", "kpi-countries"),
     ]
     cards = "".join(
         f'<div class="kpi-card">'
@@ -391,7 +392,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
         return ""
     act_keys = ["유통_채널", "인플루언서_협업", "신시장_진출", "신제품_런칭", "투자_BD", "기타"]
     act_labels_list = [ACTIVITY_LABELS.get(k, k) for k in act_keys]
-    act_colors = ["#1e40af", "#0d9488", "#7c3aed", "#d97706", "#dc2626", "#9ca3af"]
+    act_colors = ["#4a8fd4", "#c8a96e", "#9b7fe8", "#4ab884", "#e05353", "#4e5870"]
 
     # [{brand, acts: [count...]}]
     rows_data = []
@@ -424,7 +425,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
     var acts = d.rows[ri];
     var total = acts.reduce(function(s, v) {{ return s + v; }}, 0);
     var y = PAD_T + ri * (BAR_H + GAP);
-    ctx.fillStyle = '#1a202c';
+    ctx.fillStyle = '#8891ab';
     ctx.font = '600 11px system-ui,-apple-system,sans-serif';
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillText(brand, LABEL_W - 8, y + BAR_H / 2);
@@ -446,7 +447,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
       }}
       x += segW;
     }});
-    ctx.fillStyle = '#718096';
+    ctx.fillStyle = '#4e5870';
     ctx.font = '11px system-ui';
     ctx.textAlign = 'left';
     ctx.fillText(total + '건', x + 5, y + BAR_H / 2);
@@ -470,14 +471,14 @@ def _build_insights_script(brand_insights: dict) -> str:
         return ""
 
     flag_json = json.dumps({"US":"🇺🇸","JP":"🇯🇵","KR":"🇰🇷","SG":"🇸🇬","PL":"🇵🇱","TH":"🇹🇭","CA":"🇨🇦","GB":"🇬🇧"})
-    imp_json  = json.dumps({"high": "#dc2626", "medium": "#d97706", "low": "#9ca3af"})
+    imp_json  = json.dumps({"high": "#e05353", "medium": "#d4943a", "low": "#3e465c"})
 
     return f"""
 // ── Brand Insight Cards ──
 window._renderInsights = function(data) {{
   var FLAGS = {flag_json};
   var IMP_C = {imp_json};
-  var ACT_COLORS_MAP = {{"유통_채널":"#1e40af","인플루언서_협업":"#0d9488","신시장_진출":"#7c3aed","신제품_런칭":"#d97706","투자_BD":"#dc2626","기타":"#9ca3af"}};
+  var ACT_COLORS_MAP = {{"유통_채널":"#4a8fd4","인플루언서_협업":"#c8a96e","신시장_진출":"#9b7fe8","신제품_런칭":"#4ab884","투자_BD":"#e05353","기타":"#4e5870"}};
   var grid = document.getElementById('insight-grid');
   if (!grid || !data) return;
   var html = '';
@@ -486,7 +487,7 @@ window._renderInsights = function(data) {{
     var highCls = ins.high_pct >= 15 ? 'insight-badge-high-hot'
                 : ins.high_pct >= 8  ? 'insight-badge-high-warm'
                 :                      'insight-badge-high-low';
-    var actColor = ACT_COLORS_MAP[ins.top_act] || '#9ca3af';
+    var actColor = ACT_COLORS_MAP[ins.top_act] || '#4e5870';
     var mkts = (ins.top_countries || []).map(function(cc_cnt) {{
       return '<span class="insight-market-item">' + (FLAGS[cc_cnt[0]] || cc_cnt[0]) +
              ' <span class="insight-market-cnt">' + cc_cnt[1] + '건</span></span>';
@@ -549,6 +550,512 @@ _NE_LAND_POLYS = [
   [[-121.5,74.4],[-115.5,73.5],[-123.1,70.9],[-125.9,71.9],[-123.9,73.7],[-124.9,74.3]],
   [[-68.6,-52.6],[-65.1,-54.7],[-69.2,-55.5],[-74.7,-52.8],[-71.1,-54.1],[-69.3,-52.5]],
 ]
+
+_DASHBOARD_CSS = """
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:      #08090f;
+  --surface: #0f1118;
+  --elevated:#161922;
+  --deep:    #1b1f2e;
+  --border:  #1e2235;
+  --bhi:     #2c3356;
+  --gold:    #c8a96e;
+  --blue:    #4a8fd4;
+  --hi:      #eceef5;
+  --mid:     #8891ab;
+  --lo:      #3e465c;
+  --high:    #e05353;
+  --med:     #d4943a;
+}
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  background: var(--bg);
+  color: var(--hi);
+  font-size: 13px;
+  line-height: 1.55;
+}
+a { color: var(--blue); text-decoration: none; }
+a:hover { color: var(--gold); }
+
+/* ── Header ── */
+.page-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 28px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.page-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.page-header-accent {
+  width: 3px;
+  height: 22px;
+  background: linear-gradient(180deg, var(--gold), transparent);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+.page-header h1 {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--hi);
+}
+.page-header .meta {
+  font-size: 11px;
+  color: var(--mid);
+  letter-spacing: 0.02em;
+}
+.page-header .meta span { color: var(--gold); }
+
+/* ── Layout ── */
+.page-body { max-width: 1500px; margin: 0 auto; padding: 20px 24px 64px; }
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+.section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mid);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.section-title::before {
+  content: '';
+  display: block;
+  width: 2px;
+  height: 12px;
+  background: var(--gold);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+.section-sub {
+  font-size: 10px;
+  color: var(--lo);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.collapse-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--mid);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+  transition: all 0.15s;
+}
+.collapse-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ── Period row ── */
+.period-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+}
+.period-row-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--lo);
+  white-space: nowrap;
+}
+.period-presets { display: flex; gap: 4px; }
+.period-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--mid);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+.period-btn:hover { border-color: var(--gold); color: var(--gold); }
+.period-btn.active { background: var(--gold); color: var(--bg); border-color: var(--gold); font-weight: 700; }
+.period-vsep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+.period-range { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.period-date-input {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--hi);
+  background: var(--bg);
+  width: 126px;
+  cursor: pointer;
+}
+.period-date-input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px rgba(200,169,110,0.15); }
+.period-date-sep { font-size: 11px; color: var(--lo); }
+.period-apply-btn {
+  background: rgba(74,143,212,0.12);
+  color: var(--blue);
+  border: 1px solid rgba(74,143,212,0.35);
+  border-radius: 2px;
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.period-apply-btn:hover { background: rgba(74,143,212,0.22); }
+.period-msg { width: 100%; font-size: 10px; color: #e07e40; font-weight: 500; margin-top: 2px; }
+
+/* ── KPI ── */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 680px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+.kpi-card {
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 20px 18px 16px;
+  position: relative;
+  overflow: hidden;
+}
+.kpi-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 100%; height: 1px;
+  background: var(--gold);
+  opacity: 0.3;
+}
+.kpi-value {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.kpi-unit { font-size: 13px; font-weight: 400; margin-left: 2px; color: var(--mid); }
+.kpi-label {
+  font-size: 9px;
+  color: var(--mid);
+  margin-top: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ── Tables ── */
+.table-wrap { overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table th {
+  background: var(--deep);
+  color: var(--mid);
+  font-weight: 700;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 9px 10px;
+  text-align: left;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid var(--border);
+}
+.data-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--hi);
+}
+.data-table tbody .main-row:hover td { background: var(--elevated); }
+.main-row { cursor: pointer; }
+.main-row td { transition: background 0.1s; }
+
+/* ── Drilldown rows ── */
+.detail-row.hidden { display: none; }
+.detail-box {
+  background: var(--elevated);
+  border-left: 2px solid var(--blue);
+  padding: 10px 14px;
+  border-radius: 0 3px 3px 0;
+  margin: 2px 0;
+}
+.detail-box p { margin-bottom: 5px; color: var(--hi); font-size: 12px; }
+.detail-box .note-line { color: var(--med); }
+.detail-box .src-info { color: var(--mid); font-size: 10px; margin-top: 6px; }
+.detail-box .title-ko-line { color: var(--blue); font-size: 11px; margin-bottom: 4px; }
+.body-orig { margin-top: 8px; }
+.body-orig summary { font-size: 10px; color: var(--mid); cursor: pointer; }
+.body-text {
+  font-size: 10px; line-height: 1.5; color: var(--mid);
+  background: var(--bg); padding: 8px 10px; border-radius: 2px;
+  margin-top: 4px; white-space: pre-wrap; word-break: break-word;
+  max-height: 180px; overflow-y: auto;
+}
+
+/* ── Tags / badges ── */
+.imp-badge {
+  display: inline-block;
+  padding: 1px 5px; border-radius: 2px;
+  font-size: 9px; font-weight: 700; white-space: nowrap;
+  vertical-align: middle; margin-right: 2px;
+  letter-spacing: 0.06em;
+}
+.imp-high { background: rgba(224,83,83,0.15); color: #e05353; }
+.imp-med  { background: rgba(212,148,58,0.15); color: #d4943a; }
+.brand-tag {
+  background: rgba(74,143,212,0.1);
+  color: var(--blue);
+  padding: 1px 7px; border-radius: 2px;
+  font-size: 10px; font-weight: 700; white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+.act-tag {
+  background: rgba(200,169,110,0.1);
+  color: var(--gold);
+  padding: 1px 7px; border-radius: 2px;
+  font-size: 10px; white-space: nowrap;
+}
+.date-cell { color: var(--mid); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.flag-cell { white-space: nowrap; }
+.conf-cell { color: var(--mid); font-size: 11px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.title-cell { max-width: 320px; }
+
+/* ── Heatmap ── */
+.heatmap-wrap { max-height: 400px; overflow: auto; }
+.heatmap-table th { position: sticky; top: 0; z-index: 2; }
+.heatmap-table .sticky-col {
+  position: sticky; left: 0;
+  background: var(--deep) !important;
+  color: var(--mid) !important;
+  z-index: 3; min-width: 110px;
+}
+.heatmap-table thead .sticky-col { z-index: 4; }
+.heatmap-table td {
+  text-align: center; min-width: 42px; max-width: 58px;
+  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.brand-name { font-weight: 600; font-size: 11px; }
+.total-cell {
+  background: var(--deep) !important;
+  color: var(--hi) !important;
+  font-weight: 700;
+  border-left: 1px solid var(--border);
+  position: sticky; right: 0; z-index: 1;
+  font-variant-numeric: tabular-nums;
+}
+.total-row td {
+  background: var(--deep) !important;
+  color: var(--mid) !important;
+  font-weight: 700;
+}
+
+/* ── Charts layout ── */
+.charts-row { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; }
+@media (max-width: 900px) { .charts-row { grid-template-columns: 1fr; } }
+.chart-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 18px 20px;
+}
+.chart-container { position: relative; height: 260px; }
+.chart-sm { height: 240px; }
+.no-data { color: var(--lo); font-style: italic; padding: 12px 0; font-size: 12px; }
+
+/* ── Filter bar ── */
+.filter-bar {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  padding: 10px 12px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-bottom: 14px;
+}
+.filter-group { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.filter-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+.filter-label {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--lo); margin-right: 2px; white-space: nowrap;
+}
+.filter-pill {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 2px 10px;
+  font-size: 10px; font-weight: 500; color: var(--mid);
+  cursor: pointer; transition: all 0.12s; white-space: nowrap; font-family: inherit;
+  letter-spacing: 0.02em;
+}
+.filter-pill:hover { border-color: var(--gold); color: var(--gold); }
+.filter-pill.active { background: var(--gold); color: var(--bg); border-color: var(--gold); font-weight: 700; }
+.filter-pill.act-active { background: rgba(74,143,212,0.15); color: var(--blue); border-color: var(--blue); }
+.filter-count { font-size: 10px; color: var(--lo); margin-left: 4px; white-space: nowrap; }
+
+/* ── Lower 2-col ── */
+.lower-row { display: grid; grid-template-columns: 1fr 300px; gap: 16px; margin-bottom: 16px; }
+@media (max-width: 900px) { .lower-row { grid-template-columns: 1fr; } }
+
+/* ── Brand HIGH ratio ── */
+.high-ratio-wrap { display: flex; flex-direction: column; gap: 10px; }
+.hr-row { display: flex; align-items: center; gap: 8px; }
+.hr-brand { font-size: 11px; font-weight: 600; color: var(--hi); min-width: 86px; white-space: nowrap; }
+.hr-bar-bg { flex: 1; height: 12px; background: var(--elevated); border-radius: 1px; overflow: hidden; }
+.hr-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #a83838, #e05353);
+  border-radius: 1px;
+  transition: width 0.5s ease;
+}
+.hr-badge { font-size: 10px; font-weight: 700; color: #e05353; min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+.hr-meta { font-size: 10px; color: var(--mid); white-space: nowrap; min-width: 55px; font-variant-numeric: tabular-nums; }
+
+/* ── Stacked bar ── */
+.stacked-wrap { position: relative; }
+.legend-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+.legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--mid); }
+.legend-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+/* ── Drilldown panel ── */
+.dd-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200;
+  display: none; backdrop-filter: blur(2px);
+}
+.dd-panel {
+  position: fixed; top: 0; right: 0; width: 400px; max-width: 92vw;
+  height: 100%; background: var(--surface); overflow-y: auto; z-index: 201;
+  transform: translateX(100%); transition: transform 0.22s ease;
+  border-left: 1px solid var(--border);
+}
+.dd-panel.open { transform: translateX(0); }
+.dd-header {
+  position: sticky; top: 0;
+  background: var(--deep);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 16px;
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+}
+.dd-header h3 { font-size: 12px; font-weight: 700; margin: 0; color: var(--hi); letter-spacing: 0.04em; }
+.dd-header p { font-size: 10px; color: var(--mid); margin: 3px 0 0; }
+.dd-close {
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--mid);
+  width: 24px; height: 24px; border-radius: 2px; cursor: pointer;
+  font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.dd-close:hover { color: var(--hi); border-color: var(--gold); }
+.dd-body { padding: 12px 16px; }
+.dd-empty { text-align: center; padding: 40px 20px; color: var(--lo); font-size: 12px; }
+.dd-item {
+  border: 1px solid var(--border); border-radius: 3px; padding: 10px 12px;
+  margin-bottom: 8px; background: var(--elevated);
+}
+.dd-item-top { display: flex; gap: 6px; align-items: center; margin-bottom: 5px; }
+.dd-date { font-size: 10px; color: var(--mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dd-act-chip {
+  font-size: 9px; font-weight: 700; padding: 1px 7px;
+  border-radius: 2px; white-space: nowrap;
+  background: rgba(74,143,212,0.1); color: var(--blue);
+  letter-spacing: 0.04em;
+}
+.dd-title { font-size: 12px; color: var(--hi); line-height: 1.45; }
+.dd-link { display: inline-block; margin-top: 4px; font-size: 10px; color: var(--blue); }
+.dd-link:hover { color: var(--gold); }
+
+/* ── Insight Cards ── */
+.insight-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 1100px) { .insight-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px)  { .insight-grid { grid-template-columns: 1fr; } }
+.insight-card {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 14px;
+  background: var(--elevated);
+  transition: border-color 0.15s;
+  position: relative;
+  overflow: hidden;
+}
+.insight-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0;
+  width: 2px; height: 100%;
+  background: var(--gold);
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+.insight-card:hover { border-color: var(--bhi); }
+.insight-card:hover::before { opacity: 1; }
+.insight-hdr { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.insight-brand { font-size: 13px; font-weight: 700; color: var(--hi); }
+.insight-badge {
+  font-size: 9px; font-weight: 700; padding: 2px 7px;
+  border-radius: 2px; white-space: nowrap; letter-spacing: 0.06em;
+}
+.insight-badge-act          { color: var(--bg); }
+.insight-badge-high-hot     { background: rgba(224,83,83,0.18); color: #e05353; }
+.insight-badge-high-warm    { background: rgba(212,148,58,0.18); color: #d4943a; }
+.insight-badge-high-low     { background: rgba(62,70,92,0.5); color: var(--mid); }
+.insight-strategy {
+  font-size: 11px; color: var(--hi); line-height: 1.6; margin-bottom: 10px;
+  padding: 8px 10px; background: var(--bg); border-radius: 2px;
+  border-left: 2px solid rgba(74,143,212,0.35);
+}
+.insight-markets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.insight-market-item { font-size: 11px; color: var(--mid); display: flex; align-items: center; gap: 3px; }
+.insight-market-cnt { font-weight: 700; color: var(--hi); font-variant-numeric: tabular-nums; }
+.insight-articles-hdr {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--lo); margin-bottom: 6px;
+  padding-top: 8px; border-top: 1px solid var(--border);
+}
+.insight-art-row {
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 4px 0; border-top: 1px solid var(--border); font-size: 11px;
+}
+.insight-art-imp { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.insight-art-title { flex: 1; color: var(--hi); line-height: 1.4; }
+.insight-art-meta  { color: var(--lo); white-space: nowrap; font-size: 10px; font-variant-numeric: tabular-nums; }
+.insight-art-link  { color: var(--blue); font-size: 10px; white-space: nowrap; }
+.insight-art-link:hover { color: var(--gold); }
+"""
 
 _WORLDMAP_CSS = """
 /* ── World Map ── */
@@ -913,15 +1420,18 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     data: {{
       labels: d.labels,
       datasets: [
-        {{ label: 'HIGH',   data: d.high,   borderColor:'#c53030', backgroundColor:'rgba(197,48,48,0.1)',  tension:0.3, fill:true,  pointRadius:4 }},
-        {{ label: 'MEDIUM', data: d.medium, borderColor:'#dd6b20', backgroundColor:'rgba(221,107,32,0.06)',tension:0.3, fill:false, pointRadius:3 }},
-        {{ label: 'LOW',    data: d.low,    borderColor:'#a0aec0', backgroundColor:'transparent',           tension:0.3, fill:false, pointRadius:2 }}
+        {{ label: 'HIGH',   data: d.high,   borderColor:'#e05353', backgroundColor:'rgba(224,83,83,0.08)',  tension:0.35, fill:true,  pointRadius:3, borderWidth:2 }},
+        {{ label: 'MEDIUM', data: d.medium, borderColor:'#d4943a', backgroundColor:'rgba(212,148,58,0.05)', tension:0.35, fill:false, pointRadius:2, borderWidth:1.5 }},
+        {{ label: 'LOW',    data: d.low,    borderColor:'#3e465c', backgroundColor:'transparent',            tension:0.35, fill:false, pointRadius:2, borderWidth:1 }}
       ]
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 12 }} }} }} }},
-      scales: {{ y: {{ beginAtZero: true, ticks: {{ precision: 0, font: {{ size: 11 }} }} }}, x: {{ ticks: {{ font: {{ size: 10 }}, maxRotation: 45 }} }} }}
+      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:'#8891ab', boxWidth:12 }} }} }},
+      scales: {{
+        y: {{ beginAtZero: true, grid: {{ color:'rgba(30,34,53,0.8)' }}, ticks: {{ color:'#8891ab', precision: 0, font: {{ size: 10 }} }} }},
+        x: {{ grid: {{ color:'rgba(30,34,53,0.8)' }}, ticks: {{ color:'#8891ab', font: {{ size: 10 }}, maxRotation: 45 }} }}
+      }}
     }}
   }});
 }})();""")
@@ -929,7 +1439,7 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     if distribution:
         labels = [ACTIVITY_LABELS.get(d["activity_type"], d["activity_type"]) for d in distribution]
         totals = [d["total"] for d in distribution]
-        colors = ACTIVITY_COLORS[:len(distribution)]
+        colors = ["#4a8fd4","#c8a96e","#9b7fe8","#4ab884","#e05353","#4e5870","#d4943a"][:len(distribution)]
         data_json = json.dumps({"labels": labels, "data": totals, "colors": colors})
         scripts.append(f"""
 (function() {{
@@ -940,12 +1450,12 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     type: 'doughnut',
     data: {{
       labels: d.labels,
-      datasets: [{{ data: d.data, backgroundColor: d.colors, borderWidth: 2, borderColor: '#fff' }}]
+      datasets: [{{ data: d.data, backgroundColor: d.colors, borderWidth: 2, borderColor: '#0f1118' }}]
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
       plugins: {{
-        legend: {{ position: 'right', labels: {{ font: {{ size: 11 }}, boxWidth: 14 }} }},
+        legend: {{ position: 'right', labels: {{ font: {{ size: 10 }}, color:'#8891ab', boxWidth: 12 }} }},
         tooltip: {{ callbacks: {{ label: function(c) {{ return c.label + ': ' + c.parsed + '건'; }} }} }}
       }}
     }}
@@ -1049,348 +1559,21 @@ def _build_full_html(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>K-뷰티 경쟁사 인텔리전스 — 최근 {days}일</title>
 {chartjs_tag}
-<style>
-*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif;
-  background: #eef2f7;
-  color: #1a202c;
-  font-size: 14px;
-  line-height: 1.55;
-}}
-a {{ color: #2b6cb0; text-decoration: none; }}
-a:hover {{ text-decoration: underline; }}
-
-/* ── Header ── */
-.page-header {{
-  background: linear-gradient(135deg, #1a3a5c 0%, #2563a8 100%);
-  color: #fff;
-  padding: 20px 32px;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-}}
-.page-header h1 {{ font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }}
-.page-header .meta {{ font-size: 12px; opacity: 0.75; }}
-
-/* ── Layout ── */
-.page-body {{ max-width: 1440px; margin: 0 auto; padding: 24px 24px 60px; }}
-.section {{
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
-  padding: 20px 24px;
-  margin-bottom: 20px;
-}}
-.section-title {{
-  font-size: 14px; font-weight: 700; color: #2d3748;
-  margin-bottom: 14px; padding-bottom: 10px;
-  border-bottom: 2px solid #e2e8f0;
-  display: flex; align-items: center; gap: 10px;
-}}
-.section-sub {{
-  font-size: 12px; color: #a0aec0; font-weight: 400;
-  flex: 1; min-width: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}}
-.collapse-btn {{
-  flex-shrink: 0;
-  background: none; border: 1px solid #e2e8f0;
-  border-radius: 12px; padding: 3px 10px;
-  font-size: 11px; color: #a0aec0;
-  cursor: pointer; font-family: inherit; white-space: nowrap;
-  transition: all 0.15s;
-}}
-.collapse-btn:hover {{ border-color: #cbd5e0; color: #4a5568; background: #f7fafc; }}
-/* ── Period row (below KPI section-title) ── */
-.period-row {{
-  display: flex; align-items: center; gap: 10px;
-  flex-wrap: wrap;
-  background: #f8fafc; border: 1px solid #e2e8f0;
-  border-radius: 8px; padding: 10px 14px;
-  margin-bottom: 16px;
-}}
-.period-row-label {{
-  font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.5px; color: #a0aec0; white-space: nowrap;
-}}
-.period-presets {{ display: flex; gap: 5px; }}
-.period-btn {{
-  background: #fff; border: 1px solid #e2e8f0;
-  border-radius: 5px; padding: 4px 14px;
-  font-size: 12px; font-weight: 600; color: #64748b;
-  cursor: pointer; transition: all 0.15s; font-family: inherit; white-space: nowrap;
-}}
-.period-btn:hover {{ border-color: #2b6cb0; color: #2b6cb0; background: #eff6ff; }}
-.period-btn.active {{ background: #1a3a5c; color: #fff; border-color: #1a3a5c; }}
-.period-vsep {{ width: 1px; height: 22px; background: #e2e8f0; flex-shrink: 0; }}
-.period-range {{ display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }}
-.period-date-input {{
-  padding: 4px 8px; border: 1px solid #e2e8f0; border-radius: 5px;
-  font-size: 12px; font-family: inherit; color: #2d3748; width: 130px;
-  cursor: pointer;
-}}
-.period-date-input:focus {{ outline: none; border-color: #2b6cb0; box-shadow: 0 0 0 2px rgba(43,108,176,0.12); }}
-.period-date-sep {{ font-size: 12px; color: #a0aec0; padding: 0 2px; }}
-.period-apply-btn {{
-  background: #2f855a; color: #fff; border: none;
-  border-radius: 5px; padding: 4px 14px;
-  font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap;
-}}
-.period-apply-btn:hover {{ background: #276749; }}
-.period-msg {{
-  width: 100%; font-size: 11px; color: #c05621;
-  font-weight: 500; margin-top: 2px;
-}}
-
-/* ── KPI ── */
-.kpi-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }}
-@media (max-width: 680px) {{ .kpi-grid {{ grid-template-columns: repeat(2, 1fr); }} }}
-.kpi-card {{
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 16px 18px;
-  text-align: center;
-}}
-.kpi-value {{ font-size: 30px; font-weight: 800; line-height: 1.1; }}
-.kpi-unit {{ font-size: 13px; font-weight: 400; margin-left: 2px; }}
-.kpi-label {{
-  font-size: 11px; color: #718096; margin-top: 5px;
-  font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px;
-}}
-
-/* ── Tables ── */
-.table-wrap {{ overflow-x: auto; }}
-.data-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-.data-table th {{
-  background: #edf2f7; color: #4a5568; font-weight: 600;
-  padding: 8px 12px; text-align: left; white-space: nowrap;
-  position: sticky; top: 0; z-index: 2;
-}}
-.data-table td {{ padding: 7px 12px; border-bottom: 1px solid #f0f4f8; vertical-align: top; }}
-.data-table tbody .main-row:hover td {{ background: #f7fafc; }}
-.main-row {{ cursor: pointer; }}
-.main-row td {{ transition: background 0.12s; }}
-
-/* ── Drilldown ── */
-.detail-row.hidden {{ display: none; }}
-.detail-box {{
-  background: #f0f7ff;
-  border-left: 3px solid #2b6cb0;
-  padding: 10px 16px;
-  border-radius: 0 6px 6px 0;
-  margin: 2px 0;
-}}
-.detail-box p {{ margin-bottom: 5px; color: #2d3748; font-size: 13px; }}
-.detail-box .note-line {{ color: #744210; }}
-.detail-box .src-info {{ color: #718096; font-size: 11px; margin-top: 6px; }}
-.detail-box .title-ko-line {{ color: #2b6cb0; font-size: 12px; margin-bottom: 4px; }}
-.detail-box .note-line {{ color: #744210; }}
-.body-orig {{ margin-top: 8px; }}
-.body-orig summary {{ font-size: 11px; color: #718096; cursor: pointer; }}
-.body-text {{ font-size: 11px; line-height: 1.5; color: #4a5568; background: #f7fafc;
-  padding: 8px 10px; border-radius: 4px; margin-top: 6px;
-  white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }}
-
-/* ── Tags ── */
-.imp-badge {{
-  display: inline-block;
-  padding: 1px 5px; border-radius: 4px;
-  font-size: 10px; font-weight: 700; white-space: nowrap;
-  vertical-align: middle; margin-right: 2px;
-}}
-.imp-high {{ background: #fee2e2; color: #b91c1c; }}
-.imp-med  {{ background: #fef3c7; color: #92400e; }}
-.brand-tag {{
-  background: #ebf4ff; color: #2b6cb0;
-  padding: 2px 8px; border-radius: 10px;
-  font-size: 11px; font-weight: 700; white-space: nowrap;
-}}
-.act-tag {{
-  background: #f0fff4; color: #276749;
-  padding: 2px 8px; border-radius: 10px;
-  font-size: 11px; white-space: nowrap;
-}}
-.date-cell {{ color: #718096; font-size: 12px; white-space: nowrap; }}
-.flag-cell {{ white-space: nowrap; }}
-.conf-cell {{ color: #718096; font-size: 12px; text-align: right; white-space: nowrap; }}
-.title-cell {{ max-width: 320px; }}
-
-/* ── Heatmap ── */
-.heatmap-wrap {{ max-height: 420px; overflow: auto; }}
-.heatmap-table th {{ position: sticky; top: 0; z-index: 2; }}
-.heatmap-table .sticky-col {{
-  position: sticky; left: 0;
-  background: #edf2f7 !important; color: #4a5568 !important;
-  z-index: 3; min-width: 110px;
-}}
-.heatmap-table thead .sticky-col {{ z-index: 4; }}
-.heatmap-table td {{
-  text-align: center; min-width: 44px; max-width: 60px;
-  font-size: 12px; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.3);
-}}
-.brand-name {{ font-weight: 600; font-size: 12px; }}
-.total-cell {{
-  background: #edf2f7 !important; color: #2d3748 !important;
-  font-weight: 700; border-left: 2px solid #e2e8f0;
-  position: sticky; right: 0; z-index: 1;
-}}
-.total-row td {{
-  background: #e2e8f0 !important; color: #2d3748 !important;
-  font-weight: 700;
-}}
-
-/* ── Charts layout ── */
-.charts-row {{ display: grid; grid-template-columns: 3fr 2fr; gap: 20px; }}
-@media (max-width: 900px) {{ .charts-row {{ grid-template-columns: 1fr; }} }}
-.chart-section {{
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.07);
-  padding: 20px 24px;
-}}
-.chart-container {{ position: relative; height: 270px; }}
-.chart-sm {{ height: 250px; }}
-
-.no-data {{ color: #a0aec0; font-style: italic; padding: 12px 0; }}
-
-/* ── Filter bar ── */
-.filter-bar {{
-  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
-  padding: 12px 16px; background: #fff;
-  border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px;
-}}
-.filter-group {{ display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }}
-.filter-sep {{ width: 1px; height: 20px; background: #e2e8f0; margin: 0 4px; }}
-.filter-label {{
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.6px; color: #a0aec0; margin-right: 2px; white-space: nowrap;
-}}
-.filter-pill {{
-  background: #fff; border: 1px solid #e2e8f0; border-radius: 20px;
-  padding: 3px 12px; font-size: 11px; font-weight: 500; color: #718096;
-  cursor: pointer; transition: all 0.15s; white-space: nowrap; font-family: inherit;
-}}
-.filter-pill:hover {{ border-color: #2b6cb0; color: #2b6cb0; }}
-.filter-pill.active {{ background: #1a3a5c; color: #fff; border-color: #1a3a5c; }}
-.filter-pill.act-active {{ background: #2f855a; color: #fff; border-color: #2f855a; }}
-.filter-count {{ font-size: 11px; color: #a0aec0; margin-left: 6px; white-space: nowrap; }}
-
-/* ── Lower 2-col (heatmap + high ratio) ── */
-.lower-row {{ display: grid; grid-template-columns: 1fr 320px; gap: 20px; margin-bottom: 20px; }}
-@media (max-width: 900px) {{ .lower-row {{ grid-template-columns: 1fr; }} }}
-
-/* ── Brand HIGH ratio ── */
-.high-ratio-wrap {{ display: flex; flex-direction: column; gap: 12px; }}
-.hr-row {{ display: flex; align-items: center; gap: 10px; }}
-.hr-brand {{ font-size: 12px; font-weight: 600; color: #2d3748; min-width: 90px; white-space: nowrap; }}
-.hr-bar-bg {{ flex: 1; height: 18px; background: #edf2f7; border-radius: 9px; overflow: hidden; }}
-.hr-bar-fill {{ height: 100%; background: #c53030; border-radius: 9px; transition: width 0.6s ease; }}
-.hr-badge {{ font-size: 11px; font-weight: 700; color: #c53030; min-width: 38px; text-align: right; }}
-.hr-meta {{ font-size: 11px; color: #718096; white-space: nowrap; min-width: 60px; }}
-
-/* ── Stacked bar ── */
-.stacked-wrap {{ position: relative; }}
-.legend-row {{ display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }}
-.legend-item {{ display: flex; align-items: center; gap: 5px; font-size: 11px; color: #718096; }}
-.legend-dot {{ width: 8px; height: 8px; border-radius: 50%; display: inline-block; }}
-
-/* ── Drilldown panel ── */
-.dd-overlay {{
-  position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 200;
-  display: none; backdrop-filter: blur(1px);
-}}
-.dd-panel {{
-  position: fixed; top: 0; right: 0; width: 420px; max-width: 92vw;
-  height: 100%; background: #fff; overflow-y: auto; z-index: 201;
-  transform: translateX(100%); transition: transform 0.25s ease;
-  box-shadow: -4px 0 24px rgba(0,0,0,0.12);
-}}
-.dd-panel.open {{ transform: translateX(0); }}
-.dd-header {{
-  position: sticky; top: 0; background: #1a3a5c; color: #fff;
-  padding: 16px 18px; display: flex; justify-content: space-between;
-  align-items: flex-start; gap: 12px;
-}}
-.dd-header h3 {{ font-size: 14px; font-weight: 700; margin: 0; }}
-.dd-header p  {{ font-size: 11px; opacity: 0.6; margin: 3px 0 0; }}
-.dd-close {{
-  background: rgba(255,255,255,0.15); border: none; color: #fff;
-  width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
-  font-size: 16px; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}}
-.dd-body {{ padding: 14px 18px; }}
-.dd-empty {{ text-align: center; padding: 40px 20px; color: #718096; font-size: 13px; }}
-.dd-item {{
-  border: 1px solid #e2e8f0; border-radius: 5px; padding: 10px 12px;
-  margin-bottom: 10px;
-}}
-.dd-item-top {{ display: flex; gap: 8px; align-items: center; margin-bottom: 5px; }}
-.dd-date {{ font-size: 11px; color: #718096; white-space: nowrap; }}
-.dd-act-chip {{
-  font-size: 10px; font-weight: 700; padding: 2px 8px;
-  border-radius: 10px; white-space: nowrap;
-  background: #ebf4ff; color: #2b6cb0;
-}}
-.dd-title {{ font-size: 13px; color: #2d3748; line-height: 1.45; }}
-.dd-link {{ display: inline-block; margin-top: 5px; font-size: 11px; color: #2b6cb0; }}
-/* ── INSIGHT CARDS ── */
-.insight-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
-.insight-card {{
-  border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px;
-  background: #fff; transition: border-color 0.15s, box-shadow 0.15s;
-}}
-.insight-card:hover {{ border-color: #0d9488; box-shadow: 0 2px 8px rgba(13,148,136,0.08); }}
-.insight-card.pulse {{ border-color: #0d9488; box-shadow: 0 0 0 3px rgba(13,148,136,0.18); }}
-.insight-hdr {{ display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }}
-.insight-brand {{ font-size: 14px; font-weight: 700; color: #1a202c; }}
-.insight-badge {{
-  font-size: 10px; font-weight: 700; padding: 2px 8px;
-  border-radius: 10px; white-space: nowrap;
-}}
-.insight-badge-act  {{ color: #fff; }}
-.insight-badge-high-hot  {{ background: #fee2e2; color: #dc2626; }}
-.insight-badge-high-warm {{ background: #fef3c7; color: #d97706; }}
-.insight-badge-high-low  {{ background: #f3f4f6; color: #6b7280; }}
-.insight-strategy {{
-  font-size: 12px; color: #2d3748; line-height: 1.55; margin-bottom: 10px;
-  padding: 8px 10px; background: #f8fafc; border-radius: 5px;
-  border-left: 3px solid #0d9488;
-}}
-.insight-markets {{ display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }}
-.insight-market-item {{ font-size: 11px; color: #718096; display: flex; align-items: center; gap: 3px; }}
-.insight-market-cnt {{ font-weight: 700; color: #2d3748; }}
-.insight-articles-hdr {{
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.5px; color: #a0aec0; margin-bottom: 6px;
-}}
-.insight-art-row {{
-  display: flex; align-items: flex-start; gap: 6px;
-  padding: 5px 0; border-top: 1px solid #f0f0f0; font-size: 11px;
-}}
-.insight-art-imp {{
-  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 4px;
-}}
-.insight-art-title {{ flex: 1; color: #2d3748; line-height: 1.4; }}
-.insight-art-meta  {{ color: #a0aec0; white-space: nowrap; font-size: 10px; }}
-.insight-art-link  {{ color: #0d9488; font-size: 10px; white-space: nowrap; }}
-{worldmap_css}
-</style>
+<style>{_DASHBOARD_CSS}{worldmap_css}</style>
 </head>
 <body>
 <header class="page-header">
-  <h1>📊 K-뷰티 경쟁사 인텔리전스</h1>
-  <div class="meta">최근 <span id="period-label">{days}</span>일 집계 &nbsp;|&nbsp; 생성: {_esc(generated_str)}</div>
+  <div class="page-header-brand">
+    <div class="page-header-accent"></div>
+    <h1>K-BEAUTY INTEL</h1>
+  </div>
+  <div class="meta">최근 <span id="period-label">{days}</span>일 집계 &nbsp;·&nbsp; <span>{_esc(generated_str)}</span></div>
 </header>
 
 <div class="page-body">
 
   <div class="section">
-    <div class="section-title">📊 요약 통계</div>
+    <div class="section-title">요약 통계</div>
     <div class="period-row">
       <span class="period-row-label">기간</span>
       <div class="period-presets" id="pb-presets">
@@ -1414,7 +1597,7 @@ a:hover {{ text-decoration: underline; }}
 
   <div class="section">
     <div class="section-title">
-      🚨 HIGH/MED 기사 목록
+      HIGH/MED 기사 목록
       <span class="section-sub" id="high-count-label">{len(high_articles)}건</span>
       <button class="collapse-btn" id="articles-toggle" onclick="toggleArticlesSection()">▲ 접기</button>
     </div>
@@ -1448,7 +1631,7 @@ a:hover {{ text-decoration: underline; }}
   </div>
 
   <!-- Brand Insight Cards (Claude API 자동생성) -->
-  <div class="dashboard-card" id="insight-section">
+  <div class="section" id="insight-section">
     <div class="section-title">
       브랜드별 전략 인사이트
       <span class="section-sub">스택바 클릭 시 해당 브랜드로 이동</span>
