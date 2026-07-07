@@ -72,7 +72,7 @@ def _filter_relevant(articles: list[RawArticle]) -> list[int]:
                 {"role": "user", "content": build_filter_prompt(articles)},
             ],
             response_format={"type": "json_object"},
-            max_tokens=512,
+            max_completion_tokens=512,
             temperature=0,
         )
         data = json.loads(response.choices[0].message.content)
@@ -109,7 +109,7 @@ def _make_batch_schema() -> dict:
             "product_name":  {"anyOf": [{"type": "string"}, {"type": "null"}],
                               "description": "언급된 특정 제품명 (없으면 null)"},
             "title_ko":      {"anyOf": [{"type": "string"}, {"type": "null"}],
-                              "description": "기사 제목의 한국어 번역 (원문이 이미 한국어면 null)"},
+                              "description": "기사 제목의 한국어 번역. 원문이 한국어(ko)인 경우에만 null. 영어·일본어·기타 언어는 반드시 한국어로 번역"},
             "article_body_ko": {"anyOf": [{"type": "string"}, {"type": "null"}],
                               "description": "기사 본문의 한국어 번역 요약 최대 500자 (본문 없으면 null)"},
             "confidence":    {"type": "number", "description": "분류 신뢰도 0.0~1.0"},
@@ -171,8 +171,7 @@ def _classify_batch(
                     "strict": True,
                 },
             },
-            max_tokens=4096,
-            temperature=0,
+            max_completion_tokens=4096,
         )
 
         raw = json.loads(response.choices[0].message.content)
