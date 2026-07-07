@@ -1,10 +1,10 @@
 """
 APScheduler 스케줄
 
-- Tier1 브랜드 × Tier1 국가: 매일 06:00 KST
-- 전체 브랜드 × 전체 국가: 매주 월요일 03:00 KST (주간 풀스캔)
-- 주간 모멘텀 계산: 매주 월요일 02:00 KST
-- 주간 중복 정리: 매주 일요일 02:00 KST
+- Tier1 브랜드 × Tier1 국가: 매일 18:00 KST (업무시간 이후 — 피크 16시 이후 수집)
+- 전체 브랜드 × 전체 국가: 매주 월요일 20:00 KST (주간 풀스캔)
+- 주간 모멘텀 계산: 매주 월요일 19:00 KST
+- 주간 중복 정리: 매주 일요일 19:00 KST
 - Render keep-alive 핑: 14분마다 (무료 플랜 슬립 방지)
 """
 
@@ -145,49 +145,49 @@ def job_weekly_dedup() -> None:
 def create_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 
-    # 매일 06:00 KST
+    # 매일 18:00 KST (피크 16시 이후 — 하루치 기사 다 올라온 뒤 수집)
     scheduler.add_job(
         job_daily_tier1,
-        trigger=CronTrigger(hour=6, minute=0),
+        trigger=CronTrigger(hour=18, minute=0),
         id="daily_tier1",
         name="[일별] Tier1 브랜드x국가 수집",
         max_instances=1,
         coalesce=True,
     )
 
-    # 매주 월요일 03:00 KST
+    # 매주 월요일 20:00 KST (일별 수집 완료 후 풀스캔)
     scheduler.add_job(
         job_weekly_full,
-        trigger=CronTrigger(day_of_week="mon", hour=3, minute=0),
+        trigger=CronTrigger(day_of_week="mon", hour=20, minute=0),
         id="weekly_full",
         name="[주간] 전체 브랜드x국가 풀스캔",
         max_instances=1,
         coalesce=True,
     )
 
-    # 매주 월요일 02:00 KST — 모멘텀 계산 (풀스캔 전 실행)
+    # 매주 월요일 19:00 KST — 모멘텀 계산 (풀스캔 전 실행)
     scheduler.add_job(
         job_weekly_momentum,
-        trigger=CronTrigger(day_of_week="mon", hour=2, minute=0),
+        trigger=CronTrigger(day_of_week="mon", hour=19, minute=0),
         id="weekly_momentum",
         name="[주간] 브랜드 모멘텀 계산",
         max_instances=1,
         coalesce=True,
     )
 
-    # 매주 일요일 02:00 KST
+    # 매주 일요일 19:00 KST
     scheduler.add_job(
         job_weekly_dedup,
-        trigger=CronTrigger(day_of_week="sun", hour=2, minute=0),
+        trigger=CronTrigger(day_of_week="sun", hour=19, minute=0),
         id="weekly_dedup",
         name="[주간] 중복 정리",
         max_instances=1,
     )
 
-    # 매주 월요일 09:00 KST — 주간 브리핑 Slack 전송
+    # 매주 화요일 09:00 KST — 월요일 수집 완료 후 다음날 아침 브리핑
     scheduler.add_job(
         generate_weekly_briefing,
-        trigger=CronTrigger(day_of_week="mon", hour=9, minute=0),
+        trigger=CronTrigger(day_of_week="tue", hour=9, minute=0),
         id="weekly_briefing",
         name="[주간] 브리핑 생성 및 Slack 전송",
         max_instances=1,
