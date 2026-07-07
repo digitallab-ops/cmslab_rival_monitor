@@ -20,3 +20,5 @@ services:
         value: "5432"
       - key: RENDER_EXTERNAL_URL
         sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
