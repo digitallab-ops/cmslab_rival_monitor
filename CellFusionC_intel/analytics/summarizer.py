@@ -1,5 +1,5 @@
 """
-브랜드 전략 인사이트 요약 — OpenAI API (o4-mini)
+브랜드 전략 인사이트 요약 — OpenAI API (gpt-4o-mini)
 """
 
 import logging
@@ -41,13 +41,14 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
-            model="o4-mini",
-            max_completion_tokens=2000,  # reasoning + output 합산 — 최소 1500 필요
+            model="gpt-4o-mini",
+            max_tokens=300,
+            temperature=0.3,
             messages=[{"role": "user", "content": prompt}],
         )
         content = (response.choices[0].message.content or "").strip()
         if not content:
-            raise ValueError("empty response from o4-mini")
+            raise ValueError("empty response from gpt-4o-mini")
         return content
     except Exception as e:
         logger.warning("브랜드 요약 생성 실패 [%s]: %s", brand, e)

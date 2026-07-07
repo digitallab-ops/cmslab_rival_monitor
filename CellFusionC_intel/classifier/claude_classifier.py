@@ -171,7 +171,7 @@ def _classify_batch(
                     "strict": True,
                 },
             },
-            max_completion_tokens=4096,
+            max_tokens=4096,
         )
 
         raw = json.loads(response.choices[0].message.content)
