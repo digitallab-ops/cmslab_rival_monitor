@@ -604,7 +604,12 @@ def compute_brand_momentum(session: Session) -> list[dict]:
             "total_8w":     total,
         })
 
-    result.sort(key=lambda x: x["momentum"], reverse=True)
+    import math
+    # 가중치 정렬: 순수 비율 대신 volume × momentum으로 줄세움
+    # → 5건×5.0x=25 < 65건×4.64x=301 이므로 소량 급등 브랜드가 상위 점령 방지
+    for r in result:
+        r["_sort_score"] = r["recent_4w"] * math.log1p(r["momentum"])
+    result.sort(key=lambda x: x["_sort_score"], reverse=True)
     return result
 
 
@@ -641,6 +646,9 @@ def get_brand_radar(session: Session) -> list[dict]:
                 "total_8w":    0,
             })
 
-    scores.sort(key=lambda x: (-x["tier"] == 1, x["momentum"]), reverse=False)
-    scores.sort(key=lambda x: (x["tier"], -x["momentum"]))
+    import math
+    for s in scores:
+        if "_sort_score" not in s:
+            s["_sort_score"] = s["recent_4w"] * math.log1p(s["momentum"])
+    scores.sort(key=lambda x: (x["tier"], -x["_sort_score"]))
     return scores

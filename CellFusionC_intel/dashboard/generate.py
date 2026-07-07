@@ -110,7 +110,7 @@ def _fmt_art_for_js(a: dict) -> dict:
         "date":    _fmt_date(a["published_date"]),
         "act":     ACTIVITY_LABELS.get(a["activity_type"], a["activity_type"]),
         "imp":     a.get("importance", "high"),
-        "title":   (a.get("title_ko") or (a.get("details") or "")[:80] or a["title"]),
+        "title":   (a.get("title_ko") or a["title"] or (a.get("details") or "")[:120]),
         "details": a.get("details") or "",
         "url":     a.get("source_url") or "",
         "conf":    f"{a['confidence']:.0%}" if a.get("confidence") is not None else "?",
@@ -171,11 +171,9 @@ def _render_high_table(articles: list) -> str:
         # 제목: title_ko → details 첫 줄(한국어) → 원문 순서로 fallback
         title_display = (
             art.get("title_ko")
-            or (art.get("details") or "")[:80]
             or art["title"]
+            or (art.get("details") or "")[:120]
         )
-        title_disp = art["title"][:85] + ("…" if len(art["title"]) > 85 else "")
-
         product_line = (
             f'<p><strong>제품:</strong> {_esc(art["product_name"])}</p>'
             if art.get("product_name") else ""
