@@ -122,7 +122,7 @@ def _fmt_art_for_js(a: dict) -> dict:
 def _cell_color(value: int, max_value: int) -> str:
     """히트맵 셀 배경색. 0=빈 셀, max=골드, 가독성 우선."""
     if max_value == 0 or value == 0:
-        return "background:#191e2e;color:#505870;"
+        return "background:#191e2e;color:#7a82a8;"
     norm = min(value / max_value, 1.0)
     # 딥블루 → 골드 그라데이션 (명확한 구분)
     r = int(28  + norm * (200 - 28))
@@ -616,7 +616,7 @@ _DASHBOARD_CSS = """
   --blue:    #5a9fe0;
   --hi:      #f0f2f8;
   --mid:     #a0aabb;
-  --lo:      #5a6080;
+  --lo:      #7a82a8;
   --high:    #ef5353;
   --med:     #e0a040;
 }
@@ -1145,7 +1145,7 @@ _WORLDMAP_CSS = """
 /* ── World Map ── */
 .wm-section { background: #090e1a; border-color: rgba(30,70,150,0.3); }
 .wm-section .section-title { color: #a0aabb; border-bottom-color: rgba(30,70,150,0.3); }
-.wm-section .section-sub   { color: #5a6080; }
+.wm-section .section-sub   { color: #7a82a8; }
 .worldmap-container {
   position: relative;
   overflow: hidden;
@@ -1193,8 +1193,8 @@ _WORLDMAP_CSS = """
   letter-spacing: 0.5px; opacity: 0.85;
 }
 .wm-lo-size {
-  font-size: 9px; font-family: monospace; opacity: 0.55;
-  color: #7080a0; letter-spacing: 0.3px;
+  font-size: 9px; font-family: monospace; opacity: 0.7;
+  color: #8890b8; letter-spacing: 0.3px;
 }
 .wm-lo-high { color: #f87171; }
 .wm-lo-med  { color: #fbbf24; }
@@ -1240,7 +1240,7 @@ _WORLDMAP_CSS = """
 .wm-alert-card:hover { background: rgba(74,143,212,0.08); }
 .wm-alert-meta {
   font-size: 9px;
-  color: #606880;
+  color: #8090b0;
   font-family: monospace;
   margin-bottom: 3px;
   white-space: nowrap;

@@ -231,6 +231,175 @@ def collect_all(tier: str) -> None:
 
 
 @cli.command()
+@click.option("--days", "-d", default=90, show_default=True, help="재분류 대상 기간 (일)")
+@click.option("--prune", is_flag=True, default=False,
+              help="재분류 후 incidental+low 기사 삭제")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="DB 수정 없이 변경 예상 결과만 출력")
+def reclassify(days: int, prune: bool, dry_run: bool) -> None:
+    """기존 DB 기사를 최신 분류 기준으로 재분류.
+
+    \b
+    - activity_type, importance, brand_focus, details를 업데이트
+    - --prune: 재분류 후 incidental+low인 기사 삭제 (노이즈 제거)
+    - --dry-run: 실제 DB 변경 없이 변경 건수만 미리 확인
+    """
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+
+    from sqlalchemy import text
+    from storage.models import get_session, NewsArticle
+    from collectors.base_collector import RawArticle
+    from classifier.claude_classifier import _classify_batch
+    from config.settings import DB_SCHEMA
+
+    BATCH = 8
+
+    session = get_session()
+    try:
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        rows = session.execute(
+            text(f"""
+                SELECT id, brand, country, source_country,
+                       title, title_ko, details, source_url, source_name,
+                       language, article_body, importance, activity_type, brand_focus
+                FROM {DB_SCHEMA}.news_articles
+                WHERE published_date >= :cutoff
+                ORDER BY brand, published_date DESC
+            """),
+            {"cutoff": cutoff},
+        ).fetchall()
+    finally:
+        session.close()
+
+    if not rows:
+        click.echo("재분류할 기사 없음")
+        return
+
+    click.echo(f"재분류 대상: {len(rows)}건 (최근 {days}일)")
+    if dry_run:
+        click.echo("[dry-run 모드 — DB 변경 없음]\n")
+
+    # brand별 그룹핑 (classifier가 brand+country 컨텍스트 필요)
+    brand_groups: dict = defaultdict(list)
+    for r in rows:
+        brand_groups[r[1]].append(r)
+
+    stats = {"updated": 0, "unchanged": 0, "pruned": 0, "errors": 0}
+
+    for brand, articles in brand_groups.items():
+        click.echo(f"  [{brand}] {len(articles)}건 처리 중...")
+        for batch_start in range(0, len(articles), BATCH):
+            batch_rows = articles[batch_start:batch_start + BATCH]
+
+            raw_arts = [
+                RawArticle(
+                    title=r[4] or "",
+                    url=r[7] or "",
+                    published=datetime.utcnow(),
+                    summary=r[6] or "",          # details를 summary로
+                    source_name=r[8] or "",
+                    language=r[9] or "en",
+                    body=r[10] or "",              # article_body 사용
+                )
+                for r in batch_rows
+            ]
+
+            # 같은 브랜드 배치에서 country는 기사별로 다를 수 있으므로 첫 기사 country 사용
+            country_hint = batch_rows[0][3] or batch_rows[0][2] or "US"
+
+            try:
+                results = _classify_batch(raw_arts, brand, country_hint)
+            except Exception as e:
+                click.echo(f"    배치 오류: {e}", err=True)
+                stats["errors"] += len(batch_rows)
+                continue
+
+            result_map = {idx: clf for idx, clf in results}
+
+            if dry_run:
+                for idx, clf in result_map.items():
+                    row = batch_rows[idx]
+                    old_act = row[12]; new_act = clf.activity_type
+                    old_imp = row[11]; new_imp = clf.importance
+                    old_focus = row[13]; new_focus = clf.brand_focus
+                    if old_act != new_act or old_imp != new_imp or old_focus != new_focus:
+                        click.echo(
+                            f"    [변경] id={row[0]} {brand} | "
+                            f"{old_act}→{new_act} | {old_imp}→{new_imp} | "
+                            f"focus:{old_focus}→{new_focus}"
+                        )
+                        stats["updated"] += 1
+                    else:
+                        stats["unchanged"] += 1
+                continue
+
+            # 실제 DB 업데이트
+            session = get_session()
+            try:
+                for idx, clf in result_map.items():
+                    row = batch_rows[idx]
+                    art_id = row[0]
+
+                    to_delete = (
+                        prune
+                        and clf.brand_focus == "incidental"
+                        and clf.importance == "low"
+                    )
+
+                    if to_delete:
+                        session.execute(
+                            text(f"DELETE FROM {DB_SCHEMA}.news_articles WHERE id = :id"),
+                            {"id": art_id},
+                        )
+                        stats["pruned"] += 1
+                        click.echo(f"    [삭제] id={art_id} {brand} — incidental+low")
+                    else:
+                        old_act = row[12]; old_imp = row[11]
+                        session.execute(
+                            text(f"""
+                                UPDATE {DB_SCHEMA}.news_articles
+                                SET activity_type             = :act,
+                                    importance                = :imp,
+                                    brand_focus               = :focus,
+                                    details                   = :details,
+                                    classification_confidence = :conf,
+                                    classifier_model          = 'reclassify-v2'
+                                WHERE id = :id
+                            """),
+                            {
+                                "act":     clf.activity_type,
+                                "imp":     clf.importance,
+                                "focus":   clf.brand_focus,
+                                "details": clf.details or row[6],
+                                "conf":    clf.confidence,
+                                "id":      art_id,
+                            },
+                        )
+                        if old_act != clf.activity_type or old_imp != clf.importance:
+                            stats["updated"] += 1
+                            click.echo(
+                                f"    [수정] id={art_id} {brand} | "
+                                f"{old_act}→{clf.activity_type} | {old_imp}→{clf.importance}"
+                            )
+                        else:
+                            stats["unchanged"] += 1
+
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                click.echo(f"    DB 업데이트 오류: {e}", err=True)
+                stats["errors"] += len(batch_rows)
+            finally:
+                session.close()
+
+    click.echo(
+        f"\n완료: 수정 {stats['updated']}건 / 유지 {stats['unchanged']}건 / "
+        f"삭제 {stats['pruned']}건 / 오류 {stats['errors']}건"
+    )
+
+
+@cli.command()
 def run() -> None:
     """스케줄러 시작 (백그라운드 운영용, Ctrl+C 로 종료)."""
     from scheduler.runner import start
