@@ -112,13 +112,18 @@ def _make_batch_schema() -> dict:
                               "description": "기사 제목의 한국어 번역. 원문이 한국어(ko)인 경우에만 null. 영어·일본어·기타 언어는 반드시 한국어로 번역"},
             "article_body_ko": {"anyOf": [{"type": "string"}, {"type": "null"}],
                               "description": "기사 본문의 한국어 번역 요약 최대 500자 (본문 없으면 null)"},
+            "brand_focus":   {
+                "type": "string",
+                "enum": ["primary", "secondary", "incidental"],
+                "description": "기사에서 해당 브랜드의 비중: primary=주인공, secondary=주요 언급, incidental=예시로 잠깐 언급",
+            },
             "confidence":    {"type": "number", "description": "분류 신뢰도 0.0~1.0"},
             "note":          {"anyOf": [{"type": "string"}, {"type": "null"}],
                               "description": "추가 메모"},
         },
         "required": ["index", "brand", "country", "activity_type",
                      "importance", "details", "product_name",
-                     "title_ko", "article_body_ko", "confidence", "note"],
+                     "title_ko", "article_body_ko", "brand_focus", "confidence", "note"],
     }
     return {
         "type": "object",
