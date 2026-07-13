@@ -227,7 +227,9 @@ def start() -> None:
             stream_handler.stream.reconfigure(encoding="utf-8")
         except Exception:
             pass
-    logging.basicConfig(level=logging.INFO, handlers=[file_handler, stream_handler])
+    # force=True: cli() 그룹이 이미 basicConfig를 호출했으므로 기존 핸들러를
+    # 교체해야 file_handler가 실제로 붙는다 (없으면 no-op → scheduler.log 미기록).
+    logging.basicConfig(level=logging.INFO, handlers=[file_handler, stream_handler], force=True)
     scheduler = create_scheduler()
 
     logger.info("스케줄러 시작")
