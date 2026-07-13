@@ -3,11 +3,11 @@
 """
 
 # Tier 1: 매일 수집
+# 티어는 monitored_brands 테이블에서 momentum 기반으로 자동 승급/강등됨.
+# 아래 목록은 DB 미시드/장애 시 fallback 시드값.
 TIER1_BRANDS = [
     "Anua",
     "Mediheal",
-    "Cos de Baha",
-    "By Wishtrend",
     "Dalba",
     "Beauty of Joseon",  # 조선미녀 — 글로벌 바이럴 급성장
     "Skin1004",          # 스킨1004 — 세포라 입점, 마다가스카르 센텔라
@@ -17,6 +17,8 @@ TIER1_BRANDS = [
 
 # Tier 2: 주 1회 수집
 TIER2_BRANDS = [
+    "Cos de Baha",       # 코스드바하 — 소규모, momentum 승급 시 T1
+    "By Wishtrend",      # 바이위시트렌드 — 소규모, momentum 승급 시 T1
     "Roundlab",          # 라운드랩
     "Centellian24",      # 센텔리안24
     "VT Cosmetics",      # 브이티

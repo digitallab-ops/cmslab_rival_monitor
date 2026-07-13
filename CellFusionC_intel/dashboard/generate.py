@@ -141,7 +141,7 @@ def _render_kpi_cards(stats: dict) -> str:
         ("총 수집",   stats["total"],             "건", "#c8a96e", "kpi-total"),
         ("HIGH",     stats["high"],              "건", "#e05353", "kpi-high"),
         ("활성 브랜드", stats["brands_active"],   "개", "#4a8fd4", "kpi-brands"),
-        ("커버 국가",  stats["countries_active"], "개", "#8891ab", "kpi-countries"),
+        ("커버 국가",  stats["countries_active"], "개", "#aab3cc", "kpi-countries"),
     ]
     cards = "".join(
         f'<div class="kpi-card">'
@@ -374,7 +374,7 @@ def _render_brand_radar(radar: list) -> str:
         return '<p class="no-data">모멘텀 데이터 없음 (첫 주간 계산 전)</p>'
 
     SIGNAL_ICON  = {"rising": "▲", "stable": "▶", "cooling": "▼"}
-    SIGNAL_COLOR = {"rising": "#4ab884", "stable": "#8891ab", "cooling": "#e05353"}
+    SIGNAL_COLOR = {"rising": "#4ab884", "stable": "#aab3cc", "cooling": "#e05353"}
     TIER_LABEL   = {1: "Tier 1", 2: "Tier 2"}
 
     rows = []
@@ -442,9 +442,11 @@ def _build_stacked_bar_script(brand_act: list) -> str:
     """브랜드별 활동유형 스택바 Canvas 스크립트."""
     if not brand_act:
         return ""
-    act_keys = ["유통_채널", "인플루언서_협업", "신시장_진출", "신제품_런칭", "투자_BD", "기타"]
+    act_keys = ["유통_채널", "신시장_진출", "신제품_런칭", "인플루언서_협업",
+                "투자_BD", "브랜드_마케팅", "실적_공시", "기타"]
     act_labels_list = [ACTIVITY_LABELS.get(k, k) for k in act_keys]
-    act_colors = ["#4a8fd4", "#c8a96e", "#9b7fe8", "#4ab884", "#e05353", "#4e5870"]
+    act_colors = ["#4a8fd4", "#9b7fe8", "#4ab884", "#c8a96e",
+                  "#e05353", "#e0894a", "#46b0b0", "#6f7aa0"]
 
     # [{brand, acts: [count...]}]
     rows_data = []
@@ -477,7 +479,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
     var acts = d.rows[ri];
     var total = acts.reduce(function(s, v) {{ return s + v; }}, 0);
     var y = PAD_T + ri * (BAR_H + GAP);
-    ctx.fillStyle = '#8891ab';
+    ctx.fillStyle = '#aab3cc';
     ctx.font = '600 11px system-ui,-apple-system,sans-serif';
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillText(brand, LABEL_W - 8, y + BAR_H / 2);
@@ -499,7 +501,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
       }}
       x += segW;
     }});
-    ctx.fillStyle = '#4e5870';
+    ctx.fillStyle = '#6f7aa0';
     ctx.font = '11px system-ui';
     ctx.textAlign = 'left';
     ctx.fillText(total + '건', x + 5, y + BAR_H / 2);
@@ -530,7 +532,7 @@ def _build_insights_script(brand_insights: dict) -> str:
 window._renderInsights = function(data) {{
   var FLAGS = {flag_json};
   var IMP_C = {imp_json};
-  var ACT_COLORS_MAP = {{"유통_채널":"#4a8fd4","인플루언서_협업":"#c8a96e","신시장_진출":"#9b7fe8","신제품_런칭":"#4ab884","투자_BD":"#e05353","기타":"#4e5870"}};
+  var ACT_COLORS_MAP = {{"유통_채널":"#4a8fd4","신시장_진출":"#9b7fe8","신제품_런칭":"#4ab884","인플루언서_협업":"#c8a96e","투자_BD":"#e05353","브랜드_마케팅":"#e0894a","실적_공시":"#46b0b0","기타":"#6f7aa0"}};
   var grid = document.getElementById('insight-grid');
   if (!grid || !data) return;
   var html = '';
@@ -539,7 +541,7 @@ window._renderInsights = function(data) {{
     var highCls = ins.high_pct >= 15 ? 'insight-badge-high-hot'
                 : ins.high_pct >= 8  ? 'insight-badge-high-warm'
                 :                      'insight-badge-high-low';
-    var actColor = ACT_COLORS_MAP[ins.top_act] || '#4e5870';
+    var actColor = ACT_COLORS_MAP[ins.top_act] || '#6f7aa0';
     var mkts = (ins.top_countries || []).map(function(cc_cnt) {{
       return '<span class="insight-market-item mkt-click" data-brand="' + escH(brand) + '" data-country="' + escH(cc_cnt[0]) + '" title="' + escH(brand) + ' × ' + escH(cc_cnt[0]) + ' 요약 보기">' + (FLAGS[cc_cnt[0]] || cc_cnt[0]) +
              ' <span class="insight-market-cnt">' + cc_cnt[1] + '건</span></span>';
@@ -623,11 +625,11 @@ _DASHBOARD_CSS = """
   --deep:    #20243a;
   --border:  #262b40;
   --bhi:     #303660;
-  --gold:    #c8a96e;
-  --blue:    #5a9fe0;
-  --hi:      #f0f2f8;
-  --mid:     #a0aabb;
-  --lo:      #7a82a8;
+  --gold:    #d4b87e;
+  --blue:    #6fb0ec;
+  --hi:      #f4f6fb;
+  --mid:     #bcc4d8;
+  --lo:      #9ba5cc;
   --high:    #ef5353;
   --med:     #e0a040;
 }
@@ -635,7 +637,7 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif;
   background: var(--bg);
   color: var(--hi);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.55;
 }
 a { color: var(--blue); text-decoration: none; }
@@ -691,10 +693,10 @@ a:hover { color: var(--gold); }
   margin-bottom: 16px;
 }
 .section-title {
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 700;
-  color: var(--mid);
-  letter-spacing: 0.12em;
+  color: var(--hi);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   margin-bottom: 16px;
   padding-bottom: 10px;
@@ -713,7 +715,7 @@ a:hover { color: var(--gold); }
   flex-shrink: 0;
 }
 .section-sub {
-  font-size: 10px;
+  font-size: 11.5px;
   color: var(--lo);
   font-weight: 400;
   letter-spacing: 0.02em;
@@ -836,7 +838,7 @@ a:hover { color: var(--gold); }
 }
 .kpi-unit { font-size: 13px; font-weight: 400; margin-left: 2px; color: var(--mid); }
 .kpi-label {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--mid);
   margin-top: 8px;
   font-weight: 700;
@@ -846,7 +848,7 @@ a:hover { color: var(--gold); }
 
 /* ── Tables ── */
 .table-wrap { overflow-x: auto; }
-.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .data-table th {
   background: var(--deep);
   color: var(--mid);
@@ -933,11 +935,11 @@ a:hover { color: var(--gold); }
 }
 .heatmap-table thead .sticky-col { z-index: 4; }
 .heatmap-table td {
-  text-align: center; min-width: 42px; max-width: 58px;
-  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+  text-align: center; min-width: 44px; max-width: 60px;
+  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
   border-bottom: 1px solid rgba(255,255,255,0.04);
 }
-.brand-name { font-weight: 600; font-size: 11px; }
+.brand-name { font-weight: 600; font-size: 12.5px; }
 .total-cell {
   background: var(--deep) !important;
   color: var(--hi) !important;
@@ -1037,8 +1039,8 @@ a:hover { color: var(--gold); }
   padding: 14px 16px;
   display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
 }
-.dd-header h3 { font-size: 12px; font-weight: 700; margin: 0; color: var(--hi); letter-spacing: 0.04em; }
-.dd-header p { font-size: 10px; color: var(--mid); margin: 3px 0 0; }
+.dd-header h3 { font-size: 15px; font-weight: 700; margin: 0; color: var(--hi); letter-spacing: 0.02em; }
+.dd-header p { font-size: 11.5px; color: var(--mid); margin: 3px 0 0; }
 .dd-close {
   background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--mid);
   width: 24px; height: 24px; border-radius: 2px; cursor: pointer;
@@ -1052,15 +1054,15 @@ a:hover { color: var(--gold); }
   margin-bottom: 8px; background: var(--elevated);
 }
 .dd-item-top { display: flex; gap: 6px; align-items: center; margin-bottom: 5px; }
-.dd-date { font-size: 10px; color: var(--mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dd-date { font-size: 11px; color: var(--mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dd-act-chip {
-  font-size: 9px; font-weight: 700; padding: 1px 7px;
+  font-size: 10.5px; font-weight: 700; padding: 1px 8px;
   border-radius: 2px; white-space: nowrap;
-  background: rgba(74,143,212,0.1); color: var(--blue);
+  background: rgba(111,176,236,0.14); color: var(--blue);
   letter-spacing: 0.04em;
 }
-.dd-title { font-size: 12px; color: var(--hi); line-height: 1.45; }
-.dd-link { display: inline-block; margin-top: 4px; font-size: 10px; color: var(--blue); }
+.dd-title { font-size: 13.5px; color: var(--hi); line-height: 1.5; font-weight: 500; }
+.dd-link { display: inline-block; margin-top: 5px; font-size: 11px; color: var(--blue); }
 .dd-link:hover { color: var(--gold); }
 /* 브랜드×국가 전략 요약 카드 */
 .dd-summary {
@@ -1072,10 +1074,10 @@ a:hover { color: var(--gold); }
   border-radius: 3px;
 }
 .dd-sum-label {
-  font-size: 9px; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase;
-  color: var(--gold); margin-bottom: 6px;
+  font-size: 11px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--gold); margin-bottom: 7px;
 }
-.dd-sum-body { font-size: 12.5px; line-height: 1.62; color: var(--hi); }
+.dd-sum-body { font-size: 13.5px; line-height: 1.7; color: var(--hi); }
 .dd-sum-spin {
   display: inline-block; width: 11px; height: 11px; margin-right: 7px; vertical-align: -1px;
   border: 2px solid rgba(200,169,110,0.25); border-top-color: var(--gold);
@@ -1238,84 +1240,79 @@ _WORLDMAP_CSS = """
 .wm-lo-med  { color: #fbbf24; }
 .wm-lo-low  { color: #22d3ee; }
 /* ── HIGH 기사 하단 알림 스트립 ── */
-.wm-alert-strip {
-  display: flex;
-  align-items: stretch;
-  margin-top: 10px;
-  border: 1px solid rgba(239,83,83,0.18);
-  border-radius: 4px;
-  overflow: hidden;
-  background: rgba(8,12,22,0.7);
+.wm-alert-strip { margin-top: 14px; }
+.wm-alert-head {
+  font-size: 11.5px; font-weight: 800; color: #ff8a8a;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
 }
-.wm-alert-label {
-  flex-shrink: 0;
-  padding: 0 14px;
-  font-size: 10px;
-  font-weight: 700;
-  color: #f87171;
-  letter-spacing: 1.2px;
-  border-right: 1px solid rgba(239,83,83,0.18);
-  display: flex;
-  align-items: center;
-  background: rgba(239,83,83,0.06);
-  white-space: nowrap;
-}
-.wm-alert-items {
-  display: flex;
-  overflow-x: auto;
-  flex: 1;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(200,169,110,0.25) transparent;
+.wm-alert-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
 }
 .wm-alert-card {
-  flex: 0 0 210px;
-  padding: 9px 14px;
-  border-right: 1px solid rgba(30,40,64,0.9);
-  text-decoration: none;
-  display: block;
-  transition: background 0.15s;
+  position: relative;
+  padding: 11px 13px 11px 16px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--high);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
 }
-.wm-alert-card:hover { background: rgba(74,143,212,0.08); }
-.wm-alert-meta {
-  font-size: 9px;
-  color: #8090b0;
-  font-family: monospace;
-  margin-bottom: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.wm-alert-card:hover {
+  background: #1f2438;
+  border-color: var(--bhi);
+  border-left-color: var(--high);
+  transform: translateY(-1px);
+}
+.wm-alert-badges { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.wm-alert-brand {
+  font-size: 11px; font-weight: 700; color: var(--gold);
+  background: rgba(212,184,126,0.12); border-radius: 3px; padding: 2px 8px;
+  letter-spacing: 0.02em;
+}
+.wm-alert-cc {
+  font-size: 11px; font-weight: 600; color: var(--mid);
+  background: rgba(255,255,255,0.05); border-radius: 3px; padding: 2px 8px;
 }
 .wm-alert-title {
-  font-size: 11px;
-  color: #c0c8dc;
-  line-height: 1.4;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  font-size: 13.5px; color: var(--hi); line-height: 1.5; font-weight: 500;
+  overflow: hidden; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
+.wm-alert-meta { font-size: 10.5px; color: var(--lo); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.wm-alert-empty { padding: 16px; color: var(--lo); font-size: 12px; grid-column: 1 / -1; }
 """
 
 
 def _render_worldmap_section(high_articles: list | None = None) -> str:
     alert_cards = []
-    high_only = [a for a in (high_articles or []) if a.get("importance") == "high"][:12]
+    high_only = [a for a in (high_articles or []) if a.get("importance") == "high"][:8]
     for a in high_only:
         cc = a.get("country", "")
         flag = COUNTRY_FLAGS.get(cc, "🌐")
         date = _fmt_date(a.get("published_date", ""))[:10]
         brand = _esc(a.get("brand", ""))
-        title = _esc(a.get("title_ko") or a.get("title") or (a.get("details") or "")[:80])
-        url = _esc(a.get("source_url") or "#")
+        brand_js = brand.replace("'", "")
+        title = _esc(a.get("title_ko") or a.get("title") or (a.get("details") or "")[:90])
+        src = _esc(a.get("source_name") or "")
+        meta = _esc(date) + (f" · {src}" if src else "")
         alert_cards.append(
-            f'<a href="{url}" class="wm-alert-card" target="_blank" rel="noopener">'
-            f'<div class="wm-alert-meta">{flag} {_esc(cc)} · {brand} · {_esc(date)}</div>'
+            f'<div class="wm-alert-card" onclick="openHeatmapDrilldown(\'{brand_js}\',\'{_esc(cc)}\')" '
+            f'title="{brand} · {_esc(cc)} 전략 요약 보기">'
+            f'<div class="wm-alert-badges">'
+            f'<span class="wm-alert-brand">{brand}</span>'
+            f'<span class="wm-alert-cc">{flag} {_esc(cc)}</span>'
+            f'</div>'
             f'<div class="wm-alert-title">{title}</div>'
-            f'</a>'
+            f'<div class="wm-alert-meta">{meta}</div>'
+            f'</div>'
         )
 
     strip_inner = "".join(alert_cards) if alert_cards else (
-        '<div style="padding:10px 16px;color:#505870;font-size:11px;">최근 HIGH 기사 없음</div>'
+        '<div class="wm-alert-empty">최근 HIGH 기사 없음</div>'
     )
 
     return (
@@ -1338,8 +1335,8 @@ def _render_worldmap_section(high_articles: list | None = None) -> str:
         '</div>'
         '</div>'
         '<div class="wm-alert-strip">'
-        '<div class="wm-alert-label">⚡ HIGH</div>'
-        f'<div class="wm-alert-items">{strip_inner}</div>'
+        '<div class="wm-alert-head">⚡ 실시간 HIGH 신호</div>'
+        f'<div class="wm-alert-grid">{strip_inner}</div>'
         '</div>'
         '</div>'
     )
@@ -1643,10 +1640,10 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:'#8891ab', boxWidth:12 }} }} }},
+      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:'#aab3cc', boxWidth:12 }} }} }},
       scales: {{
-        y: {{ beginAtZero: true, grid: {{ color:'rgba(30,34,53,0.8)' }}, ticks: {{ color:'#8891ab', precision: 0, font: {{ size: 10 }} }} }},
-        x: {{ grid: {{ color:'rgba(30,34,53,0.8)' }}, ticks: {{ color:'#8891ab', font: {{ size: 10 }}, maxRotation: 45 }} }}
+        y: {{ beginAtZero: true, grid: {{ color:'rgba(30,34,53,0.8)' }}, ticks: {{ color:'#aab3cc', precision: 0, font: {{ size: 10 }} }} }},
+        x: {{ grid: {{ color:'rgba(30,34,53,0.8)' }}, ticks: {{ color:'#aab3cc', font: {{ size: 10 }}, maxRotation: 45 }} }}
       }}
     }}
   }});
@@ -1655,7 +1652,7 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     if distribution:
         labels = [ACTIVITY_LABELS.get(d["activity_type"], d["activity_type"]) for d in distribution]
         totals = [d["total"] for d in distribution]
-        colors = ["#4a8fd4","#c8a96e","#9b7fe8","#4ab884","#e05353","#4e5870","#d4943a"][:len(distribution)]
+        colors = ["#4a8fd4","#c8a96e","#9b7fe8","#4ab884","#e05353","#6f7aa0","#d4943a"][:len(distribution)]
         data_json = json.dumps({"labels": labels, "data": totals, "colors": colors})
         scripts.append(f"""
 (function() {{
@@ -1671,7 +1668,7 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     options: {{
       responsive: true, maintainAspectRatio: false,
       plugins: {{
-        legend: {{ position: 'right', labels: {{ font: {{ size: 10 }}, color:'#8891ab', boxWidth: 12 }} }},
+        legend: {{ position: 'right', labels: {{ font: {{ size: 10 }}, color:'#aab3cc', boxWidth: 12 }} }},
         tooltip: {{ callbacks: {{ label: function(c) {{ return c.label + ': ' + c.parsed + '건'; }} }} }}
       }}
     }}
@@ -2159,13 +2156,13 @@ function openHeatmapDrilldown(brand, country, total) {{
     body.innerHTML = arts.map(function(a) {{
       var link = a.url ? '<a class="dd-link" href="' + a.url + '" target="_blank" rel="noopener">원문 보기 ↗</a>' : '';
       var badge = a.imp === 'high'
-        ? '<span style="background:#fee2e2;color:#b91c1c;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;margin-right:5px">HIGH</span>'
-        : '<span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;margin-right:5px">MED</span>';
+        ? '<span style="background:rgba(239,83,83,0.18);color:#ff8a8a;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-right:5px">HIGH</span>'
+        : '<span style="background:rgba(224,160,64,0.18);color:#f0be6e;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-right:5px">MED</span>';
       return '<div class="dd-item">'
         + '<div class="dd-item-top"><span class="dd-date">' + a.date + '</span>'
         + badge + '<span class="dd-act-chip">' + a.act + '</span></div>'
         + '<div class="dd-title">' + a.title + '</div>'
-        + (a.details ? '<div style="font-size:12px;color:#718096;margin-top:4px;">' + a.details + '</div>' : '')
+        + (a.details ? '<div style="font-size:13px;color:var(--mid);margin-top:4px;line-height:1.5;">' + a.details + '</div>' : '')
         + link + '</div>';
     }}).join('');
   }}
