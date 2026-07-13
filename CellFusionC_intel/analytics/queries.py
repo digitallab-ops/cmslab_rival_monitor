@@ -532,6 +532,96 @@ def get_brand_insights_raw_by_range(session: Session, from_date: str, to_date: s
     return result
 
 
+# ── 브랜드×국가 인사이트 (히트맵 셀 드릴다운) ────────────────────────────────
+
+def get_brand_country_insight_cache(
+    session: Session, brand: str, country: str, from_date: str, to_date: str
+) -> "dict | None":
+    """브랜드×국가×날짜범위 캐시 조회. 없으면 None."""
+    row = session.execute(
+        text(f"""
+            SELECT summary, high_count, med_count
+            FROM {DB_SCHEMA}.brand_country_insights
+            WHERE brand = :brand
+              AND country = :country
+              AND from_date::date = :from_date
+              AND to_date::date = :to_date
+        """),
+        {"brand": brand, "country": country, "from_date": from_date, "to_date": to_date},
+    ).fetchone()
+    if not row or not (row[0] or "").strip():
+        return None
+    return {
+        "summary":    row[0],
+        "high_count": row[1] or 0,
+        "med_count":  row[2] or 0,
+    }
+
+
+def upsert_brand_country_insight(
+    session: Session, brand: str, country: str,
+    from_date: str, to_date: str, data: dict
+) -> None:
+    """브랜드×국가 인사이트 UPSERT (brand, country, from_date, to_date 기준)."""
+    session.execute(
+        text(f"""
+            INSERT INTO {DB_SCHEMA}.brand_country_insights
+                (brand, country, from_date, to_date, summary, high_count, med_count, generated_at)
+            VALUES (:brand, :country, :from_date, :to_date, :summary, :high_count, :med_count, NOW())
+            ON CONFLICT (brand, country, from_date, to_date)
+            DO UPDATE SET
+                summary      = EXCLUDED.summary,
+                high_count   = EXCLUDED.high_count,
+                med_count    = EXCLUDED.med_count,
+                generated_at = EXCLUDED.generated_at
+        """),
+        {
+            "brand":      brand,
+            "country":    country,
+            "from_date":  from_date,
+            "to_date":    to_date,
+            "summary":    data.get("summary", ""),
+            "high_count": int(data.get("high_count", 0)),
+            "med_count":  int(data.get("med_count", 0)),
+        },
+    )
+    session.commit()
+
+
+def get_brand_country_articles(
+    session: Session, brand: str, country: str, from_date: str, to_date: str
+) -> list:
+    """해당 브랜드×국가의 HIGH/MED 기사 (요약 입력용). [{imp, act, title_ko, details, date}]"""
+    rows = session.execute(
+        text(f"""
+            SELECT importance, activity_type,
+                   COALESCE(NULLIF(title_ko,''), LEFT(NULLIF(details,''),70), title) AS title_ko,
+                   published_date::date::text AS pub_date, details
+            FROM {DB_SCHEMA}.news_articles
+            WHERE importance IN ('high', 'medium')
+              AND LOWER(brand) = :brand
+              AND country = :country
+              AND published_date::date >= :from_date
+              AND published_date::date <= :to_date
+            ORDER BY CASE importance WHEN 'high' THEN 0 ELSE 1 END,
+                     published_date DESC
+            LIMIT 12
+        """),
+        {"brand": brand.lower(), "country": country.upper(),
+         "from_date": from_date, "to_date": to_date},
+    ).fetchall()
+    return [
+        {
+            "imp":      r[0] or "",
+            "act":      r[1] or "기타",
+            "title_ko": r[2] or "",
+            "date":     r[3] or "",
+            "details":  r[4] or "",
+        }
+        for r in rows
+    ]
+
+
 def get_country_signal_stats(session: Session, days: int = 30) -> dict:
     """국가별 신호 통계 반환 (세계지도용). {CC: {total, high, medium}}"""
     cutoff = _cutoff_iso(days)

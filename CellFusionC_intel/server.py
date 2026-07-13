@@ -185,6 +185,62 @@ async def api_insights(
     return JSONResponse(result)
 
 
+@app.get("/api/cell-insight")
+async def api_cell_insight(
+    brand: str    = Query(..., description="브랜드명"),
+    country: str  = Query(..., description="국가 코드 (예: US)"),
+    from_date: str = Query(..., description="시작일 YYYY-MM-DD"),
+    to_date: str   = Query(..., description="종료일 YYYY-MM-DD"),
+):
+    """히트맵 셀 드릴다운용 브랜드×국가 전략 요약.
+
+    캐시 히트 → 즉시 반환. 미스 → OpenAI 생성 → DB 저장 → 반환.
+    사용자 클릭 시에만 호출되며 (brand, country, from_date, to_date)로 영구 캐시.
+    """
+    from analytics.queries import (
+        get_brand_country_insight_cache,
+        upsert_brand_country_insight,
+        get_brand_country_articles,
+    )
+    from analytics.summarizer import generate_brand_country_summary
+    from storage.models import get_session
+
+    session = get_session()
+    try:
+        cached = get_brand_country_insight_cache(session, brand, country, from_date, to_date)
+        if cached:
+            return JSONResponse({
+                "summary": html_lib.escape(cached["summary"]),
+                "stats":   {"high": cached["high_count"], "med": cached["med_count"]},
+                "cached":  True,
+            })
+
+        articles = get_brand_country_articles(session, brand, country, from_date, to_date)
+    finally:
+        session.close()
+
+    high = sum(1 for a in articles if a["imp"] == "high")
+    med  = len(articles) - high
+
+    summary = generate_brand_country_summary(brand, country, articles)
+
+    if summary:
+        save_session = get_session()
+        try:
+            upsert_brand_country_insight(
+                save_session, brand, country, from_date, to_date,
+                {"summary": summary, "high_count": high, "med_count": med},
+            )
+        finally:
+            save_session.close()
+
+    return JSONResponse({
+        "summary": html_lib.escape(summary),
+        "stats":   {"high": high, "med": med},
+        "cached":  False,
+    })
+
+
 # ── 로컬 실행 ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

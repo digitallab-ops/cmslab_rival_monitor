@@ -274,7 +274,7 @@ def _render_heatmap(matrix_data: dict) -> str:
             style = _cell_color(v, max_val)
             if v:
                 b_esc = _esc(brand).replace("'", "\\'")
-                click = f' onclick="openHeatmapDrilldown(\'{b_esc}\',\'{c}\')"'
+                click = f' onclick="openHeatmapDrilldown(\'{b_esc}\',\'{c}\',{v})"'
                 extra = f' title="{_esc(brand)} × {c} ({v}건)" style="{style}cursor:pointer;"'
             else:
                 click = ""
@@ -541,7 +541,7 @@ window._renderInsights = function(data) {{
                 :                      'insight-badge-high-low';
     var actColor = ACT_COLORS_MAP[ins.top_act] || '#4e5870';
     var mkts = (ins.top_countries || []).map(function(cc_cnt) {{
-      return '<span class="insight-market-item">' + (FLAGS[cc_cnt[0]] || cc_cnt[0]) +
+      return '<span class="insight-market-item mkt-click" data-brand="' + escH(brand) + '" data-country="' + escH(cc_cnt[0]) + '" title="' + escH(brand) + ' × ' + escH(cc_cnt[0]) + ' 요약 보기">' + (FLAGS[cc_cnt[0]] || cc_cnt[0]) +
              ' <span class="insight-market-cnt">' + cc_cnt[1] + '건</span></span>';
     }}).join('');
     var arts = (ins.key_articles || []).map(function(a) {{
@@ -572,6 +572,17 @@ window._renderInsights = function(data) {{
 }};
 // 초기 렌더링 — 현재 기간의 PERIOD_DATA insights 사용
 (function() {{
+  // 국가 칩 클릭 → 히트맵 드릴다운 (위임 방식 — 카드 재렌더에도 유지)
+  var grid = document.getElementById('insight-grid');
+  if (grid && !grid._mktBound) {{
+    grid._mktBound = true;
+    grid.addEventListener('click', function(e) {{
+      var t = e.target.closest ? e.target.closest('.mkt-click') : null;
+      if (t && t.dataset.country && typeof openHeatmapDrilldown === 'function') {{
+        openHeatmapDrilldown(t.dataset.brand, t.dataset.country);
+      }}
+    }});
+  }}
   var d = PERIOD_DATA[String(_currentPeriod)];
   if (d && d.insights) window._renderInsights(d.insights);
 }})();"""
@@ -1051,6 +1062,26 @@ a:hover { color: var(--gold); }
 .dd-title { font-size: 12px; color: var(--hi); line-height: 1.45; }
 .dd-link { display: inline-block; margin-top: 4px; font-size: 10px; color: var(--blue); }
 .dd-link:hover { color: var(--gold); }
+/* 브랜드×국가 전략 요약 카드 */
+.dd-summary {
+  margin: 14px 16px 0;
+  padding: 12px 14px 13px 15px;
+  background: linear-gradient(180deg, rgba(200,169,110,0.09), rgba(200,169,110,0.03));
+  border: 1px solid rgba(200,169,110,0.22);
+  border-left: 3px solid var(--gold);
+  border-radius: 3px;
+}
+.dd-sum-label {
+  font-size: 9px; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--gold); margin-bottom: 6px;
+}
+.dd-sum-body { font-size: 12.5px; line-height: 1.62; color: var(--hi); }
+.dd-sum-spin {
+  display: inline-block; width: 11px; height: 11px; margin-right: 7px; vertical-align: -1px;
+  border: 2px solid rgba(200,169,110,0.25); border-top-color: var(--gold);
+  border-radius: 50%; animation: ddspin 0.8s linear infinite;
+}
+@keyframes ddspin { to { transform: rotate(360deg); } }
 
 /* ── Brand Radar ── */
 .radar-list { display: flex; flex-direction: column; gap: 7px; }
@@ -1124,6 +1155,13 @@ a:hover { color: var(--gold); }
 }
 .insight-markets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .insight-market-item { font-size: 11px; color: var(--mid); display: flex; align-items: center; gap: 3px; }
+.insight-market-item.mkt-click {
+  cursor: pointer; padding: 1px 6px; border-radius: 3px;
+  border: 1px solid transparent; transition: border-color 0.15s, background 0.15s;
+}
+.insight-market-item.mkt-click:hover {
+  border-color: rgba(200,169,110,0.4); background: rgba(200,169,110,0.08);
+}
 .insight-market-cnt { font-weight: 700; color: var(--hi); font-variant-numeric: tabular-nums; }
 .insight-articles-hdr {
   font-size: 9px; font-weight: 700; text-transform: uppercase;
@@ -1848,6 +1886,7 @@ def _build_full_html(
     <div><h3 id="dd-title">—</h3><p id="dd-subtitle">HIGH importance 기사</p></div>
     <button class="dd-close" onclick="closeDrilldown()">✕</button>
   </div>
+  <div class="dd-summary" id="dd-summary" style="display:none;"></div>
   <div class="dd-body" id="dd-body"></div>
 </div>
 
@@ -2063,14 +2102,56 @@ function toggleRow(i) {{
 }}
 
 // ── Heatmap drilldown ──
-function openHeatmapDrilldown(brand, country) {{
-  var _CN = {{US:'미국',JP:'일본',KR:'한국',CN:'중국',PL:'폴란드',SG:'싱가포르',TH:'태국',GB:'영국',CA:'캐나다',AU:'호주',DE:'독일',FR:'프랑스',ID:'인도네시아',MY:'말레이시아',VN:'베트남'}};
+var _CN2 = {{US:'미국',JP:'일본',KR:'한국',CN:'중국',PL:'폴란드',SG:'싱가포르',TH:'태국',GB:'영국',CA:'캐나다',AU:'호주',DE:'독일',FR:'프랑스',ID:'인도네시아',MY:'말레이시아',VN:'베트남',PH:'필리핀',IT:'이탈리아'}};
+
+function _currentRange() {{
+  var fEl = document.getElementById('from-date');
+  var tEl = document.getElementById('to-date');
+  if (fEl && fEl.value && tEl && tEl.value) return {{from: fEl.value, to: tEl.value}};
+  var today = new Date(); today.setHours(0,0,0,0);
+  var from = new Date(today.getTime() - (_currentPeriod || 30) * 86400000);
+  return {{from: _isoDate(from), to: _isoDate(today)}};
+}}
+
+var _ddToken = 0;
+function _renderCellSummary(brand, country) {{
+  var sumEl = document.getElementById('dd-summary');
+  if (!sumEl) return;
+  if (brand === 'all') {{ sumEl.style.display = 'none'; sumEl.innerHTML = ''; return; }}
+  var myToken = ++_ddToken;
+  sumEl.style.display = '';
+  sumEl.innerHTML = '<div class="dd-sum-label">전략 요약</div>'
+    + '<div class="dd-sum-body"><span class="dd-sum-spin"></span>요약 생성 중…</div>';
+  var rng = _currentRange();
+  fetch('/api/cell-insight?brand=' + encodeURIComponent(brand)
+        + '&country=' + encodeURIComponent(country)
+        + '&from_date=' + encodeURIComponent(rng.from)
+        + '&to_date=' + encodeURIComponent(rng.to))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(data) {{
+      if (myToken !== _ddToken) return;  // 다른 셀로 이동함 — 무시
+      if (data && data.summary) {{
+        sumEl.innerHTML = '<div class="dd-sum-label">전략 요약</div>'
+          + '<div class="dd-sum-body">' + data.summary + '</div>';
+      }} else {{
+        sumEl.style.display = 'none';
+      }}
+    }})
+    .catch(function() {{
+      if (myToken !== _ddToken) return;
+      sumEl.style.display = 'none';
+    }});
+}}
+
+function openHeatmapDrilldown(brand, country, total) {{
+  var _CN = _CN2;
   var arts = HIGH_DATA.filter(function(a) {{ return (brand === 'all' || a.brand === brand) && a.country === country; }});
-  document.getElementById('dd-title').textContent = brand === 'all' ? (_CN[country] || country) + ' 전체' : brand + ' · ' + country;
+  document.getElementById('dd-title').textContent = brand === 'all' ? (_CN[country] || country) + ' 전체' : brand + ' · ' + (_CN[country] || country);
   var highCount = arts.filter(function(a){{ return a.imp === 'high'; }}).length;
   var medCount  = arts.length - highCount;
-  var countText = 'HIGH ' + highCount + '건' + (medCount > 0 ? ' / MED ' + medCount + '건' : '');
+  var countText = (typeof total === 'number' ? '전체 ' + total + '건 · ' : '') + 'HIGH ' + highCount + '건' + (medCount > 0 ? ' · MED ' + medCount + '건' : '');
   document.getElementById('dd-subtitle').textContent = countText;
+  _renderCellSummary(brand, country);
   var body = document.getElementById('dd-body');
   if (!arts.length) {{
     body.innerHTML = '<div class="dd-empty">이 셀에 HIGH/MEDIUM 기사 없음</div>';

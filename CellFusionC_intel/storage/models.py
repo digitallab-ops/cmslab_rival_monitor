@@ -107,6 +107,26 @@ class BrandInsight(Base):
     generated_at = Column(TIMESTAMP(timezone=True), default=datetime.utcnow)
 
 
+class BrandCountryInsight(Base):
+    """브랜드×국가 단위 날짜 범위 AI 인사이트 캐시 (히트맵 셀 드릴다운용)."""
+    __tablename__ = "brand_country_insights"
+    __table_args__ = (
+        Index("uq_brand_country_insight_range",
+              "brand", "country", "from_date", "to_date", unique=True),
+        {"schema": DB_SCHEMA},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    brand = Column(String(100), nullable=False)
+    country = Column(String(10), nullable=False)
+    from_date = Column(TIMESTAMP(timezone=True), nullable=False)
+    to_date = Column(TIMESTAMP(timezone=True), nullable=False)
+    summary = Column(Text, nullable=False)
+    high_count = Column(Integer)
+    med_count = Column(Integer)
+    generated_at = Column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+
+
 class MonitoredBrand(Base):
     """동적 브랜드 티어 + 모멘텀 관리."""
     __tablename__ = "monitored_brands"
