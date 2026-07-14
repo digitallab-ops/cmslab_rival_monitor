@@ -530,6 +530,21 @@ def _build_insights_script(brand_insights: dict) -> str:
 
     return f"""
 // ── Brand Insight Cards ──
+function _fmtInsightStrategy(raw) {{
+  if (!raw) return '';
+  var parts = raw.split(/###\\s+/).filter(function(s) {{ return s.trim(); }});
+  if (parts.length === 0) return '<div class="insight-strat-body">' + raw + '</div>';
+  return parts.map(function(chunk) {{
+    var nl = chunk.indexOf('\\n');
+    var label = nl === -1 ? chunk.trim() : chunk.slice(0, nl).trim();
+    var body  = nl === -1 ? '' : chunk.slice(nl + 1).trim();
+    body = body.replace(/\\n/g, ' ');
+    var watch = label.indexOf('관전') !== -1;
+    return '<div class="insight-strat-sec"><div class="insight-strat-h' + (watch ? ' watch' : '') + '">'
+      + label + '</div><div class="insight-strat-body">' + body + '</div></div>';
+  }}).join('');
+}}
+
 window._renderInsights = function(data) {{
   var FLAGS = {flag_json};
   var IMP_C = {imp_json};
@@ -565,7 +580,7 @@ window._renderInsights = function(data) {{
         '<span class="insight-badge insight-badge-act" style="background:' + actColor + '">' + ins.top_act + ' ' + ins.top_pct + '%</span>' +
         '<span class="insight-badge ' + highCls + '">HIGH ' + ins.high_pct + '%</span>' +
       '</div>' +
-      '<div class="insight-strategy">' + (ins.strategy || '') + '</div>' +
+      '<div class="insight-strategy">' + _fmtInsightStrategy(ins.strategy || '') + '</div>' +
       '<div class="insight-markets">' + mkts + '</div>' +
       '<div class="insight-articles-hdr">핵심 근거 기사</div>' +
       arts +
@@ -1174,10 +1189,18 @@ a:hover { color: var(--gold); }
 .insight-badge-high-warm    { background: rgba(212,148,58,0.18); color: #d4943a; }
 .insight-badge-high-low     { background: rgba(62,70,92,0.5); color: var(--mid); }
 .insight-strategy {
-  font-size: 11px; color: var(--hi); line-height: 1.6; margin-bottom: 10px;
-  padding: 8px 10px; background: var(--bg); border-radius: 2px;
+  font-size: 12.5px; color: var(--hi); line-height: 1.6; margin-bottom: 10px;
+  padding: 10px 12px; background: var(--bg); border-radius: 2px;
   border-left: 2px solid rgba(74,143,212,0.35);
 }
+.insight-strat-sec { margin-bottom: 8px; }
+.insight-strat-sec:last-child { margin-bottom: 0; }
+.insight-strat-h {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em;
+  color: var(--blue); margin-bottom: 3px;
+}
+.insight-strat-h.watch { color: var(--gold); }
+.insight-strat-body { font-size: 12.5px; color: var(--hi); line-height: 1.6; }
 .insight-markets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .insight-market-item { font-size: 11px; color: var(--mid); display: flex; align-items: center; gap: 3px; }
 .insight-market-item.mkt-click {

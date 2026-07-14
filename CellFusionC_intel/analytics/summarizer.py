@@ -12,38 +12,43 @@ logger = logging.getLogger(__name__)
 
 
 def generate_brand_strategy_summary(brand: str, articles: list) -> str:
-    """HIGH+MEDIUM 기사 → 구체적 전략 인사이트 2문장 (한국어).
+    """HIGH+MEDIUM 기사 → 분석적 전략 인사이트 (2섹션, 한국어).
 
+    ### 전략 요약 / ### 관전 포인트 형식. 프론트가 '### 라벨'로 분할 렌더.
     articles: [{imp, act, title_ko, details, date}, ...]
     """
     if not articles:
-        return f"{brand}의 최근 주목할 만한 활동이 없습니다."
+        return f"### 전략 요약\n{brand}의 최근 주목할 만한 활동이 없습니다."
 
     article_lines = "\n".join(
-        f"- [{a['imp'].upper()}] {a.get('title_ko','')} / {a.get('details','')[:120]} ({a.get('act','')}, {a.get('date','')})"
+        f"- [{a['imp'].upper()}] {a.get('title_ko','')} / {a.get('details','')[:140]} ({a.get('act','')}, {a.get('date','')})"
         for a in articles
         if a.get("title_ko") or a.get("details")
     )
     if not article_lines:
         return _fallback_from_data(brand, articles)
 
-    prompt = f"""다음은 K-뷰티 브랜드 {brand}의 최근 경쟁 인텔리전스 기사입니다:
+    prompt = f"""당신은 K-뷰티 경쟁사 인텔리전스 분석가입니다. 아래는 브랜드 **{brand}**의 최근 기사(여러 시장 종합)입니다:
 
 {article_lines}
 
-위 기사를 바탕으로 {brand}의 현재 전략을 **2문장**으로 요약하세요.
-- 반드시 기사에 나온 **구체적 사실**(파트너십, 진출국가, 인수합병, 채널명, 수치 등)을 포함할 것
-- "글로벌 시장을 공략 중입니다" 같은 뻔한 표현 금지
-- 첫 문장: 가장 중요한 최근 움직임 (무엇을, 어디서, 어떻게)
-- 둘째 문장: 그것이 시사하는 전략 방향 또는 다음 시장"""
+이 브랜드가 지금 무엇을 하고 있고, 그것이 **경쟁 관점에서 무엇을 의미하는지** 분석하세요.
+단순 사실 나열("~하고 있다")이 아니라 **패턴과 의도, 시사점**을 읽어내야 합니다.
+아래 2개 섹션 형식을 **정확히** 지키세요 (머리말은 반드시 `### `로 시작):
+
+### 전략 요약
+여러 시장·활동을 관통하는 {brand}의 핵심 전략 패턴을 2문장으로. 구체적 사실(채널명·국가·파트너·수치)로 뒷받침. "글로벌 공략 중" 같은 뻔한 말 금지.
+
+### 관전 포인트
+분석가의 한 줄 인사이트 — 이 움직임이 **왜 중요한가 / 무엇을 노리는가 / 다음에 무엇을 주시해야 하는가**. 경쟁사(우리) 관점에서 시사점이 드러나게 1~2문장. 기사에 없는 추측은 "가능성" 수준으로만."""
 
     try:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            max_tokens=300,
-            temperature=0.3,
+            max_tokens=450,
+            temperature=0.35,
             messages=[{"role": "user", "content": prompt}],
         )
         content = (response.choices[0].message.content or "").strip()
