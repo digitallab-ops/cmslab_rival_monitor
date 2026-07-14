@@ -409,6 +409,38 @@ def get_brand_insights_raw(session: Session, days: int = 30) -> dict:
     return result
 
 
+def get_insights_cache_by_period(
+    session: Session, days: int, max_age_days: int = 7
+) -> dict:
+    """기간 길이(days) 기준 최근 캐시 재사용 — 정확 날짜 매칭 대신 근사.
+
+    대시보드 프리빌드가 매일 to_date=오늘로 캐시 미스 나서 20개 브랜드×3기간
+    요약을 매일 재생성하던 낭비 방지. 같은 기간 길이(±2일)로 max_age_days 내
+    생성된 요약을 브랜드별 최신 1건 재사용.
+    """
+    rows = session.execute(
+        text(f"""
+            SELECT DISTINCT ON (brand)
+                   brand, summary, top_act, top_pct, high_pct
+            FROM {DB_SCHEMA}.brand_insights
+            WHERE (to_date::date - from_date::date) BETWEEN :dmin AND :dmax
+              AND generated_at >= NOW() - (:age || ' days')::interval
+              AND summary IS NOT NULL AND summary != ''
+            ORDER BY brand, generated_at DESC
+        """),
+        {"dmin": days - 2, "dmax": days + 2, "age": max_age_days},
+    ).fetchall()
+    return {
+        r[0]: {
+            "summary":  r[1] or "",
+            "top_act":  r[2] or "기타",
+            "top_pct":  r[3] or 0,
+            "high_pct": float(r[4]) if r[4] is not None else 0.0,
+        }
+        for r in rows
+    }
+
+
 def get_insights_cache(session: Session, from_date: str, to_date: str) -> dict:
     """날짜 범위 기준 캐시 조회. {brand: {summary, top_act, top_pct, high_pct}}"""
     rows = session.execute(

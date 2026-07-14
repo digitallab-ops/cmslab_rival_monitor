@@ -46,12 +46,20 @@ def _get_tier_brands(tier: int) -> list[str]:
     return TIER1_BRANDS if tier == 1 else ALL_BRANDS
 
 
-def _run_collection(label: str, brands: list[str], countries: list[str]) -> None:
-    """브랜드×국가 수집 루프 + 완료 후 Slack 요약 리포트."""
+def _run_collection(label: str, brands: list[str], countries: list[str],
+                    deep_query: bool = False) -> None:
+    """브랜드×국가 수집 루프 + 완료 후 Slack 요약 리포트.
+
+    deep_query: 구글뉴스 보조(활동) 쿼리 사용 여부. 주간 풀스캔만 True(비용 절감).
+    """
     import time
     from collections import defaultdict
     from notifications.slack import notify_collection_summary
+    from classifier.claude_classifier import reset_token_usage, get_token_usage
+    import collectors.google_rss as _gr
 
+    _gr.DEEP_QUERY = deep_query
+    reset_token_usage()
     t0 = time.time()
     agg = {"found": 0, "saved": 0, "classified": 0, "high": 0, "errors": 0}
     saved_by_brand: dict = defaultdict(int)
@@ -71,13 +79,19 @@ def _run_collection(label: str, brands: list[str], countries: list[str]) -> None
                 agg["errors"] += 1
                 logger.error("오류 [%s/%s]: %s", brand, country, e)
 
+    usage = get_token_usage()
     agg["brands"]    = len(brands)
     agg["countries"] = len(countries)
     agg["duration"]  = time.time() - t0
     agg["top_saved"] = sorted(saved_by_brand.items(), key=lambda x: -x[1])
+    agg["tokens_in"]  = usage["in"]
+    agg["tokens_out"] = usage["out"]
+    agg["api_calls"]  = usage["calls"]
+    agg["cost_usd"]   = usage["cost_usd"]
 
-    logger.info("=== [%s] 수집 완료 — 신규 %d건(HIGH %d) / 오류 %d ===",
-                label, agg["saved"], agg["high"], agg["errors"])
+    logger.info("=== [%s] 수집 완료 — 신규 %d건(HIGH %d) / 오류 %d / OpenAI %d콜 $%.3f ===",
+                label, agg["saved"], agg["high"], agg["errors"],
+                usage["calls"], usage["cost_usd"])
     try:
         notify_collection_summary(label, agg)
     except Exception as e:
@@ -90,7 +104,7 @@ def job_daily_tier1() -> None:
     tier1 = _get_tier_brands(1)
     logger.info("=== [일별] Tier1 수집 시작 (브랜드 %d개 x 국가 %d개) ===",
                 len(tier1), len(TIER1_COUNTRIES))
-    _run_collection("일별 Tier1", tier1, TIER1_COUNTRIES)
+    _run_collection("일별 Tier1", tier1, TIER1_COUNTRIES, deep_query=False)
 
 
 def job_weekly_full() -> None:
@@ -108,7 +122,7 @@ def job_weekly_full() -> None:
         all_active = ALL_BRANDS
     logger.info("=== [주간] 전체 수집 시작 (브랜드 %d개 x 국가 %d개) ===",
                 len(all_active), len(all_countries))
-    _run_collection("주간 풀스캔", all_active, all_countries)
+    _run_collection("주간 풀스캔", all_active, all_countries, deep_query=True)
 
 
 TIER_CHANGE_COOLDOWN_DAYS = 14   # 최근 변경 후 이 기간 내 재변경 금지 (플립플롭 방지)

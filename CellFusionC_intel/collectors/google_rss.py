@@ -14,8 +14,10 @@ logger = logging.getLogger(__name__)
 
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl={hl}&gl={gl}&ceid={ceid}"
 
-# 브랜드당 2쿼리: 일반 + 전략 활동 지향(유통·진출·투자·협업 신호 커버리지 보강)
+# 전략 활동 지향 보조 쿼리(유통·진출·투자·협업 신호 커버리지 보강).
+# DEEP_QUERY=True일 때만 추가 실행 → 비용 절감 위해 주간 풀스캔에서만 켬(일별은 1쿼리).
 _ACTIVITY_TERMS = "launch OR Sephora OR Ulta OR expansion OR funding OR partnership OR flagship OR collaboration"
+DEEP_QUERY = False
 
 
 def _parse_date(entry) -> datetime:
@@ -38,10 +40,9 @@ class GoogleRSSCollector(BaseCollector):
             logger.warning("미지원 국가 코드: %s", country)
             return []
 
-        queries = [
-            f'"{brand}" beauty',
-            f'"{brand}" ({_ACTIVITY_TERMS})',
-        ]
+        queries = [f'"{brand}" beauty']
+        if DEEP_QUERY:
+            queries.append(f'"{brand}" ({_ACTIVITY_TERMS})')
 
         seen_links: set[str] = set()
         articles: list[RawArticle] = []

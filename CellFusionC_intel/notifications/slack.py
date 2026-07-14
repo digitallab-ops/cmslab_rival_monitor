@@ -102,6 +102,10 @@ def notify_collection_summary(label: str, agg: dict) -> bool:
     dur_str = f"{mins}분 {secs}초" if mins else f"{secs}초"
     err_line = f"  ·  ⚠️ 오류 {errors}건" if errors else ""
 
+    cost = agg.get("cost_usd", 0)
+    calls = agg.get("api_calls", 0)
+    cost_line = f"  ·  🪙 OpenAI {calls}콜 ≈ ${cost:.3f}" if calls else ""
+
     payload = {
         "text": f"📥 수집 완료 — {label}  (신규 {saved}건)",
         "blocks": [
@@ -125,7 +129,7 @@ def notify_collection_summary(label: str, agg: dict) -> bool:
             {
                 "type": "context",
                 "elements": [
-                    {"type": "mrkdwn", "text": f"⏱ 소요 {dur_str}{err_line}"},
+                    {"type": "mrkdwn", "text": f"⏱ 소요 {dur_str}{err_line}{cost_line}"},
                 ],
             },
             {"type": "divider"},

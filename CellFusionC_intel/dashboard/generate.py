@@ -25,6 +25,7 @@ from analytics.queries import (
     get_country_signal_stats,
     get_high_articles,
     get_insights_cache,
+    get_insights_cache_by_period,
     get_weekly_trend,
     upsert_insight_cache,
 )
@@ -2361,7 +2362,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             _from = p_cutoff_str
             _to   = _today.isoformat()
             period_date_ranges[p]  = (_from, _to)
-            period_cache[p]        = get_insights_cache(session, _from, _to)
+            # 정확 날짜 대신 기간 길이 기준 최근(7일) 캐시 재사용 → 매일 재생성 방지
+            period_cache[p]        = get_insights_cache_by_period(session, p, max_age_days=7)
             period_data[p] = {
                 "kpi": {
                     "total":     p_stats["total"],

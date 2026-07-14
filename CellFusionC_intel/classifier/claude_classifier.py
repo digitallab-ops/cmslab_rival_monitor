@@ -32,6 +32,33 @@ RETRY_BASE_DELAY = 20   # 첫 재시도 대기 (초)
 
 _client: Optional[OpenAI] = None
 
+# ── 토큰 사용량 집계 (비용 가시화) ──────────────────────────────────────────
+# gpt-4o-mini 단가 (USD / 1M tokens)
+_PRICE_IN = 0.15
+_PRICE_OUT = 0.60
+_token_usage = {"in": 0, "out": 0, "calls": 0}
+
+
+def reset_token_usage() -> None:
+    _token_usage.update({"in": 0, "out": 0, "calls": 0})
+
+
+def get_token_usage() -> dict:
+    """{in, out, calls, cost_usd} 반환."""
+    cost = _token_usage["in"] / 1e6 * _PRICE_IN + _token_usage["out"] / 1e6 * _PRICE_OUT
+    return {**_token_usage, "cost_usd": round(cost, 4)}
+
+
+def _track_usage(response) -> None:
+    try:
+        u = getattr(response, "usage", None)
+        if u:
+            _token_usage["in"] += getattr(u, "prompt_tokens", 0) or 0
+            _token_usage["out"] += getattr(u, "completion_tokens", 0) or 0
+            _token_usage["calls"] += 1
+    except Exception:
+        pass
+
 
 def _get_client() -> OpenAI:
     global _client
@@ -75,6 +102,7 @@ def _filter_relevant(articles: list[RawArticle]) -> list[int]:
             max_completion_tokens=512,
             temperature=0,
         )
+        _track_usage(response)
         data = json.loads(response.choices[0].message.content)
         indices = data.get("relevant", [])
         return [i for i in indices if isinstance(i, int) and 0 <= i < len(articles)]
@@ -178,6 +206,7 @@ def _classify_batch(
             },
             max_tokens=4096,
         )
+        _track_usage(response)
 
         raw = json.loads(response.choices[0].message.content)
         results = []
