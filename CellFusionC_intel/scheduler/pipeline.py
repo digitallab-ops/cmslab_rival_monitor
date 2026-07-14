@@ -49,6 +49,7 @@ class PipelineStats:
     title_duped: int = 0
     classified: int = 0
     saved: int = 0
+    high: int = 0
     errors: int = 0
     duration: float = 0.0
     error_message: str = ""
@@ -127,6 +128,7 @@ def _run_single(
 
             # high importance → 즉시 Slack 알림
             if clf.importance == "high":
+                stats.high += 1
                 try:
                     notify_high_importance(article)
                 except Exception:

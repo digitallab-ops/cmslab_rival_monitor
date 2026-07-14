@@ -29,6 +29,7 @@ ACTIVITY_EMOJI = {
     "인플루언서_협업": "📱",
     "투자_BD":       "💰",
     "브랜드_마케팅": "📣",
+    "실적_공시":     "📊",
     "기타":          "📌",
 }
 
@@ -71,6 +72,61 @@ def notify_high_importance(article) -> bool:
                         f"{source_line}"
                     ),
                 },
+            },
+            {"type": "divider"},
+        ],
+    }
+    return _post(payload)
+
+
+def notify_collection_summary(label: str, agg: dict) -> bool:
+    """수집 잡 완료 후 요약 리포트 전송.
+
+    agg: {found, saved, classified, errors, brands, countries,
+          duration, high, top_saved:[(brand,cnt),...]}
+    """
+    saved     = agg.get("saved", 0)
+    found     = agg.get("found", 0)
+    classified = agg.get("classified", 0)
+    high      = agg.get("high", 0)
+    errors    = agg.get("errors", 0)
+    brands    = agg.get("brands", 0)
+    countries = agg.get("countries", 0)
+    duration  = agg.get("duration", 0)
+
+    top_saved = agg.get("top_saved", [])
+    top_line = "\n".join(f"• {b} — {c}건" for b, c in top_saved[:8]) or "• 신규 저장 없음"
+
+    mins = int(duration // 60)
+    secs = int(duration % 60)
+    dur_str = f"{mins}분 {secs}초" if mins else f"{secs}초"
+    err_line = f"  ·  ⚠️ 오류 {errors}건" if errors else ""
+
+    payload = {
+        "text": f"📥 수집 완료 — {label}  (신규 {saved}건)",
+        "blocks": [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": f"📥 수집 완료 — {label}"},
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*신규 저장*\n{saved}건"},
+                    {"type": "mrkdwn", "text": f"*그중 HIGH*\n{high}건"},
+                    {"type": "mrkdwn", "text": f"*수집/분류*\n{found} → {classified}"},
+                    {"type": "mrkdwn", "text": f"*브랜드×국가*\n{brands}×{countries}"},
+                ],
+            },
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*신규 저장 브랜드*\n{top_line}"},
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {"type": "mrkdwn", "text": f"⏱ 소요 {dur_str}{err_line}"},
+                ],
             },
             {"type": "divider"},
         ],

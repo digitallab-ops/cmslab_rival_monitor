@@ -46,19 +46,51 @@ def _get_tier_brands(tier: int) -> list[str]:
     return TIER1_BRANDS if tier == 1 else ALL_BRANDS
 
 
+def _run_collection(label: str, brands: list[str], countries: list[str]) -> None:
+    """브랜드×국가 수집 루프 + 완료 후 Slack 요약 리포트."""
+    import time
+    from collections import defaultdict
+    from notifications.slack import notify_collection_summary
+
+    t0 = time.time()
+    agg = {"found": 0, "saved": 0, "classified": 0, "high": 0, "errors": 0}
+    saved_by_brand: dict = defaultdict(int)
+
+    for brand in brands:
+        for country in countries:
+            try:
+                st = run_pipeline(brand, country)
+                agg["found"]      += st.found
+                agg["saved"]      += st.saved
+                agg["classified"] += st.classified
+                agg["high"]       += st.high
+                agg["errors"]     += st.errors
+                if st.saved:
+                    saved_by_brand[brand] += st.saved
+            except Exception as e:
+                agg["errors"] += 1
+                logger.error("오류 [%s/%s]: %s", brand, country, e)
+
+    agg["brands"]    = len(brands)
+    agg["countries"] = len(countries)
+    agg["duration"]  = time.time() - t0
+    agg["top_saved"] = sorted(saved_by_brand.items(), key=lambda x: -x[1])
+
+    logger.info("=== [%s] 수집 완료 — 신규 %d건(HIGH %d) / 오류 %d ===",
+                label, agg["saved"], agg["high"], agg["errors"])
+    try:
+        notify_collection_summary(label, agg)
+    except Exception as e:
+        logger.warning("수집 요약 Slack 전송 실패: %s", e)
+
+
 def job_daily_tier1() -> None:
     """Tier1 브랜드 × Tier1 국가 — 매일 수집 (구글RSS + 전문미디어 + 장업신문 + PRTIMES)."""
     reset_jangup_cache()
     tier1 = _get_tier_brands(1)
     logger.info("=== [일별] Tier1 수집 시작 (브랜드 %d개 x 국가 %d개) ===",
                 len(tier1), len(TIER1_COUNTRIES))
-    for brand in tier1:
-        for country in TIER1_COUNTRIES:
-            try:
-                run_pipeline(brand, country)
-            except Exception as e:
-                logger.error("오류 [%s/%s]: %s", brand, country, e)
-    logger.info("=== [일별] Tier1 수집 완료 ===")
+    _run_collection("일별 Tier1", tier1, TIER1_COUNTRIES)
 
 
 def job_weekly_full() -> None:
@@ -76,13 +108,7 @@ def job_weekly_full() -> None:
         all_active = ALL_BRANDS
     logger.info("=== [주간] 전체 수집 시작 (브랜드 %d개 x 국가 %d개) ===",
                 len(all_active), len(all_countries))
-    for brand in all_active:
-        for country in all_countries:
-            try:
-                run_pipeline(brand, country)
-            except Exception as e:
-                logger.error("오류 [%s/%s]: %s", brand, country, e)
-    logger.info("=== [주간] 전체 수집 완료 ===")
+    _run_collection("주간 풀스캔", all_active, all_countries)
 
 
 TIER_CHANGE_COOLDOWN_DAYS = 14   # 최근 변경 후 이 기간 내 재변경 금지 (플립플롭 방지)
