@@ -353,7 +353,7 @@ def get_brand_insights_raw(session: Session, days: int = 30) -> dict:
             SELECT brand, importance, activity_type,
                    COALESCE(NULLIF(title_ko,''), LEFT(NULLIF(details,''),70), title) AS title_ko,
                    source_url, published_date::date::text AS pub_date,
-                   details
+                   details, country, product_name
             FROM {DB_SCHEMA}.news_articles
             WHERE importance IN ('high', 'medium')
               AND published_date >= :cutoff
@@ -391,6 +391,8 @@ def get_brand_insights_raw(session: Session, days: int = 30) -> dict:
                 "url":      r[4] or "",
                 "details":  r[6] or "",
                 "date":     r[5] or "",
+                "country":  r[7] or "",
+                "product":  r[8] or "",
             })
 
     result: dict = {}
@@ -533,7 +535,8 @@ def get_brand_insights_raw_by_range(session: Session, from_date: str, to_date: s
         text(f"""
             SELECT brand, importance, activity_type,
                    COALESCE(NULLIF(title_ko,''), LEFT(NULLIF(details,''),70), title) AS title_ko,
-                   source_url, published_date::date::text AS pub_date, details
+                   source_url, published_date::date::text AS pub_date, details,
+                   country, product_name
             FROM {DB_SCHEMA}.news_articles
             WHERE importance IN ('high', 'medium')
               AND {date_filter}
@@ -558,6 +561,7 @@ def get_brand_insights_raw_by_range(session: Session, from_date: str, to_date: s
                 "imp": r[1] or "", "act": r[2] or "기타",
                 "title_ko": r[3] or "", "url": r[4] or "",
                 "details": r[6] or "", "date": r[5] or "",
+                "country": r[7] or "", "product": r[8] or "",
             })
 
     result: dict = {}

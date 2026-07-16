@@ -620,19 +620,17 @@ window._renderMarket = function(raw) {
     var nl = chunk.indexOf('\\n');
     var label = nl === -1 ? chunk.trim() : chunk.slice(0, nl).trim();
     var body  = nl === -1 ? '' : chunk.slice(nl + 1).trim();
-    var action = label.indexOf('액션') !== -1;
+    // 버킷 판별: 대응/기회/점검(확인)
+    var kind = 'check';
+    if (label.indexOf('대응') !== -1) kind = 'respond';
+    else if (label.indexOf('기회') !== -1) kind = 'opportunity';
     var lines = body.split(/\\n/).map(function(l) { return l.trim(); }).filter(Boolean);
-    var bulleted = lines.filter(function(l) { return /^[-•]/.test(l); }).length >= 1;
-    var inner;
-    if (bulleted || action) {
-      var items = lines.map(function(l) { return l.replace(/^\\s*[-•\\d.]+\\s*/, '').trim(); }).filter(Boolean);
-      var cls = action ? 'market-actions' : 'market-list';
-      inner = '<ul class="' + cls + '">' + items.map(function(i) { return '<li>' + _mdBold(i) + '</li>'; }).join('') + '</ul>';
-    } else {
-      inner = '<div class="market-sec-b">' + _mdBold(body).replace(/\\n/g, '<br>') + '</div>';
-    }
-    return '<div class="market-sec' + (action ? ' action' : '') + '">'
-      + '<div class="market-sec-h' + (action ? ' action' : '') + '">' + _mdBold(label) + '</div>' + inner + '</div>';
+    var items = lines.map(function(l) { return l.replace(/^\\s*[-•\\d.]+\\s*/, '').trim(); }).filter(Boolean);
+    var inner = items.length
+      ? '<ul class="market-list">' + items.map(function(i) { return '<li>' + _mdBold(i) + '</li>'; }).join('') + '</ul>'
+      : '<div class="market-sec-b">' + _mdBold(body).replace(/\\n/g, '<br>') + '</div>';
+    return '<div class="market-sec ' + kind + '">'
+      + '<div class="market-sec-h ' + kind + '">' + _mdBold(label) + '</div>' + inner + '</div>';
   }).join('');
 };"""
 
@@ -1186,41 +1184,38 @@ a:hover { color: var(--gold); }
   background: rgba(224,83,83,0.12); color: #e05353; letter-spacing: 0.04em; flex-shrink: 0;
 }
 
-/* ── 시장 종합 인사이트 ── */
+/* ── 시장 종합 인사이트 (대응/기회/점검 3버킷) ── */
 .market-body { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 800px) { .market-body { grid-template-columns: 1fr; } }
 .market-empty { color: var(--lo); font-size: 13px; padding: 8px; grid-column: 1 / -1; }
 .market-sec {
   background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
-  padding: 14px 16px;
+  padding: 14px 16px; border-left: 3px solid var(--border);
 }
-.market-sec.action {
+/* 대응해야 할 것: 최우선 → full-width + 적색 긴급 */
+.market-sec.respond {
   grid-column: 1 / -1;
-  background: linear-gradient(180deg, rgba(212,184,126,0.10), rgba(212,184,126,0.03));
-  border: 1px solid rgba(212,184,126,0.28); border-left: 3px solid var(--gold);
+  background: linear-gradient(180deg, rgba(239,83,83,0.10), rgba(239,83,83,0.03));
+  border: 1px solid rgba(239,83,83,0.28); border-left: 3px solid var(--high);
 }
+.market-sec.opportunity { border-left-color: #4ab884; }
+.market-sec.check { border-left-color: var(--gold); }
 .market-sec-h {
-  font-size: 12px; font-weight: 800; letter-spacing: 0.06em;
-  color: var(--blue); margin-bottom: 8px;
+  font-size: 12.5px; font-weight: 800; letter-spacing: 0.06em; margin-bottom: 8px;
 }
-.market-sec-h.action { color: var(--gold); font-size: 12.5px; }
+.market-sec-h.respond { color: #ff8a8a; }
+.market-sec-h.opportunity { color: #5fce9e; }
+.market-sec-h.check { color: var(--gold); }
 .market-sec-b { font-size: 13.5px; line-height: 1.72; color: var(--hi); }
-.market-actions { margin: 0; padding-left: 4px; list-style: none; }
-.market-actions li {
-  font-size: 13.5px; line-height: 1.6; color: var(--hi);
-  padding: 5px 0 5px 20px; position: relative;
-}
-.market-actions li::before {
-  content: '▸'; position: absolute; left: 2px; color: var(--gold); font-weight: 700;
-}
 .market-list { margin: 0; padding-left: 4px; list-style: none; }
 .market-list li {
-  font-size: 13.5px; line-height: 1.62; color: var(--hi);
-  padding: 4px 0 4px 16px; position: relative;
+  font-size: 13.5px; line-height: 1.64; color: var(--hi);
+  padding: 5px 0 5px 18px; position: relative;
 }
-.market-list li::before {
-  content: '·'; position: absolute; left: 4px; color: var(--blue); font-weight: 700;
-}
+.market-sec.respond .market-list li::before { content: '▸'; color: var(--high); }
+.market-sec.opportunity .market-list li::before { content: '▸'; color: #4ab884; }
+.market-sec.check .market-list li::before { content: '▸'; color: var(--gold); }
+.market-list li::before { position: absolute; left: 2px; font-weight: 700; }
 
 /* ── Insight Cards ── */
 .insight-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
