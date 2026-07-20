@@ -399,6 +399,19 @@ def reclassify(days: int, prune: bool, dry_run: bool) -> None:
     )
 
 
+@cli.command("sync-profile")
+def sync_profile() -> None:
+    """Cafe24 Admin API에서 자사 제품 라인을 당겨 company_profile.md 자동 갱신."""
+    from analytics.product_sync import sync_company_profile
+    try:
+        section = sync_company_profile()
+        click.echo("제품 프로필 동기화 완료:\n")
+        click.echo(section)
+    except Exception as e:
+        click.echo(f"[오류] 동기화 실패: {e}", err=True)
+        sys.exit(1)
+
+
 @cli.command()
 def run() -> None:
     """스케줄러 시작 (백그라운드 운영용, Ctrl+C 로 종료)."""

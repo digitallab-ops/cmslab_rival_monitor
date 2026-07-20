@@ -207,6 +207,17 @@ def job_keepalive() -> None:
         logger.warning("keep-alive ping 실패: %s", e)
 
 
+def job_profile_sync() -> None:
+    """Cafe24 → 자사 제품 라인 자동 동기화 (company_profile.md). 실패해도 파이프라인 무영향."""
+    logger.info("=== 자사 제품 프로필 동기화 시작 ===")
+    try:
+        from analytics.product_sync import sync_company_profile
+        sync_company_profile()
+        logger.info("=== 제품 프로필 동기화 완료 ===")
+    except Exception as e:
+        logger.warning("제품 프로필 동기화 스킵(자격증명·연결 확인): %s", e)
+
+
 def job_weekly_dedup() -> None:
     """제목 유사도 기반 중복 쌍 기록."""
     logger.info("=== 주간 중복 정리 시작 ===")
@@ -259,6 +270,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day_of_week="mon", hour=19, minute=0),
         id="weekly_momentum",
         name="[주간] 브랜드 모멘텀 계산",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매주 월요일 17:00 KST — 자사 제품 프로필 Cafe24 동기화 (인사이트 생성 전 최신화)
+    scheduler.add_job(
+        job_profile_sync,
+        trigger=CronTrigger(day_of_week="mon", hour=17, minute=0),
+        id="profile_sync",
+        name="[주간] 자사 제품 프로필 동기화",
         max_instances=1,
         coalesce=True,
     )
