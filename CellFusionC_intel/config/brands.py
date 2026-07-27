@@ -38,10 +38,10 @@ ALL_BRANDS = TIER1_BRANDS + TIER2_BRANDS
 # Tier 1 국가: 매일 수집 (K-뷰티 핵심 시장)
 TIER1_COUNTRIES = ["US", "PL", "JP", "TH", "SG", "CN", "KR", "GB", "CA", "AU", "ID", "MY", "VN"]
 
-# Tier 2 국가: 주 1회 수집 (확장 시장)
-TIER2_COUNTRIES = ["DE", "FR"]
+# Tier 2 국가: 주 1회 수집 (확장 시장 + 가이드 신규 권역 — 비용 위해 주간 티어)
+TIER2_COUNTRIES = ["DE", "FR", "IT", "AE", "SA", "BR", "MX", "IN", "PH", "ZA"]
 
-# 국가별 언어 코드 + Google News 파라미터
+# 국가별 언어 코드 + Google News 파라미터 (신규 로케일은 실제 수집 검증 완료)
 COUNTRIES = {
     "US": {"hl": "en", "gl": "US", "ceid": "US:en", "name": "미국"},
     "PL": {"hl": "pl", "gl": "PL", "ceid": "PL:pl", "name": "폴란드"},
@@ -58,6 +58,40 @@ COUNTRIES = {
     "MY": {"hl": "ms", "gl": "MY", "ceid": "MY:ms", "name": "말레이시아"},
     "VN": {"hl": "vi", "gl": "VN", "ceid": "VN:vi", "name": "베트남"},
     "KR": {"hl": "ko", "gl": "KR", "ceid": "KR:ko", "name": "한국"},
+    # ── 가이드 신규 권역 ──────────────────────────────────────
+    "IT": {"hl": "it",     "gl": "IT", "ceid": "IT:it",     "name": "이탈리아"},
+    "AE": {"hl": "en",     "gl": "AE", "ceid": "AE:en",     "name": "UAE"},
+    "SA": {"hl": "ar",     "gl": "SA", "ceid": "SA:ar",     "name": "사우디"},
+    "BR": {"hl": "pt-BR",  "gl": "BR", "ceid": "BR:pt-419", "name": "브라질"},
+    "MX": {"hl": "es-419", "gl": "MX", "ceid": "MX:es-419", "name": "멕시코"},
+    "IN": {"hl": "en",     "gl": "IN", "ceid": "IN:en",     "name": "인도"},
+    "PH": {"hl": "en",     "gl": "PH", "ceid": "PH:en",     "name": "필리핀"},
+    "ZA": {"hl": "en",     "gl": "ZA", "ceid": "ZA:en",     "name": "남아공"},
+}
+
+# 국가 → 권역 (대시보드 필터·보고서 그룹핑)
+REGION_MAP = {
+    "GB": "EU", "PL": "EU", "DE": "EU", "FR": "EU", "IT": "EU",
+    "AE": "ME", "SA": "ME",
+    "BR": "LATAM", "MX": "LATAM",
+    "ZA": "AF",
+    "TH": "SEA", "SG": "SEA", "ID": "SEA", "MY": "SEA", "VN": "SEA", "PH": "SEA",
+    "IN": "IN",
+    "US": "NA", "CA": "NA",
+    "JP": "APAC", "CN": "APAC", "AU": "APAC", "KR": "KR",
+}
+
+# 현지어 활동 키워드 (google_rss 주간 심층수집에서 브랜드명과 결합 → 현지 기사 recall↑)
+LOCALE_KEYWORDS = {
+    "BR": ["cosméticos coreanos", "marca coreana", "lançamento", "chega ao Brasil"],
+    "MX": ["cosmética coreana", "lanzamiento", "llega a México", "distribuidor"],
+    "PL": ["kosmetyki koreańskie", "koreańska marka", "debiut", "wchodzi do Polski"],
+    "AE": ["Korean beauty", "K-beauty launch", "market entry"],
+    "SA": ["مستحضرات التجميل الكورية", "علامة كورية", "إطلاق", "دخول السوق"],
+    "ID": ["skincare Korea", "brand Korea", "resmi hadir", "masuk Indonesia"],
+    "TH": ["เครื่องสำอางเกาหลี", "สกินแคร์เกาหลี", "เปิดตัว", "เข้าไทย"],
+    "VN": ["mỹ phẩm Hàn Quốc", "thương hiệu Hàn Quốc", "ra mắt", "chính thức có mặt"],
+    "IT": ["cosmetici coreani", "skincare coreana", "lancio", "arriva in Italia"],
 }
 
 # 활동 유형 분류 기준

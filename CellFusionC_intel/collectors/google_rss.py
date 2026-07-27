@@ -7,7 +7,7 @@ from urllib.parse import quote_plus
 import feedparser
 
 from collectors.base_collector import BaseCollector, RawArticle
-from config.brands import COUNTRIES
+from config.brands import COUNTRIES, LOCALE_KEYWORDS
 from config.settings import RSS_REQUEST_DELAY
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,11 @@ class GoogleRSSCollector(BaseCollector):
         queries = [f'"{brand}" beauty']
         if DEEP_QUERY:
             queries.append(f'"{brand}" ({_ACTIVITY_TERMS})')
+            # 현지어 키워드 쿼리 (해당 국가 언어권 기사 recall 보강) — 주간 심층수집만
+            loc_kw = LOCALE_KEYWORDS.get(country.upper())
+            if loc_kw:
+                terms = " OR ".join(f'"{k}"' for k in loc_kw)
+                queries.append(f'"{brand}" ({terms})')
 
         seen_links: set[str] = set()
         articles: list[RawArticle] = []
