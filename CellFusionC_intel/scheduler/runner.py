@@ -5,7 +5,7 @@ APScheduler 스케줄
 - 전체 브랜드 × 전체 국가: 매주 월요일 20:00 KST (주간 풀스캔)
 - 주간 모멘텀 계산: 매주 월요일 19:00 KST
 - 주간 중복 정리: 매주 일요일 19:00 KST
-- Render keep-alive 핑: 10분마다 (무료 플랜 15분 슬립 방지, 시작 즉시 1회)
+(Render는 유료플랜 상시가동 — keep-alive 핑 불필요, 제거됨)
 """
 
 import logging
@@ -15,7 +15,6 @@ from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
 from config.brands import TIER1_BRANDS, ALL_BRANDS, TIER1_COUNTRIES, COUNTRIES
 from config.settings import TITLE_SIMILARITY_THRESHOLD
@@ -195,26 +194,6 @@ def _notify_tier_changes(promoted: list[str], demoted: list[str]) -> None:
         logger.warning("티어 변경 Slack 알림 실패: %s", e)
 
 
-def job_keepalive() -> None:
-    """Render keep-alive 핑 — 업무시간(평일 08~20시 KST)에만.
-
-    ⚠️ 상시(24h) 핑은 Render 무료플랜 월 750시간을 소진 → 서비스 정지됨.
-    스케줄러는 로컬에서 돌므로 Render는 대시보드 조회 전용이라 상시 가동 불필요.
-    업무시간에만 깨워두고 나머지는 슬립 → 월 사용시간 대폭 절감(약 250h/월).
-    """
-    url = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
-    if not url:
-        return
-    now = datetime.now()  # 로컬(Asia/Seoul) 기준
-    if now.weekday() >= 5 or not (8 <= now.hour < 20):  # 주말 or 업무시간 외 → 슬립 허용
-        return
-    try:
-        urllib.request.urlopen(f"{url}/health", timeout=10)
-        logger.debug("keep-alive ping OK: %s", url)
-    except Exception as e:
-        logger.warning("keep-alive ping 실패: %s", e)
-
-
 def job_profile_sync() -> None:
     """Cafe24 → 자사 제품 라인 자동 동기화 (company_profile.md). 실패해도 파이프라인 무영향."""
     logger.info("=== 자사 제품 프로필 동기화 시작 ===")
@@ -310,18 +289,8 @@ def create_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
-    # 10분마다 — Render 무료 플랜 슬립 방지 (15분 비활성 → 슬립).
-    # next_run_time=now: 스케줄러 시작(또는 재시작) 즉시 1회 핑 → 재시작 시
-    # 인터벌 리셋으로 생기는 공백(→ 슬립) 방지.
-    scheduler.add_job(
-        job_keepalive,
-        trigger=IntervalTrigger(minutes=10),
-        id="keepalive",
-        name="[상시] Render keep-alive 핑",
-        max_instances=1,
-        coalesce=True,
-        next_run_time=datetime.now(),
-    )
+    # keep-alive 잡 제거 — Render 유료플랜은 유휴 슬립이 없어 핑 불필요.
+    # (무료티어 시절 슬립 방지용이었음. 상시 핑이 오히려 사용시간을 소진했음.)
 
     return scheduler
 
