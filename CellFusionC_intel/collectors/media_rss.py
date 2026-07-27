@@ -118,6 +118,43 @@ MEDIA_FEEDS = [
         "url": "https://asia.nikkei.com/rss/feed/nar",
         "language": "en",
     },
+    # ── 가이드 신규 권역 매체 (RSS 실응답 검증 완료) ──────────────────────
+    {  # 영국 뷰티 리테일
+        "key": "theindustry_beauty",
+        "name": "TheIndustry.beauty",
+        "url": "https://theindustry.beauty/feed/",
+        "language": "en",
+    },
+    {  # Benelux·서유럽 리테일
+        "key": "retaildetail",
+        "name": "RetailDetail",
+        "url": "https://www.retaildetail.eu/en/feed/",
+        "language": "en",
+    },
+    {  # 동남아 리테일
+        "key": "inside_retail_asia",
+        "name": "Inside Retail Asia",
+        "url": "https://insideretail.asia/feed/",
+        "language": "en",
+    },
+    {  # 인도 광고·마케팅
+        "key": "et_brandequity",
+        "name": "ET BrandEquity",
+        "url": "https://brandequity.economictimes.indiatimes.com/rss/topstories",
+        "language": "en",
+    },
+    {  # 중동(GCC) 캠페인
+        "key": "campaign_me",
+        "name": "Campaign Middle East",
+        "url": "https://campaignme.com/feed/",
+        "language": "en",
+    },
+    {  # 남아공·범아프리카
+        "key": "bizcommunity",
+        "name": "Bizcommunity",
+        "url": "https://www.bizcommunity.com/rss/196/1.html",
+        "language": "en",
+    },
 ]
 
 
