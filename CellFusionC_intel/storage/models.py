@@ -35,6 +35,13 @@ class NewsArticle(Base):
     # 제품 정보
     product_name = Column(String(200))   # GPT가 추출한 언급 제품명
 
+    # 가이드 확장 필드 (Phase 3)
+    channel = Column(String(200))          # 입점·유통 채널/리테일러명
+    price_info = Column(String(300))       # 가격·프로모션 정보
+    city = Column(String(100))             # 구체 도시명
+    evidence_level = Column(String(20))    # official / editorial / pr / rehash
+    strategic_score = Column(Integer)      # 100점 전략 중요도 스코어
+
     # 기사 본문 (원문 + 한국어 번역)
     article_body = Column(Text)          # URL fetch로 가져온 원문 본문 (최대 2000자)
     title_ko = Column(String(400))       # GPT가 번역한 제목 한국어
@@ -180,6 +187,11 @@ def migrate_tables():
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS article_body_ko TEXT",
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS source_country VARCHAR(10)",
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS brand_focus VARCHAR(20)",
+        f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS channel VARCHAR(200)",
+        f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS price_info VARCHAR(300)",
+        f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS city VARCHAR(100)",
+        f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS evidence_level VARCHAR(20)",
+        f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS strategic_score INTEGER",
     ]
     with engine.connect() as conn:
         for sql in migrations:
