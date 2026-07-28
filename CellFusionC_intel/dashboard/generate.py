@@ -29,6 +29,7 @@ from analytics.queries import (
     get_insights_cache_by_period,
     get_weekly_trend,
     upsert_insight_cache,
+    compute_brand_momentum,
 )
 from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
 from storage.models import get_session
@@ -2508,6 +2509,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             brand_radar = get_brand_radar(session)
         except Exception:
             brand_radar = []
+        # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
+        try:
+            market_momentum = compute_brand_momentum(session)
+        except Exception:
+            market_momentum = []
 
         # 기간 선택기용 멀티 기간 데이터 (30/60/90일 + 현재 days)
         preset_periods = sorted(set([30, 60, 90, days]))
@@ -2526,6 +2532,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         period_insights_raw: dict = {}
         period_cache: dict = {}
         period_date_ranges: dict = {}
+        period_cat_battle: dict = {}
         for p in preset_periods:
             p_cutoff_str = (_today - timedelta(days=p)).isoformat()
             p_arts = [
@@ -2535,6 +2542,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             p_stats  = get_collection_stats(session, days=p)
             p_cstats = get_country_signal_stats(session, days=p)
             period_insights_raw[p] = get_brand_insights_raw(session, days=p)
+            period_cat_battle[p] = get_category_battle(session, days=p)
             _from = p_cutoff_str
             _to   = _today.isoformat()
             period_date_ranges[p]  = (_from, _to)
@@ -2587,7 +2595,10 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             if m_cached:
                 market = m_cached
             else:
-                market = generate_market_overview(p_raw)
+                market = generate_market_overview(
+                    p_raw, momentum=market_momentum,
+                    category_battle=period_cat_battle.get(p),
+                )
                 if market:
                     _from, _to = period_date_ranges[p]
                     upsert_insight_cache(insight_session, "__MARKET__", _from, _to, {

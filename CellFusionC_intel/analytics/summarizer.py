@@ -160,11 +160,38 @@ def generate_brand_country_summary(brand: str, country: str, articles: list) -> 
         return _fallback_from_data(brand, articles)
 
 
-def generate_market_overview(brand_insights_raw: dict) -> str:
-    """전 브랜드 데이터 종합 → 시장 인사이트 + 셀퓨전씨 맞춤 조언 (구조화).
+def _build_quant_context(momentum: list | None, category_battle: list | None) -> str:
+    """모멘텀·카테고리 압박 숫자를 프롬프트용 정량 블록으로. 인사이트를 '수치로 못박게' 하는 재료."""
+    blocks: list = []
+    if momentum:
+        rising = [m for m in momentum if m.get("signal") == "rising"][:6]
+        cooling = [m for m in momentum if m.get("signal") == "cooling"][:4]
+        if rising:
+            blocks.append("[급상승 브랜드 · 최근4주/직전4주 배수] " + ", ".join(
+                f"{m['brand']} {m['momentum']}x(최근 {m['recent_4w']}건·HIGH {m['recent_high']})"
+                for m in rising))
+        if cooling:
+            blocks.append("[식는 브랜드] " + ", ".join(
+                f"{m['brand']} {m['momentum']}x(최근 {m['recent_4w']}건)" for m in cooling))
+    if category_battle:
+        top = [c for c in category_battle if c.get("total")][:7]
+        if top:
+            def _lead(c):
+                mv = c.get("moves") or []
+                return mv[0]["brand"] if mv else "?"
+            blocks.append("[우리(셀퓨전씨) 카테고리별 경쟁 압박 · 건수(HIGH)/주도브랜드] " + ", ".join(
+                f"{c['category']} {c['total']}건(HIGH {c['high']})·주도 {_lead(c)}" for c in top))
+    return "\n".join(blocks)
+
+
+def generate_market_overview(brand_insights_raw: dict, momentum: list | None = None,
+                             category_battle: list | None = None) -> str:
+    """전 브랜드 데이터 종합 → 정량 근거 기반 시장 인사이트 + 셀퓨전씨 맞춤 조언 (gpt-4o).
 
     brand_insights_raw: {brand: {top_act, high_pct, articles:[{imp,act,title_ko,details,date}], ...}}
-    반환: ### 지금 대응해야 할 것 / ### 선점할 기회 / ### 확인·점검할 것
+    momentum: compute_brand_momentum() 결과 — 급상승/식는 브랜드 속도(숫자).
+    category_battle: get_category_battle() 결과 — 우리 카테고리별 경쟁 압박(숫자).
+    반환: ### 지금 대응해야 할 것 / ### 선점할 기회·해외 확장 / ### 확인·점검할 것
     """
     if not brand_insights_raw:
         return "### 지금 대응해야 할 것\n- 최근 종합할 만한 경쟁사 활동이 없습니다."
@@ -198,35 +225,38 @@ def generate_market_overview(brand_insights_raw: dict) -> str:
 
     act_rank = sorted(act_tally.items(), key=lambda x: -x[1])
     act_str = ", ".join(f"{_ACT_LABEL.get(k,k)} {v}건" for k, v in act_rank[:6])
+    quant = _build_quant_context(momentum, category_battle)
+    quant_block = f"\n[정량 시그널 — 인사이트에 반드시 이 숫자를 인용]\n{quant}\n" if quant else ""
 
-    prompt = f"""당신은 씨엠에스랩의 수석 경쟁 전략 애널리스트입니다.
+    prompt = f"""당신은 씨엠에스랩의 수석 경쟁 전략 애널리스트입니다. 경영진이 이 인사이트만 보고 이번 주 우리 팀이 뭘 할지 판단합니다. 사업적으로 뾰족하게 쓰세요.
+
 아래는 최근 모니터링된 K-뷰티 경쟁 브랜드들의 주요 활동입니다. 각 줄 형식: [브랜드/국가] 제목 (활동유형, 국가, 제품, 날짜)
 
 {chr(10).join(lines)}
 
 [활동유형 분포] {act_str}
-
+{quant_block}
 {CMS_PROFILE}
 
-당신의 임무: 위 경쟁 동향을 **셀퓨전씨(더마 선케어)의 눈으로** 걸러내고 매칭해서, 우리가 실제로 움직일 근거가 되는 인사이트만 뽑는다.
+당신의 임무: 위 경쟁 동향을 **셀퓨전씨(더마 선케어)의 눈으로** 걸러내고, 우리가 실제로 움직일 근거가 되는 인사이트만 뽑는다.
 
 절대 규칙:
-1) 관련성 필터 — 위 [관련성 판단 기준]에 안 맞는 항목(색조·향수·아이크림 순위 등 우리와 무관)은 **버려라**. 억지로 채우지 마라.
-2) 매칭 — 남긴 항목은 반드시 **우리의 특정 제품/라인(레이저선스크린·톤업선크림·데일리선크림·더마스킨케어·이너뷰티) 또는 특정 시장(한국올영·베트남·중국·일본·미국)**에 연결해라. "누가 어디서 무엇을 → 그게 우리 무엇에 어떻게" 형태.
-3) 뻔한 말·추상어("경쟁 심화", "글로벌 공략") 금지. 경쟁사 실명과 구체 행동을 반드시 포함.
-4) 출력은 마크다운 볼드(**)·번호목록 쓰지 말 것. 각 항목은 "- "로 시작. 머리말은 `### `.
+1) 숫자로 못박아라 — 두루뭉술 서술 금지. 위 [정량 시그널]의 배수·건수·주도브랜드를 문장 안에 직접 인용하라(예: "Anua 2.3x 급상승(최근 18건)", "앰플/세럼 74건 압박"). 숫자 없는 항목은 약하다.
+2) 관련성 필터 — 색조·향수·아이크림 등 우리와 무관한 항목은 **버려라**. 억지로 채우지 마라.
+3) 매칭 — 남긴 항목은 반드시 우리의 특정 제품/라인(레이저선스크린·톤업선크림·데일리선크림·더마스킨케어·PDRN앰플) 또는 특정 시장(한국올영·베트남·중국·일본·미국)에 연결. "누가 어디서 무엇을(숫자) → 우리 무엇에 어떻게" 형태.
+4) 뻔한 말·추상어("경쟁 심화", "글로벌 공략") 금지. 경쟁사 실명 + 구체 행동 + 숫자.
+5) 출력은 마크다운 볼드(**)·번호목록 쓰지 말 것. 각 항목은 "- "로 시작. 머리말은 `### `.
 
 아래 3개 섹션으로:
 
 ### 지금 대응해야 할 것
-우리가 '실제로 파는 제품'(선케어/자외선차단·톤업·틴티드, 약산성 배리어·시카, PDRN/펩타이드 앰플, 잡티/브라이트닝 세럼)과 직접 겹치거나, 우리 주력시장(베트남·중국·일본·올영)의 점유·매대·인지도를 직접 위협하는 것만. 각 줄 = [경쟁사가 무엇을 어디서] → [우리 어떤 '실제 제품'/시장이 위협받나 + 그 제품으로 어떻게 대응] [시급:높음/중간].
-금지: 우리가 안 만드는 카테고리(아이크림 등)를 여기 넣거나, 새 카테고리 진입·성분 카피를 제안하는 것. 진짜 겹치는 위협이 없으면 "- 현재 직접 위협 없음"이라고만 적어라(억지로 채우지 마라).
+우리가 실제로 파는 제품(선케어·자외선차단·톤업·틴티드, 약산성 배리어·시카, PDRN/펩타이드 앰플, 잡티/브라이트닝 세럼)과 직접 겹치거나, 우리 주력시장(베트남·중국·일본·올영)의 점유·매대를 위협하는 것만. 각 줄 = [경쟁사가 무엇을 어디서 + 정량시그널] → [우리 어떤 제품/시장이 위협받나 + 그 제품으로 어떻게 대응] [시급:높음/중간]. 진짜 위협 없으면 "- 현재 직접 위협 없음".
 
-### 선점할 기회
-우리 강점(임상 더마 선케어, 자외선차단 전문, 우리가 이미 가진 PDRN·시카·배리어 라인)으로 먼저 먹을 수 있는 빈틈/트렌드. 각 줄 = [어떤 트렌드·빈틈] → [우리 어떤 '실제 제품'으로 + 어느 시장·채널에서 선점].
+### 선점할 기회·해외 확장
+두 종류를 담아라. (a) 우리 강점(임상 더마 선케어·자외선차단·PDRN·시카·배리어)으로 먼저 먹을 빈틈/트렌드. (b) **해외 확장 관점** — 경쟁사가 신시장에 진입한 방식(어느 나라·어느 채널: Watsons·Sephora·Nykaa·TikTok Shop 등)을 우리 진출 참고서로 뒤집어 읽기. 각 줄 = [트렌드·빈틈 또는 경쟁사 진입 경로(숫자)] → [우리 어떤 제품으로 + 어느 시장·채널에서 선점/진출].
 
 ### 확인·점검할 것
-우리가 안 만드는 카테고리의 경쟁 트렌드(예: 아이크림 성분 트렌드)나 아직 불확실한 시그널은 여기에. 각 줄 = [무엇을 왜 지켜봐야 하나](예: 경쟁사가 우리 1위 시장에 진입 조짐, 특정 성분 트렌드가 우리 인접 카테고리로 번질지, 데이터 부족 영역).
+우리가 안 만드는 카테고리의 경쟁 트렌드, 데이터가 얇은 확장시장(중동·중남미·인도 등), 아직 불확실한 시그널. 각 줄 = [무엇을 왜 지켜봐야 하나].
 
 각 섹션 2~3개. 정말 해당 항목이 없으면 그 섹션에 "- 현재 특이사항 없음"이라고만 적어라."""
 
@@ -234,8 +264,8 @@ def generate_market_overview(brand_insights_raw: dict) -> str:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            max_tokens=900,
+            model="gpt-4o",
+            max_tokens=1200,
             temperature=0.4,
             messages=[{"role": "user", "content": prompt}],
         )
