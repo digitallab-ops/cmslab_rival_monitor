@@ -155,6 +155,61 @@ MEDIA_FEEDS = [
         "url": "https://www.bizcommunity.com/rss/196/1.html",
         "language": "en",
     },
+    # ── 확장시장 P1/P2 보강 (2026-07 RSS 실응답 검증 — 얇은 권역 강화) ──────
+    {  # 이탈리아 뷰티 전문 (P2)
+        "key": "pambianco_beauty",
+        "name": "Pambianco Beauty",
+        "url": "https://beauty.pambianconews.com/feed/",
+        "language": "it",
+    },
+    {  # 폴란드·CEE 화장품 전문 (P1)
+        "key": "wiadomosci_kosmetyczne",
+        "name": "Wiadomosci Kosmetyczne",
+        "url": "https://www.wiadomoscikosmetyczne.pl/feed",
+        "language": "pl",
+    },
+    {  # 브라질 리테일·유통 (P1)
+        "key": "mercado_consumo",
+        "name": "Mercado & Consumo",
+        "url": "https://mercadoeconsumo.com.br/feed/",
+        "language": "pt",
+    },
+    {  # 브라질 화장품 전문 (P2)
+        "key": "cosmetic_innovation_br",
+        "name": "Cosmetic Innovation BR",
+        "url": "https://cosmeticinnovation.com.br/feed/",
+        "language": "pt",
+    },
+    {  # 중동(GCC) 브랜드·리테일 미디어 (P1)
+        "key": "communicate_me",
+        "name": "Communicate Middle East",
+        "url": "https://communicateonline.me/feed/",
+        "language": "en",
+    },
+    {  # UAE·사우디 비즈니스 (P2 — 대형 진출·투자)
+        "key": "arabian_business",
+        "name": "Arabian Business",
+        "url": "https://www.arabianbusiness.com/feed",
+        "language": "en",
+    },
+    {  # 인도 광고·브랜드 전략 (P1)
+        "key": "afaqs",
+        "name": "afaqs!",
+        "url": "https://www.afaqs.com/rss",
+        "language": "en",
+    },
+    {  # 나이지리아 캠페인·마케팅 (P1)
+        "key": "brand_communicator_ng",
+        "name": "Brand Communicator",
+        "url": "https://brandcom.ng/feed",
+        "language": "en",
+    },
+    {  # 인도네시아 뷰티 (P2)
+        "key": "female_daily_id",
+        "name": "Female Daily",
+        "url": "https://editorial.femaledaily.com/feed",
+        "language": "id",
+    },
 ]
 
 

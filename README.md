@@ -26,13 +26,14 @@
 | # | 수집기 | 소스 | 범위 |
 |---|--------|------|------|
 | 1 | `google_rss.py` | Google News RSS (브랜드 × 국가) | 전 국가. 국가별 언어·지역 파라미터로 현지 기사 수집 |
-| 2 | `media_rss.py` | 글로벌 뷰티 전문지 RSS **21개 피드** | 국가 비종속 — 기사 내용으로 시장 판정 |
+| 2 | `media_rss.py` | 글로벌 뷰티 전문지 RSS **30개 피드** | 국가 비종속 — 기사 내용으로 시장 판정 |
 | 3 | `jangup.py` | 장업신문 (국내 뷰티 전문지) | KR |
 | 4 | `prtimes.py` | PRTimes Japan (일본 PR 배포) | JP |
 | 5 | `naver_news.py` | 네이버 뉴스 검색 API | KR |
 | 6 | `reddit_collector.py` | Reddit (r/AsianBeauty 등) | 소비자 커뮤니티 반응 |
 
-**전문지 21개 피드 (media_rss):** BeautyMatter, WWD Beauty, Glossy, Global Cosmetics News, Cosmetics Business, Premium Beauty News, CosmeticsDesign Asia/Europe, PR Newswire, BusinessWire, WWD Japan, Korea Herald, SCMP Lifestyle, Nikkei Asia 등.
+**전문지 30개 피드 (media_rss):** BeautyMatter, WWD Beauty, Glossy, Global Cosmetics News, Cosmetics Business, Premium Beauty News, CosmeticsDesign Asia/Europe, PR Newswire, BusinessWire, WWD Japan, Korea Herald, SCMP Lifestyle, Nikkei Asia, TheIndustry.beauty(UK), RetailDetail(Benelux), Inside Retail Asia, ET BrandEquity(IN), Campaign ME, Bizcommunity(AF) 등.
+- **확장시장 보강(2026-07):** Pambianco Beauty(IT), Wiadomości Kosmetyczne(PL), Mercado & Consumo·Cosmetic Innovation(BR), Communicate·Arabian Business(ME), afaqs!(IN), Brand Communicator(NG), Female Daily(ID) — RSS 실응답 검증된 것만 채택. Atualidade Cosmética·IndiaRetailing 등은 RSS 미제공/차단으로 제외(Google News가 간접 커버).
 
 ### 현지어 심층 수집
 주간 풀스캔 시 브랜드명을 **현지어 활동 키워드**와 결합해 recall을 높입니다.
