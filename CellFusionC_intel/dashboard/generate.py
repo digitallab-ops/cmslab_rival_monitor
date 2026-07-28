@@ -53,6 +53,7 @@ ACTIVITY_LABELS = {
     "투자_BD":        "투자·BD",
     "브랜드_마케팅":  "브랜드 마케팅",
     "실적_공시":      "실적·공시",
+    "가격_프로모션":  "가격·프로모션",
     "기타":           "기타",
 }
 
@@ -117,6 +118,11 @@ def _fmt_art_for_js(a: dict) -> dict:
         "url":     a.get("source_url") or "",
         "conf":    f"{a['confidence']:.0%}" if a.get("confidence") is not None else "?",
         "source":  a.get("source_name") or "",
+        "score":   a.get("score") or 0,
+        "channel": a.get("channel") or "",
+        "city":    a.get("city") or "",
+        "price":   a.get("price_info") or "",
+        "evidence": a.get("evidence_level") or "",
     }
 
 
@@ -444,10 +450,10 @@ def _build_stacked_bar_script(brand_act: list) -> str:
     if not brand_act:
         return ""
     act_keys = ["유통_채널", "신시장_진출", "신제품_런칭", "인플루언서_협업",
-                "투자_BD", "브랜드_마케팅", "실적_공시", "기타"]
+                "투자_BD", "브랜드_마케팅", "실적_공시", "가격_프로모션", "기타"]
     act_labels_list = [ACTIVITY_LABELS.get(k, k) for k in act_keys]
     act_colors = ["#4a8fd4", "#9b7fe8", "#4ab884", "#c8a96e",
-                  "#e05353", "#e0894a", "#46b0b0", "#6f7aa0"]
+                  "#e05353", "#e0894a", "#46b0b0", "#d64f8f", "#6f7aa0"]
 
     # [{brand, acts: [count...]}]
     rows_data = []
@@ -548,7 +554,7 @@ function _fmtInsightStrategy(raw) {{
 window._renderInsights = function(data) {{
   var FLAGS = {flag_json};
   var IMP_C = {imp_json};
-  var ACT_COLORS_MAP = {{"유통_채널":"#4a8fd4","신시장_진출":"#9b7fe8","신제품_런칭":"#4ab884","인플루언서_협업":"#c8a96e","투자_BD":"#e05353","브랜드_마케팅":"#e0894a","실적_공시":"#46b0b0","기타":"#6f7aa0"}};
+  var ACT_COLORS_MAP = {{"유통_채널":"#4a8fd4","신시장_진출":"#9b7fe8","신제품_런칭":"#4ab884","인플루언서_협업":"#c8a96e","투자_BD":"#e05353","브랜드_마케팅":"#e0894a","실적_공시":"#46b0b0","가격_프로모션":"#d64f8f","기타":"#6f7aa0"}};
   var grid = document.getElementById('insight-grid');
   if (!grid || !data) return;
   var html = '';
@@ -2232,6 +2238,7 @@ var _ACT_META = {{
   '투자_BD':{{l:'투자·BD',c:'#e05353'}},
   '브랜드_마케팅':{{l:'브랜드 마케팅',c:'#e0894a'}},
   '실적_공시':{{l:'실적·공시',c:'#46b0b0'}},
+  '가격_프로모션':{{l:'가격·프로모션',c:'#d64f8f'}},
   '기타':{{l:'기타',c:'#6f7aa0'}}
 }};
 
@@ -2313,12 +2320,19 @@ function openHeatmapDrilldown(brand, country, total) {{
       var badge = a.imp === 'high'
         ? '<span style="background:rgba(239,83,83,0.18);color:#ff8a8a;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-right:5px">HIGH</span>'
         : '<span style="background:rgba(224,160,64,0.18);color:#f0be6e;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-right:5px">MED</span>';
+      var scoreBadge = a.score ? '<span style="background:rgba(200,169,110,0.16);color:var(--gold);padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-left:auto">' + a.score + '점</span>' : '';
+      var meta = [];
+      if (a.channel) meta.push('🏪 ' + a.channel);
+      if (a.city) meta.push('📍 ' + a.city);
+      if (a.price) meta.push('💰 ' + a.price);
+      if (a.evidence) meta.push(a.evidence);
+      var metaLine = meta.length ? '<div style="font-size:11.5px;color:var(--lo);margin-top:5px;">' + meta.join(' · ') + '</div>' : '';
       return '<div class="dd-item">'
         + '<div class="dd-item-top"><span class="dd-date">' + a.date + '</span>'
-        + badge + '<span class="dd-act-chip">' + a.act + '</span></div>'
+        + badge + '<span class="dd-act-chip">' + a.act + '</span>' + scoreBadge + '</div>'
         + '<div class="dd-title">' + a.title + '</div>'
         + (a.details ? '<div style="font-size:13px;color:var(--mid);margin-top:4px;line-height:1.5;">' + a.details + '</div>' : '')
-        + link + '</div>';
+        + metaLine + link + '</div>';
     }}).join('');
   }}
   document.getElementById('dd-panel').classList.add('open');

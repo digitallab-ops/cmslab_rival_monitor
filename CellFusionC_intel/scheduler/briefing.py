@@ -20,15 +20,18 @@ logger = logging.getLogger(__name__)
 
 
 def _fetch_week_data(session) -> dict:
-    """최근 7일 데이터 집계."""
+    """최근 7일 데이터 집계 (전략 스코어순)."""
     since = (datetime.utcnow() - timedelta(days=7)).isoformat()
 
     rows = session.execute(text(f"""
         SELECT brand, country, activity_type, importance,
-               details, product_name, source_url, collected_at
+               details, product_name, source_url, collected_at,
+               COALESCE(strategic_score, 0) AS score,
+               channel, evidence_level
         FROM {DB_SCHEMA}.news_articles
         WHERE collected_at >= :since
-        ORDER BY importance DESC, collected_at DESC
+          AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+        ORDER BY COALESCE(strategic_score,0) DESC, importance DESC, collected_at DESC
     """), {"since": since}).fetchall()
 
     stats = session.execute(text(f"""
@@ -56,11 +59,14 @@ def _build_gpt_prompt(rows) -> str:
     if not rows:
         return "이번 주 수집된 기사가 없습니다."
 
-    lines = ["=== 최근 7일 수집 데이터 ===\n"]
+    # r: brand0 country1 activity2 importance3 details4 product5 url6 collected7 score8 channel9 evidence10
+    lines = ["=== 최근 7일 수집 데이터 (전략 스코어순) ===\n"]
     for r in rows[:60]:  # 최대 60건 (토큰 절약)
-        product = f" [{r[4]}]" if r[4] else ""
+        ch = f" 채널:{r[9]}" if r[9] else ""
+        ev = f" 근거:{r[10]}" if r[10] else ""
         lines.append(
-            f"[{r[3].upper()}] {r[0]}/{r[1]} - {r[2]}{product}: {r[4][:150] if r[4] else ''}"
+            f"[score {r[8]}][{str(r[3]).upper()}] {r[0]}/{r[1]} - {r[2]}{ch}{ev}: "
+            f"{(r[4] or '')[:160]}"
         )
 
     return "\n".join(lines)
@@ -80,6 +86,11 @@ def generate_weekly_briefing() -> str:
 
     data_prompt = _build_gpt_prompt(data["rows"])
 
+    try:
+        from analytics.summarizer import CMS_PROFILE
+    except Exception:
+        CMS_PROFILE = "우리=씨엠에스랩/셀퓨전씨(더마 선케어 스페셜리스트)."
+
     client = OpenAI(api_key=OPENAI_API_KEY)
     try:
         response = client.chat.completions.create(
@@ -88,18 +99,21 @@ def generate_weekly_briefing() -> str:
                 {
                     "role": "system",
                     "content": (
-                        "당신은 K-뷰티 시장 인텔리전스 분석가입니다. "
-                        "수집된 경쟁사 활동 데이터를 바탕으로 간결하고 통찰력 있는 주간 브리핑을 작성하세요.\n\n"
-                        "형식:\n"
-                        "1. 이번 주 핵심 시그널 (2-3가지)\n"
-                        "2. 브랜드별 주요 활동 (high importance 위주)\n"
-                        "3. 시장 패턴 및 인사이트 (여러 브랜드에서 보이는 공통 트렌드)\n\n"
-                        "한국어로 작성, 총 400자 이내로 간결하게."
+                        "당신은 씨엠에스랩의 글로벌 경쟁 인텔리전스 분석가입니다. "
+                        "아래 1주치 경쟁사 활동 데이터로 의사결정용 주간 보고를 작성하세요.\n\n"
+                        f"{CMS_PROFILE}\n\n"
+                        "다음 4개 섹션 형식을 정확히 지키세요 (마크다운 볼드 ** 쓰지 말 것):\n"
+                        "### Executive Takeaway\n- 이번 주 가장 중요한 국가·채널·경쟁 변화 3줄\n\n"
+                        "### Top 5 Activity\n- 각 줄: 브랜드 / 국가 / 활동유형 / 채널 / 근거수준 / score / 한줄 시사점 "
+                        "(strategic score 높은 순 5건. 75점↑은 '[즉시공유]' 표시)\n\n"
+                        "### Watchlist\n- 아직 공식 확인이 약한(근거 pr·rehash) 또는 후속 확인 필요한 3건\n\n"
+                        "### Implication (셀퓨전씨)\n- 우리 유통·상품·마케팅 관점 검토 액션 1~3개. 우리 실제 제품/시장에 매칭.\n\n"
+                        "한국어. 근거는 데이터에 있는 사실만."
                     ),
                 },
                 {"role": "user", "content": data_prompt},
             ],
-            max_tokens=800,
+            max_tokens=1100,
             temperature=0.3,
         )
         briefing_text = response.choices[0].message.content

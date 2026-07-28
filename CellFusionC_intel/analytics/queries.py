@@ -71,7 +71,8 @@ def get_high_articles(
                    details, product_name, source_url, source_name,
                    published_date, note, classification_confidence,
                    title_ko, article_body_ko, importance,
-                   brand_focus, source_country
+                   brand_focus, source_country,
+                   COALESCE(strategic_score, 0), channel, city, price_info, evidence_level
             FROM {DB_SCHEMA}.news_articles
             WHERE importance IN ('high', 'medium')
               AND (
@@ -83,6 +84,7 @@ def get_high_articles(
               {where_extras}
             ORDER BY
                 CASE importance WHEN 'high' THEN 0 ELSE 1 END,
+                COALESCE(strategic_score, 0) DESC,
                 published_date DESC
             LIMIT 400
         """),
@@ -108,6 +110,11 @@ def get_high_articles(
             "importance":       r[14] or "high",
             "brand_focus":      r[15],
             "source_country":   r[16],
+            "score":            r[17] or 0,
+            "channel":          r[18],
+            "city":             r[19],
+            "price_info":       r[20],
+            "evidence_level":   r[21],
         }
         for r in rows
     ]
