@@ -138,37 +138,54 @@ def notify_collection_summary(label: str, agg: dict) -> bool:
     return _post(payload)
 
 
-def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
-    """주간 브리핑 Slack 전송."""
-    total   = stats.get("total", 0)
-    high    = stats.get("high", 0)
-    brands  = stats.get("brands", 0)
-    countries = stats.get("countries", 0)
+def _text_sections(text: str, limit: int = 2900) -> list:
+    """긴 텍스트를 Slack section 블록(≤3000자)들로 분할."""
+    blocks, buf = [], ""
+    for para in (text or "").split("\n"):
+        if len(buf) + len(para) + 1 > limit:
+            if buf:
+                blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": buf}})
+            buf = para
+        else:
+            buf = f"{buf}\n{para}" if buf else para
+    if buf:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": buf}})
+    return blocks
 
+
+def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
+    """주간 브리핑 Slack 전송 (긴 본문 자동 분할)."""
     payload = {
         "text": "📊 CellFusionC 경쟁사 주간 인텔리전스 브리핑",
         "blocks": [
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": "📊 경쟁사 주간 인텔리전스 브리핑",
-                },
-            },
+            {"type": "header", "text": {"type": "plain_text", "text": "📊 경쟁사 주간 인텔리전스 브리핑"}},
             {
                 "type": "section",
                 "fields": [
-                    {"type": "mrkdwn", "text": f"*총 수집*\n{total}건"},
-                    {"type": "mrkdwn", "text": f"*High Importance*\n{high}건"},
-                    {"type": "mrkdwn", "text": f"*활성 브랜드*\n{brands}개"},
-                    {"type": "mrkdwn", "text": f"*커버 국가*\n{countries}개"},
+                    {"type": "mrkdwn", "text": f"*총 수집*\n{stats.get('total',0)}건"},
+                    {"type": "mrkdwn", "text": f"*High Importance*\n{stats.get('high',0)}건"},
+                    {"type": "mrkdwn", "text": f"*활성 브랜드*\n{stats.get('brands',0)}개"},
+                    {"type": "mrkdwn", "text": f"*커버 국가*\n{stats.get('countries',0)}개"},
                 ],
             },
             {"type": "divider"},
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": briefing_text},
-            },
+            *_text_sections(briefing_text),
+        ],
+    }
+    return _post(payload)
+
+
+def send_daily_briefing(briefing_text: str, stats: dict) -> bool:
+    """일간 브리핑 Slack 전송."""
+    payload = {
+        "text": "🌅 경쟁사 일간 브리핑",
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": "🌅 경쟁사 일간 브리핑 (어제 수집분)"}},
+            {"type": "context", "elements": [
+                {"type": "mrkdwn", "text": f"신규 {stats.get('total',0)}건 · HIGH {stats.get('high',0)}건 · "
+                                           f"브랜드 {stats.get('brands',0)} · 국가 {stats.get('countries',0)}"}]},
+            {"type": "divider"},
+            *_text_sections(briefing_text),
         ],
     }
     return _post(payload)

@@ -19,7 +19,7 @@ from apscheduler.triggers.cron import CronTrigger
 from config.brands import TIER1_BRANDS, ALL_BRANDS, TIER1_COUNTRIES, COUNTRIES
 from config.settings import TITLE_SIMILARITY_THRESHOLD
 from scheduler.pipeline import run_pipeline, reset_jangup_cache
-from scheduler.briefing import generate_weekly_briefing
+from scheduler.briefing import generate_weekly_briefing, generate_daily_briefing
 from storage.models import get_session
 from storage.repository import save_dedup_candidate, get_recent_titles
 from deduplication.url_hasher import title_similarity
@@ -280,13 +280,23 @@ def create_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
-    # 매주 화요일 09:00 KST — 월요일 수집 완료 후 다음날 아침 브리핑
+    # 매주 월요일 08:00 KST — 지난주(월~일) 심층 종합 브리핑
     scheduler.add_job(
         generate_weekly_briefing,
-        trigger=CronTrigger(day_of_week="tue", hour=9, minute=0),
+        trigger=CronTrigger(day_of_week="mon", hour=8, minute=0),
         id="weekly_briefing",
-        name="[주간] 브리핑 생성 및 Slack 전송",
+        name="[주간] 심층 브리핑 생성 및 Slack 전송",
         max_instances=1,
+    )
+
+    # 매일 08:00 KST — 전날 수집분 일간 브리핑
+    scheduler.add_job(
+        generate_daily_briefing,
+        trigger=CronTrigger(hour=8, minute=0),
+        id="daily_briefing",
+        name="[일간] 브리핑 생성 및 Slack 전송",
+        max_instances=1,
+        coalesce=True,
     )
 
     # keep-alive 잡 제거 — Render 유료플랜은 유휴 슬립이 없어 핑 불필요.
