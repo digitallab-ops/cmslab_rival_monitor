@@ -62,6 +62,72 @@ def get_category_battle(session: Session, days: int = 30) -> list[dict]:
     return out
 
 
+# 잡음 국가코드(권역명·전역·비대상) — 플레이북에서 제외
+_NON_MARKET_CC = {"", "?", "EU", "GLOBAL", "global", "NA", "LATAM", "SEA", "APAC", "ME",
+                  "AF", "IN?", "other", "OTHER", "null", "None"}
+
+
+def get_expansion_playbook(session: Session, days: int = 90) -> list[dict]:
+    """해외 진출 플레이북 — '경쟁사는 이 시장에 이렇게 들어갔다'.
+
+    신시장_진출·유통_채널 활동(중복·incidental 제외)을 시장(국가)별로 묶어,
+    그 시장 진입에 쓰인 채널(리테일러)과 대표 무브먼트를 반환.
+    우리가 해당 시장에 갈 때의 참고서로 읽는 뷰. 최근일수록 channel 필드가 풍부.
+    """
+    cutoff = _cutoff_iso(days)
+    rows = session.execute(text(f"""
+        SELECT country, brand, activity_type,
+               COALESCE(channel,''), COALESCE(strategic_score,0),
+               COALESCE(NULLIF(title_ko,''), title),
+               source_url, published_date::date::text, importance
+        FROM {DB_SCHEMA}.news_articles
+        WHERE (is_duplicate IS NOT TRUE)
+          AND activity_type IN ('신시장_진출','유통_채널')
+          AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+          AND published_date >= :cutoff
+        ORDER BY published_date DESC
+    """), {"cutoff": cutoff}).fetchall()
+
+    markets: dict = {}
+    for r in rows:
+        cc = (r[0] or "").strip()
+        if cc in _NON_MARKET_CC:
+            continue
+        m = markets.setdefault(cc, {"country": cc, "moves": 0, "high": 0,
+                                    "channels": {}, "brands": set(), "items": []})
+        m["moves"] += 1
+        if r[8] == "high":
+            m["high"] += 1
+        m["brands"].add(r[1])
+        # 채널 필드(리테일러) 집계 — 진입 경로
+        ch = (r[3] or "").strip()
+        if ch:
+            for part in ch.replace("·", ",").replace("/", ",").split(","):
+                p = part.strip()
+                if p:
+                    m["channels"][p] = m["channels"].get(p, 0) + 1
+        m["items"].append({
+            "brand": r[1], "activity_type": r[2], "channel": ch,
+            "score": r[4] or 0, "title": r[5] or "", "url": r[6] or "",
+            "date": r[7] or "",
+        })
+
+    out = []
+    for cc, m in markets.items():
+        chans = sorted(m["channels"].items(), key=lambda x: -x[1])
+        items = sorted(m["items"], key=lambda x: (-x["score"], x["date"]))[:5]
+        out.append({
+            "country": cc,
+            "moves": m["moves"],
+            "high": m["high"],
+            "brand_count": len(m["brands"]),
+            "channels": [c for c, _ in chans[:8]],
+            "items": items,
+        })
+    out.sort(key=lambda x: (-x["moves"], -x["high"]))
+    return out
+
+
 def get_collection_stats(session: Session, days: int = 30) -> dict:
     """KPI 요약 통계 반환."""
     cutoff = _cutoff_iso(days)

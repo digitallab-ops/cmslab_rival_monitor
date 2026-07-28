@@ -262,9 +262,10 @@ def generate_market_overview(brand_insights_raw: dict, momentum: list | None = N
 
     try:
         from openai import OpenAI
+        from config.settings import INSIGHT_MODEL_MARKET
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=INSIGHT_MODEL_MARKET,
             max_tokens=1200,
             temperature=0.4,
             messages=[{"role": "user", "content": prompt}],

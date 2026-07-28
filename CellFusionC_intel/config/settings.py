@@ -29,6 +29,13 @@ DATABASE_URL = URL.create(
 CLASSIFIER_MODEL_FILTER = "gpt-4o-mini"
 CLASSIFIER_MODEL_DETAIL = "gpt-4o-mini"
 
+# 인사이트 생성 모델
+#  - 시장 종합 인사이트: 기간당 1회·7일 캐시라 실호출 주 10~20회 → 상위 모델 써도 비용 미미(주 $1 미만).
+#    계정에서 열려 있는 더 강력한 모델(예: 차기 gpt-5 계열)로 바꾸려면 이 값만 교체.
+#  - 브랜드 카드: 브랜드×기간 다회 호출이라 비용 위해 mini 유지.
+INSIGHT_MODEL_MARKET = os.getenv("INSIGHT_MODEL_MARKET", "gpt-4o")
+INSIGHT_MODEL_BRAND  = os.getenv("INSIGHT_MODEL_BRAND", "gpt-4o-mini")
+
 # 의미 중복 병합
 EMBED_MODEL = "text-embedding-3-small"
 DEDUP_COSINE_THRESHOLD = 0.60   # 전이적(union-find) 병합 임계값. 브랜드 내 같은 사건 체인

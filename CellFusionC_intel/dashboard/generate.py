@@ -24,6 +24,7 @@ from analytics.queries import (
     get_collection_stats,
     get_country_signal_stats,
     get_category_battle,
+    get_expansion_playbook,
     get_high_articles,
     get_insights_cache,
     get_insights_cache_by_period,
@@ -44,7 +45,8 @@ COUNTRY_FLAGS = {
     "PL": "🇵🇱", "SG": "🇸🇬", "TH": "🇹🇭", "GB": "🇬🇧",
     "CA": "🇨🇦", "AU": "🇦🇺", "DE": "🇩🇪", "FR": "🇫🇷",
     "ID": "🇮🇩", "MY": "🇲🇾", "VN": "🇻🇳", "PH": "🇵🇭",
-    "IT": "🇮🇹",
+    "IT": "🇮🇹", "BR": "🇧🇷", "MX": "🇲🇽", "IN": "🇮🇳",
+    "AE": "🇦🇪", "SA": "🇸🇦", "ZA": "🇿🇦",
 }
 
 ACTIVITY_LABELS = {
@@ -471,6 +473,60 @@ def _render_category_battle(battle: list) -> str:
         '<span class="section-sub">셀퓨전씨가 파는 카테고리에서 경쟁사가 얼마나 활발한가 (중복 제외)</span>'
         '</div>'
         f'<div class="catb-list">{"".join(rows)}</div>'
+        '</div>'
+    )
+
+
+_COUNTRY_KO_LBL = {
+    "US": "미국", "JP": "일본", "KR": "한국", "CN": "중국", "GB": "영국",
+    "PL": "폴란드", "SG": "싱가포르", "TH": "태국", "CA": "캐나다", "AU": "호주",
+    "DE": "독일", "FR": "프랑스", "ID": "인도네시아", "MY": "말레이시아",
+    "VN": "베트남", "PH": "필리핀", "IT": "이탈리아", "BR": "브라질",
+    "MX": "멕시코", "IN": "인도", "AE": "UAE", "SA": "사우디", "ZA": "남아공",
+}
+
+
+def _render_expansion_playbook(playbook: list) -> str:
+    """해외 진출 플레이북 — 경쟁사가 각 시장에 어떤 채널로 들어갔나 (우리 진출 참고서)."""
+    if not playbook:
+        return ""
+    cards = []
+    for m in playbook[:9]:
+        cc = m["country"]
+        flag = COUNTRY_FLAGS.get(cc, "🌐")
+        name = _COUNTRY_KO_LBL.get(cc, cc)
+        chips = "".join(
+            f'<span class="pb-chip">{_esc(ch)}</span>' for ch in m.get("channels", [])[:6]
+        )
+        chips_html = (f'<div class="pb-chips"><span class="pb-chips-lbl">진입 채널</span>{chips}</div>'
+                      if chips else
+                      '<div class="pb-chips pb-chips-empty">채널 데이터 축적 중 (신규 수집분부터 채워짐)</div>')
+        moves = []
+        for it in m.get("items", [])[:4]:
+            ch = f' · <span class="pb-mv-ch">{_esc(it["channel"])}</span>' if it.get("channel") else ""
+            url = _esc(it.get("url", ""))
+            title = _esc((it.get("title") or "")[:80])
+            act = ACTIVITY_LABELS.get(it["activity_type"], it["activity_type"])
+            title_html = f'<a href="{url}" target="_blank" rel="noopener">{title}</a>' if url else title
+            moves.append(
+                f'<li><span class="pb-mv-b">{_esc(it["brand"])}</span> '
+                f'<span class="pb-mv-act">{act}</span>{ch}<br>{title_html}</li>'
+            )
+        cards.append(
+            f'<div class="pb-card">'
+            f'<div class="pb-head"><span class="pb-flag">{flag}</span>'
+            f'<span class="pb-name">{_esc(name)}</span>'
+            f'<span class="pb-stat">{m["moves"]}건 · HIGH {m["high"]} · 경쟁사 {m["brand_count"]}</span></div>'
+            f'{chips_html}'
+            f'<ul class="pb-moves">{"".join(moves)}</ul>'
+            f'</div>'
+        )
+    return (
+        '<div class="section" id="expansion-playbook">'
+        '<div class="section-title">🧭 해외 진출 플레이북'
+        '<span class="section-sub">경쟁사는 이 시장에 이렇게 들어갔다 — 우리 진출 참고서 (신시장 진출·유통 채널 활동, 중복 제외)</span>'
+        '</div>'
+        f'<div class="pb-grid">{"".join(cards)}</div>'
         '</div>'
     )
 
@@ -1245,6 +1301,35 @@ a:hover { color: var(--gold); }
 .catb-top b { color: var(--mid); }
 @media (max-width: 640px) { .catb-row { grid-template-columns: 70px 1fr; } .catb-name { font-size: 12px; } }
 
+/* ── 해외 진출 플레이북 ── */
+.pb-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 900px) { .pb-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .pb-grid { grid-template-columns: 1fr; } }
+.pb-card {
+  background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+  border-radius: 10px; padding: 13px 14px; display: flex; flex-direction: column; gap: 9px;
+}
+.pb-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.pb-flag { font-size: 17px; }
+.pb-name { font-size: 14px; font-weight: 800; color: var(--hi); }
+.pb-stat { margin-left: auto; font-size: 11px; color: var(--lo); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pb-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.pb-chips-lbl { font-size: 10.5px; color: var(--lo); margin-right: 2px; }
+.pb-chip {
+  font-size: 11px; font-weight: 700; color: #7fd3b5;
+  background: rgba(74,184,132,0.12); border: 1px solid rgba(74,184,132,0.3);
+  border-radius: 999px; padding: 2px 8px;
+}
+.pb-chips-empty { font-size: 11px; color: var(--lo); font-style: italic; }
+.pb-moves { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.pb-moves li { font-size: 12px; line-height: 1.5; color: var(--mid); border-top: 1px solid var(--border); padding-top: 6px; }
+.pb-moves li:first-child { border-top: 0; padding-top: 0; }
+.pb-mv-b { font-weight: 800; color: var(--hi); }
+.pb-mv-act { font-size: 10.5px; color: #9b7fe8; font-weight: 700; }
+.pb-mv-ch { color: #7fd3b5; font-weight: 700; }
+.pb-moves a { color: var(--mid); text-decoration: none; }
+.pb-moves a:hover { color: var(--accent); text-decoration: underline; }
+
 /* ── 시장 종합 인사이트 (대응/기회/점검 3버킷) ── */
 .market-body { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 800px) { .market-body { grid-template-columns: 1fr; } }
@@ -1866,6 +1951,7 @@ def _build_full_html(
     period_data: dict = None,
     brand_radar: list = None,
     category_battle: list = None,
+    expansion_playbook: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -1880,6 +1966,7 @@ def _build_full_html(
     brand_high_html   = _render_brand_high_ratio(brand_high)
     brand_act_html    = _render_brand_activity_bar(brand_act)
     category_battle_html = _render_category_battle(category_battle or [])
+    expansion_playbook_html = _render_expansion_playbook(expansion_playbook or [])
     radar_html        = _render_brand_radar(brand_radar or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
@@ -2028,6 +2115,8 @@ def _build_full_html(
   </div>
 
   {category_battle_html}
+
+  {expansion_playbook_html}
 
   <!-- 시장 종합 인사이트 + 셀퓨전씨 맞춤 조언 -->
   <div class="section" id="market-section">
@@ -2505,6 +2594,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         insights_raw  = get_brand_insights_raw(session, days=days)
         country_stats = get_country_signal_stats(session, days=days)
         category_battle = get_category_battle(session, days=days)
+        # 해외 진출 플레이북은 진입 이벤트가 드물어 윈도우를 넓게(최소 90일) 잡아 밀도 확보
+        expansion_playbook = get_expansion_playbook(session, days=max(days, 90))
         try:
             brand_radar = get_brand_radar(session)
         except Exception:
@@ -2619,6 +2710,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         period_data=period_data,
         brand_radar=brand_radar,
         category_battle=category_battle,
+        expansion_playbook=expansion_playbook,
     )
 
     abs_path = os.path.abspath(output_path)
