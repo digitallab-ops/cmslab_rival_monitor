@@ -19,8 +19,8 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
-# 대표 기사만(중복 제외). Phase B(is_duplicate 컬럼) 마이그레이션 후 활성화됨.
-_DUP_FILTER = ""  # Phase B에서 "AND is_duplicate IS NOT TRUE"로 교체
+# 대표 기사만(의미 중복 제외).
+_DUP_FILTER = "AND is_duplicate IS NOT TRUE"
 
 
 def _fetch_rows(session, hours: int) -> list:

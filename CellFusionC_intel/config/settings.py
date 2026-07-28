@@ -29,6 +29,11 @@ DATABASE_URL = URL.create(
 CLASSIFIER_MODEL_FILTER = "gpt-4o-mini"
 CLASSIFIER_MODEL_DETAIL = "gpt-4o-mini"
 
+# 의미 중복 병합
+EMBED_MODEL = "text-embedding-3-small"
+DEDUP_COSINE_THRESHOLD = 0.60   # 전이적(union-find) 병합 임계값. 브랜드 내 같은 사건 체인
+                                # (실측: 같은 사건 0.42~0.85 체인연결, 무관 기사 0.17~0.30 → 안전)
+
 COLLECTION_INTERVAL_PRIORITY = 3600
 COLLECTION_INTERVAL_ALL = 21600
 

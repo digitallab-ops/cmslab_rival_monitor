@@ -205,6 +205,21 @@ def job_profile_sync() -> None:
         logger.warning("제품 프로필 동기화 스킵(자격증명·연결 확인): %s", e)
 
 
+def job_semantic_dedup() -> None:
+    """의미 임베딩 기반 중복 병합 (매일 수집 후). 대표 외 is_duplicate 플래그."""
+    logger.info("=== 의미 중복 병합 시작 ===")
+    from deduplication.semantic_dedup import dedup_recent
+    session = get_session()
+    try:
+        r = dedup_recent(session, days=10)
+        logger.info("의미 중복 병합 완료: 임베딩 %d / 클러스터 %d / 중복 %d건",
+                    r["embedded"], r["clusters"], r["marked"])
+    except Exception as e:
+        logger.error("의미 중복 병합 오류: %s", e)
+    finally:
+        session.close()
+
+
 def job_weekly_dedup() -> None:
     """제목 유사도 기반 중복 쌍 기록."""
     logger.info("=== 주간 중복 정리 시작 ===")
@@ -287,6 +302,16 @@ def create_scheduler() -> BackgroundScheduler:
         id="weekly_briefing",
         name="[주간] 심층 브리핑 생성 및 Slack 전송",
         max_instances=1,
+    )
+
+    # 매일 23:00 KST — 의미 중복 병합 (수집 완료 후, 아침 브리핑 전)
+    scheduler.add_job(
+        job_semantic_dedup,
+        trigger=CronTrigger(hour=23, minute=0),
+        id="semantic_dedup",
+        name="[일간] 의미 중복 병합",
+        max_instances=1,
+        coalesce=True,
     )
 
     # 매일 08:00 KST — 전날 수집분 일간 브리핑
