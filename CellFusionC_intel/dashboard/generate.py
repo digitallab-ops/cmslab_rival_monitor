@@ -23,6 +23,7 @@ from analytics.queries import (
     get_brand_radar,
     get_collection_stats,
     get_country_signal_stats,
+    get_category_battle,
     get_high_articles,
     get_insights_cache,
     get_insights_cache_by_period,
@@ -436,6 +437,41 @@ def _render_brand_high_ratio(brand_high: list) -> str:
             f'</div>'
         )
     return f'<div class="high-ratio-wrap">{"".join(rows)}</div>'
+
+
+def _render_category_battle(battle: list) -> str:
+    """자사 카테고리 × 경쟁 활동 대결 뷰 (서버 렌더)."""
+    if not battle:
+        return ""
+    max_total = max((c["total"] for c in battle), default=1) or 1
+    rows = []
+    for c in battle:
+        total, high = c["total"], c["high"]
+        pct = int(total / max_total * 100)
+        high_pct = int(high / total * 100) if total else 0
+        top = c["moves"][0] if c["moves"] else None
+        top_html = ""
+        if top:
+            ch = f" · {_esc(top['channel'])}" if top.get("channel") else ""
+            top_html = (f'<div class="catb-top">최고 위협: <b>{_esc(top["brand"])}</b> '
+                        f'({_esc(top["country"])}, {ACTIVITY_LABELS.get(top["activity_type"], top["activity_type"])}'
+                        f'{ch}) · {top["score"]}점</div>')
+        rows.append(
+            f'<div class="catb-row">'
+            f'<div class="catb-name">{_esc(c["category"])}</div>'
+            f'<div class="catb-bar-wrap"><div class="catb-bar" style="width:{pct}%">'
+            f'<span class="catb-bar-hi" style="width:{high_pct}%"></span></div>'
+            f'<span class="catb-cnt">{total}건 <span class="catb-hi-cnt">HIGH {high}</span></span></div>'
+            f'{top_html}</div>'
+        )
+    return (
+        '<div class="section" id="category-battle">'
+        '<div class="section-title">🥊 우리 카테고리 vs 경쟁 활동'
+        '<span class="section-sub">셀퓨전씨가 파는 카테고리에서 경쟁사가 얼마나 활발한가 (중복 제외)</span>'
+        '</div>'
+        f'<div class="catb-list">{"".join(rows)}</div>'
+        '</div>'
+    )
 
 
 def _render_brand_activity_bar(brand_act: list) -> str:
@@ -1190,6 +1226,24 @@ a:hover { color: var(--gold); }
   background: rgba(224,83,83,0.12); color: #e05353; letter-spacing: 0.04em; flex-shrink: 0;
 }
 
+/* ── 카테고리 대결 뷰 ── */
+.catb-list { display: flex; flex-direction: column; gap: 12px; }
+.catb-row { display: grid; grid-template-columns: 96px 1fr; gap: 12px 14px; align-items: center; }
+.catb-name { font-size: 13.5px; font-weight: 700; color: var(--hi); text-align: right; }
+.catb-bar-wrap { display: flex; align-items: center; gap: 10px; }
+.catb-bar {
+  height: 22px; border-radius: 4px; min-width: 3px;
+  background: linear-gradient(90deg, rgba(111,176,236,0.35), rgba(111,176,236,0.6));
+  position: relative; display: flex; align-items: center;
+}
+.catb-bar-hi { position: absolute; left: 0; top: 0; height: 100%; border-radius: 4px 0 0 4px;
+  background: linear-gradient(90deg, rgba(239,83,83,0.55), rgba(239,83,83,0.75)); }
+.catb-cnt { font-size: 12.5px; color: var(--mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.catb-hi-cnt { color: #ff8a8a; font-weight: 700; margin-left: 2px; }
+.catb-top { grid-column: 2; font-size: 11.5px; color: var(--lo); margin-top: -4px; }
+.catb-top b { color: var(--mid); }
+@media (max-width: 640px) { .catb-row { grid-template-columns: 70px 1fr; } .catb-name { font-size: 12px; } }
+
 /* ── 시장 종합 인사이트 (대응/기회/점검 3버킷) ── */
 .market-body { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 800px) { .market-body { grid-template-columns: 1fr; } }
@@ -1810,6 +1864,7 @@ def _build_full_html(
     country_stats: dict = None,
     period_data: dict = None,
     brand_radar: list = None,
+    category_battle: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -1823,6 +1878,7 @@ def _build_full_html(
     heatmap_html      = _render_heatmap(matrix)
     brand_high_html   = _render_brand_high_ratio(brand_high)
     brand_act_html    = _render_brand_activity_bar(brand_act)
+    category_battle_html = _render_category_battle(category_battle or [])
     radar_html        = _render_brand_radar(brand_radar or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
@@ -1969,6 +2025,8 @@ def _build_full_html(
     </div>
     {radar_html}
   </div>
+
+  {category_battle_html}
 
   <!-- 시장 종합 인사이트 + 셀퓨전씨 맞춤 조언 -->
   <div class="section" id="market-section">
@@ -2445,6 +2503,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brand_high    = get_brand_high_ratio(session, days=days)
         insights_raw  = get_brand_insights_raw(session, days=days)
         country_stats = get_country_signal_stats(session, days=days)
+        category_battle = get_category_battle(session, days=days)
         try:
             brand_radar = get_brand_radar(session)
         except Exception:
@@ -2548,6 +2607,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         country_stats=country_stats,
         period_data=period_data,
         brand_radar=brand_radar,
+        category_battle=category_battle,
     )
 
     abs_path = os.path.abspath(output_path)

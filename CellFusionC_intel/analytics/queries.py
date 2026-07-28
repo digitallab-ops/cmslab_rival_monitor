@@ -17,6 +17,51 @@ def _cutoff_iso(days: int) -> str:
     return (datetime.utcnow() - timedelta(days=days)).isoformat()
 
 
+def get_category_battle(session: Session, days: int = 30) -> list[dict]:
+    """자사 카테고리 × 경쟁 활동 '대결 뷰'.
+
+    우리가 파는 카테고리(CATEGORY_KEYWORDS)별로, 경쟁사 HIGH/MED 활동(중복·incidental 제외)이
+    제품명·details·제목에서 매칭되는 건수 + 상위 무브먼트 반환.
+    """
+    from config.brands import OUR_CATEGORIES, CATEGORY_KEYWORDS
+    cutoff = _cutoff_iso(days)
+    rows = session.execute(text(f"""
+        SELECT brand, country, activity_type, importance,
+               COALESCE(strategic_score,0),
+               COALESCE(product_name,''), COALESCE(details,''),
+               COALESCE(NULLIF(title_ko,''), title), source_url, channel
+        FROM {DB_SCHEMA}.news_articles
+        WHERE (is_duplicate IS NOT TRUE)
+          AND importance IN ('high','medium')
+          AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+          AND published_date >= :cutoff
+    """), {"cutoff": cutoff}).fetchall()
+
+    result = {c: {"category": c, "total": 0, "high": 0, "moves": []} for c in OUR_CATEGORIES}
+    for r in rows:
+        hay = f"{r[5]} {r[6]} {r[7]}".lower()
+        for cat in OUR_CATEGORIES:
+            if any(kw.lower() in hay for kw in CATEGORY_KEYWORDS[cat]):
+                b = result[cat]
+                b["total"] += 1
+                if r[3] == "high":
+                    b["high"] += 1
+                b["moves"].append({
+                    "brand": r[0], "country": r[1], "activity_type": r[2],
+                    "importance": r[3], "score": r[4] or 0,
+                    "title": r[7] or "", "url": r[8] or "", "channel": r[9] or "",
+                })
+    # 무브먼트 스코어순 상위 5, 카테고리는 total 많은 순
+    out = []
+    for c in OUR_CATEGORIES:
+        b = result[c]
+        b["moves"].sort(key=lambda m: -m["score"])
+        b["moves"] = b["moves"][:5]
+        out.append(b)
+    out.sort(key=lambda x: -x["total"])
+    return out
+
+
 def get_collection_stats(session: Session, days: int = 30) -> dict:
     """KPI 요약 통계 반환."""
     cutoff = _cutoff_iso(days)

@@ -94,6 +94,19 @@ LOCALE_KEYWORDS = {
     "IT": ["cosmetici coreani", "skincare coreana", "lancio", "arriva in Italia"],
 }
 
+# 자사(셀퓨전씨) 카테고리 × 경쟁 활동 "대결 뷰" — 우리 카테고리 → 경쟁기사 매칭 키워드
+# (제품명+details+제목에서 매칭. Cafe24 카탈로그 카테고리와 정렬. 선케어=우리 간판)
+OUR_CATEGORIES = ["선케어", "크림", "앰플/세럼", "마스크팩", "클렌징", "토너", "비비/쿠션"]
+CATEGORY_KEYWORDS = {
+    "선케어":    ["선크림", "선스크린", "썬스크린", "선스틱", "자외선", "톤업", "sunscreen", "sun stick", "spf", "uv", "suncare"],
+    "크림":      ["크림", "수분크림", "아이크림", "cream", "moisturizer"],
+    "앰플/세럼":  ["앰플", "세럼", "부스터", "ampoule", "serum", "pdrn", "펩타이드", "peptide", "essence", "에센스"],
+    "마스크팩":   ["마스크팩", "마스크", "시트마스크", "sheet mask", "mask pack", "패드", "pad"],
+    "클렌징":    ["클렌징", "클렌저", "클렌징폼", "클렌징오일", "cleansing", "cleanser", "foam", "미셀라"],
+    "토너":      ["토너", "toner", "토닝패드", "toner pad"],
+    "비비/쿠션":  ["비비", "쿠션", "bb크림", "bb cream", "cushion", "선베이스"],
+}
+
 # 활동 유형 분류 기준
 ACTIVITY_TYPES = [
     "신시장_진출",      # 신규 국가 공식 진출, 현지 미디어 최초 등장
