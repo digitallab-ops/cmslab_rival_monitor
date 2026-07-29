@@ -134,13 +134,13 @@ def _fmt_art_for_js(a: dict) -> dict:
 def _cell_color(value: int, max_value: int) -> str:
     """히트맵 셀 배경색. 0=빈 셀, max=골드, 가독성 우선."""
     if max_value == 0 or value == 0:
-        return "background:#191e2e;color:#7a82a8;"
+        return "background:#eef1f6;color:#b3bacb;"
     norm = min(value / max_value, 1.0)
-    # 딥블루 → 골드 그라데이션 (명확한 구분)
-    r = int(28  + norm * (200 - 28))
-    g = int(40  + norm * (169 - 40))
-    b = int(65  + norm * (60  - 65))
-    text = "#f0f2f8" if norm > 0.2 else "#a0aabb"
+    # 라이트 테마: 연한 블루 → 골드 (낮음=연함, 높음=진한 골드). 텍스트는 진하게.
+    r = int(216 - norm * (216 - 196))
+    g = int(226 - norm * (226 - 156))
+    b = int(240 - norm * (240 - 56))
+    text = "#20242f"
     return f"background:rgb({r},{g},{b});color:{text};"
 
 
@@ -153,7 +153,7 @@ def _render_kpi_cards(stats: dict) -> str:
         ("총 수집",   stats["total"],             "건", "#c8a96e", "kpi-total"),
         ("HIGH",     stats["high"],              "건", "#e05353", "kpi-high"),
         ("활성 브랜드", stats["brands_active"],   "개", "#4a8fd4", "kpi-brands"),
-        ("커버 국가",  stats["countries_active"], "개", "#aab3cc", "kpi-countries"),
+        ("커버 국가",  stats["countries_active"], "개", "#6b7488", "kpi-countries"),
     ]
     cards = "".join(
         f'<div class="kpi-card">'
@@ -386,7 +386,7 @@ def _render_brand_radar(radar: list) -> str:
         return '<p class="no-data">모멘텀 데이터 없음 (첫 주간 계산 전)</p>'
 
     SIGNAL_ICON  = {"rising": "▲", "stable": "▶", "cooling": "▼"}
-    SIGNAL_COLOR = {"rising": "#4ab884", "stable": "#aab3cc", "cooling": "#e05353"}
+    SIGNAL_COLOR = {"rising": "#4ab884", "stable": "#8891a8", "cooling": "#e05353"}
     TIER_LABEL   = {1: "Tier 1", 2: "Tier 2"}
 
     rows = []
@@ -635,6 +635,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
     return f"""
 (function() {{
   var d = {data_json};
+  window._drawStacked = function() {{
   var canvas = document.getElementById('stackedBar');
   if (!canvas) return;
   var dpr = window.devicePixelRatio || 1;
@@ -642,6 +643,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
   var n = d.brands.length;
   var totalH = PAD_T + n * BAR_H + (n - 1) * GAP + PAD_B;
   var W = canvas.parentElement.getBoundingClientRect().width;
+  if (!W) return;
   canvas.width = W * dpr; canvas.height = totalH * dpr;
   canvas.style.width = W + 'px'; canvas.style.height = totalH + 'px';
   var ctx = canvas.getContext('2d');
@@ -651,7 +653,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
     var acts = d.rows[ri];
     var total = acts.reduce(function(s, v) {{ return s + v; }}, 0);
     var y = PAD_T + ri * (BAR_H + GAP);
-    ctx.fillStyle = '#aab3cc';
+    ctx.fillStyle = '#4c5468';
     ctx.font = '600 11px system-ui,-apple-system,sans-serif';
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillText(brand, LABEL_W - 8, y + BAR_H / 2);
@@ -673,7 +675,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
       }}
       x += segW;
     }});
-    ctx.fillStyle = '#6f7aa0';
+    ctx.fillStyle = '#4c5468';
     ctx.font = '11px system-ui';
     ctx.textAlign = 'left';
     ctx.fillText(total + '건', x + 5, y + BAR_H / 2);
@@ -681,6 +683,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
   // Legend
   var leg = document.getElementById('stacked-legend');
   if (leg) {{
+    leg.innerHTML = '';
     d.act_labels.forEach(function(lb, i) {{
       var el = document.createElement('div');
       el.className = 'legend-item';
@@ -688,6 +691,8 @@ def _build_stacked_bar_script(brand_act: list) -> str:
       leg.appendChild(el);
     }});
   }}
+  }};
+  window._drawStacked();
 }})();"""
 
 
@@ -697,7 +702,7 @@ def _build_insights_script(brand_insights: dict) -> str:
         return ""
 
     flag_json = json.dumps({"US":"🇺🇸","JP":"🇯🇵","KR":"🇰🇷","SG":"🇸🇬","PL":"🇵🇱","TH":"🇹🇭","CA":"🇨🇦","GB":"🇬🇧"})
-    imp_json  = json.dumps({"high": "#e05353", "medium": "#d4943a", "low": "#3e465c"})
+    imp_json  = json.dumps({"high": "#e05353", "medium": "#d4943a", "low": "#9aa3b5"})
 
     return f"""
 // ── Brand Insight Cards ──
@@ -835,19 +840,21 @@ _NE_LAND_POLYS = [
 _DASHBOARD_CSS = """
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg:      #0c0e18;
-  --surface: #131620;
-  --elevated:#1a1e2e;
-  --deep:    #20243a;
-  --border:  #262b40;
-  --bhi:     #303660;
-  --gold:    #d4b87e;
-  --blue:    #6fb0ec;
-  --hi:      #f4f6fb;
-  --mid:     #bcc4d8;
-  --lo:      #9ba5cc;
-  --high:    #ef5353;
-  --med:     #e0a040;
+  --bg:      #f5f7fb;
+  --surface: #ffffff;
+  --elevated:#ffffff;
+  --deep:    #eef1f6;
+  --border:  #e5e8f0;
+  --bhi:     #d3d8e6;
+  --gold:    #a9803f;
+  --accent:  #a9803f;
+  --blue:    #2f6fd0;
+  --hi:      #1a1d29;
+  --mid:     #4c5468;
+  --lo:      #7b839a;
+  --high:    #e0483f;
+  --med:     #c07d1c;
+  --shadow:  0 1px 2px rgba(23,33,64,.05), 0 2px 8px rgba(23,33,64,.05);
 }
 body {
   font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif;
@@ -904,9 +911,10 @@ a:hover { color: var(--gold); }
 .section {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 18px 20px;
+  border-radius: 12px;
+  padding: 20px 22px;
   margin-bottom: 16px;
+  box-shadow: var(--shadow);
 }
 .section-title {
   font-size: 13px;
@@ -959,17 +967,37 @@ a:hover { color: var(--gold); }
 .collapse-btn:hover { border-color: var(--gold); color: var(--gold); }
 
 /* ── Period row ── */
+/* ── 탭바 ── */
+.tabbar {
+  position: sticky; top: 52px; z-index: 40;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 9px 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  box-shadow: 0 1px 6px rgba(23,33,64,.04);
+}
+.tabbar-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab-btn {
+  background: transparent; border: 1px solid transparent;
+  border-radius: 9px; padding: 8px 16px;
+  font-size: 13.5px; font-weight: 700; color: var(--lo);
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+}
+.tab-btn:hover { color: var(--hi); background: var(--deep); }
+.tab-btn.active { color: var(--gold); background: rgba(169,128,63,0.12); border-color: rgba(169,128,63,0.30); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; animation: tabfade 0.18s ease; }
+@keyframes tabfade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
 .period-row {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  background: var(--elevated);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 8px 12px;
-  margin-bottom: 16px;
 }
+/* 탭바 안에 들어온 기간 컨트롤은 컴팩트하게 (자체 카드 스타일 제거) */
+.tabbar .period-row { margin-bottom: 0; }
 .period-row-label {
   font-size: 9px;
   font-weight: 700;
@@ -1032,10 +1060,11 @@ a:hover { color: var(--gold); }
 .kpi-card {
   background: var(--elevated);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 12px;
   padding: 20px 18px 16px;
   position: relative;
   overflow: hidden;
+  box-shadow: var(--shadow);
 }
 .kpi-card::after {
   content: '';
@@ -1176,8 +1205,9 @@ a:hover { color: var(--gold); }
 .chart-section {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 18px 20px;
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: var(--shadow);
 }
 .chart-container { position: relative; height: 260px; }
 .chart-sm { height: 240px; }
@@ -1311,7 +1341,7 @@ a:hover { color: var(--gold); }
 .dd-act-focus {
   font-size: 12px; font-weight: 600; padding: 3px 9px;
   border: 1px solid; border-radius: 12px; white-space: nowrap;
-  background: rgba(255,255,255,0.03);
+  background: rgba(0,0,0,0.02);
 }
 .dd-act-focus b { font-weight: 800; }
 /* 구조화 요약 섹션 */
@@ -1368,7 +1398,7 @@ a:hover { color: var(--gold); }
 .catb-bar-hi { position: absolute; left: 0; top: 0; height: 100%; border-radius: 4px 0 0 4px;
   background: linear-gradient(90deg, rgba(239,83,83,0.55), rgba(239,83,83,0.75)); }
 .catb-cnt { font-size: 12.5px; color: var(--mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.catb-hi-cnt { color: #ff8a8a; font-weight: 700; margin-left: 2px; }
+.catb-hi-cnt { color: #d83a33; font-weight: 700; margin-left: 2px; }
 .catb-top { grid-column: 2; font-size: 11.5px; color: var(--lo); margin-top: -4px; }
 .catb-top b { color: var(--mid); }
 @media (max-width: 640px) { .catb-row { grid-template-columns: 70px 1fr; } .catb-name { font-size: 12px; } }
@@ -1378,7 +1408,7 @@ a:hover { color: var(--gold); }
 @media (max-width: 900px) { .pb-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) { .pb-grid { grid-template-columns: 1fr; } }
 .pb-card {
-  background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+  background: rgba(0,0,0,0.02); border: 1px solid var(--border);
   border-radius: 10px; padding: 13px 14px; display: flex; flex-direction: column; gap: 9px;
 }
 .pb-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
@@ -1404,15 +1434,15 @@ a:hover { color: var(--gold); }
 
 /* ── 브리핑 아카이브 ── */
 .bfa-list { display: flex; flex-direction: column; gap: 8px; }
-.bfa-item { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.bfa-item { background: rgba(0,0,0,0.02); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
 .bfa-sum { list-style: none; cursor: pointer; padding: 11px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .bfa-sum::-webkit-details-marker { display: none; }
 .bfa-sum::before { content: '▸'; color: var(--lo); font-size: 12px; transition: transform .15s; }
 .bfa-item[open] .bfa-sum::before { transform: rotate(90deg); }
 .bfa-item[open] .bfa-sum { border-bottom: 1px solid var(--border); }
 .bfa-badge { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; }
-.bfa-weekly { color: #7fb2ff; background: rgba(74,143,212,0.15); border: 1px solid rgba(74,143,212,0.35); }
-.bfa-daily { color: #ffcf8a; background: rgba(224,137,74,0.15); border: 1px solid rgba(224,137,74,0.35); }
+.bfa-weekly { color: #2f6fd0; background: rgba(74,143,212,0.14); border: 1px solid rgba(74,143,212,0.35); }
+.bfa-daily { color: #b5730f; background: rgba(224,137,74,0.16); border: 1px solid rgba(224,137,74,0.38); }
 .bfa-date { font-size: 13px; font-weight: 700; color: var(--hi); font-variant-numeric: tabular-nums; }
 .bfa-period { font-size: 11.5px; color: var(--lo); }
 .bfa-stat { font-size: 11.5px; color: var(--mid); margin-left: auto; white-space: nowrap; }
@@ -1444,8 +1474,8 @@ a:hover { color: var(--gold); }
 .market-sec-h {
   font-size: 12.5px; font-weight: 800; letter-spacing: 0.06em; margin-bottom: 8px;
 }
-.market-sec-h.respond { color: #ff8a8a; }
-.market-sec-h.opportunity { color: #5fce9e; }
+.market-sec-h.respond { color: #d83a33; }
+.market-sec-h.opportunity { color: #1f9d6a; }
 .market-sec-h.check { color: var(--gold); }
 .market-sec-b { font-size: 13.5px; line-height: 1.72; color: var(--hi); }
 .market-list { margin: 0; padding-left: 4px; list-style: none; }
@@ -1711,12 +1741,16 @@ def _build_worldmap_script(country_stats: dict) -> str:
   var COORDS = {{
     US:[38,-97],  CA:[56,-96], GB:[54,-2],  DE:[51,10],  FR:[46,2],
     PL:[52,20],   JP:[36,138], KR:[37,128], CN:[35,105], TH:[15,101],
-    SG:[1.3,104], MY:[4,109],  ID:[-5,120], VN:[14,108], AU:[-27,133]
+    SG:[1.3,104], MY:[4,109],  ID:[-5,120], VN:[14,108], AU:[-27,133],
+    IT:[42,13],   PH:[13,122], IN:[22,79],  AE:[24,54],  SA:[24,45],
+    BR:[-10,-52], MX:[23,-102], ZA:[-29,24]
   }};
   var CNAMES = {{
     US:'미국', CA:'캐나다', GB:'영국', DE:'독일', FR:'프랑스',
     PL:'폴란드', JP:'일본', KR:'한국', CN:'중국', TH:'태국',
-    SG:'싱가포르', MY:'말레이시아', ID:'인도네시아', VN:'베트남', AU:'호주'
+    SG:'싱가포르', MY:'말레이시아', ID:'인도네시아', VN:'베트남', AU:'호주',
+    IT:'이탈리아', PH:'필리핀', IN:'인도', AE:'UAE', SA:'사우디',
+    BR:'브라질', MX:'멕시코', ZA:'남아공'
   }};
   var LAND = {land_json};
 
@@ -1984,15 +2018,15 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
       datasets: [
         {{ label: 'HIGH',   data: d.high,   borderColor:'#e05353', backgroundColor:'rgba(224,83,83,0.08)',  tension:0.35, fill:true,  pointRadius:3, borderWidth:2 }},
         {{ label: 'MEDIUM', data: d.medium, borderColor:'#d4943a', backgroundColor:'rgba(212,148,58,0.05)', tension:0.35, fill:false, pointRadius:2, borderWidth:1.5 }},
-        {{ label: 'LOW',    data: d.low,    borderColor:'#3e465c', backgroundColor:'transparent',            tension:0.35, fill:false, pointRadius:2, borderWidth:1 }}
+        {{ label: 'LOW',    data: d.low,    borderColor:'#9aa3b5', backgroundColor:'transparent',            tension:0.35, fill:false, pointRadius:2, borderWidth:1 }}
       ]
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:'#aab3cc', boxWidth:12 }} }} }},
+      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:'#4c5468', boxWidth:12 }} }} }},
       scales: {{
-        y: {{ beginAtZero: true, grid: {{ color:'rgba(30,34,53,0.8)' }}, ticks: {{ color:'#aab3cc', precision: 0, font: {{ size: 10 }} }} }},
-        x: {{ grid: {{ color:'rgba(30,34,53,0.8)' }}, ticks: {{ color:'#aab3cc', font: {{ size: 10 }}, maxRotation: 45 }} }}
+        y: {{ beginAtZero: true, grid: {{ color:'rgba(0,0,0,0.07)' }}, ticks: {{ color:'#4c5468', precision: 0, font: {{ size: 10 }} }} }},
+        x: {{ grid: {{ color:'rgba(0,0,0,0.07)' }}, ticks: {{ color:'#4c5468', font: {{ size: 10 }}, maxRotation: 45 }} }}
       }}
     }}
   }});
@@ -2017,7 +2051,7 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     options: {{
       responsive: true, maintainAspectRatio: false,
       plugins: {{
-        legend: {{ position: 'right', labels: {{ font: {{ size: 10 }}, color:'#aab3cc', boxWidth: 12 }} }},
+        legend: {{ position: 'right', labels: {{ font: {{ size: 10 }}, color:'#4c5468', boxWidth: 12 }} }},
         tooltip: {{ callbacks: {{ label: function(c) {{ return c.label + ': ' + c.parsed + '건'; }} }} }}
       }}
     }}
@@ -2142,102 +2176,123 @@ def _build_full_html(
   <div class="meta">최근 <span id="period-label">{days}</span>일 집계 &nbsp;·&nbsp; <span>{_esc(generated_str)}</span></div>
 </header>
 
+<div class="tabbar">
+  <div class="tabbar-tabs">
+    <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">📊 개요</button>
+    <button class="tab-btn" data-tab="brands" onclick="switchTab('brands')">🏢 경쟁사</button>
+    <button class="tab-btn" data-tab="strategy" onclick="switchTab('strategy')">🎯 우리 관점</button>
+    <button class="tab-btn" data-tab="feed" onclick="switchTab('feed')">📰 기록</button>
+  </div>
+  <div class="period-row">
+    <span class="period-row-label">기간</span>
+    <div class="period-presets" id="pb-presets">
+      <button class="period-btn{"" if days != 30 else " active"}" data-days="30" onclick="setPeriod(30)">30일</button>
+      <button class="period-btn{"" if days != 60 else " active"}" data-days="60" onclick="setPeriod(60)">60일</button>
+      <button class="period-btn{"" if days != 90 else " active"}" data-days="90" onclick="setPeriod(90)">90일</button>
+    </div>
+    <div class="period-vsep"></div>
+    <div class="period-range">
+      <input type="date" id="from-date" class="period-date-input" />
+      <span class="period-date-sep">~</span>
+      <input type="date" id="to-date" class="period-date-input" />
+      <button class="period-apply-btn" onclick="applyDateRange()">조회</button>
+    </div>
+    <span id="period-msg" class="period-msg" style="display:none"></span>
+  </div>
+</div>
+
 <div class="page-body">
 
-  <div class="section">
-    <div class="section-title">요약 통계</div>
-    <div class="period-row">
-      <span class="period-row-label">기간</span>
-      <div class="period-presets" id="pb-presets">
-        <button class="period-btn{"" if days != 30 else " active"}" data-days="30" onclick="setPeriod(30)">30일</button>
-        <button class="period-btn{"" if days != 60 else " active"}" data-days="60" onclick="setPeriod(60)">60일</button>
-        <button class="period-btn{"" if days != 90 else " active"}" data-days="90" onclick="setPeriod(90)">90일</button>
-      </div>
-      <div class="period-vsep"></div>
-      <div class="period-range">
-        <input type="date" id="from-date" class="period-date-input" />
-        <span class="period-date-sep">~</span>
-        <input type="date" id="to-date" class="period-date-input" />
-        <button class="period-apply-btn" onclick="applyDateRange()">조회</button>
-      </div>
-      <span id="period-msg" class="period-msg" style="display:none"></span>
+  <!-- ===== 탭: 개요 ===== -->
+  <div class="tab-panel active" id="tab-overview">
+    <div class="section">
+      <div class="section-title">요약 통계</div>
+      {kpi_html}
     </div>
-    {kpi_html}
+
+    {worldmap_section}
   </div>
 
-  {worldmap_section}
-
-  <div class="section">
-    <div class="section-title">
-      HIGH/MED 기사 목록
-      <span class="section-sub" id="high-count-label">{len(high_articles)}건</span>
-      <button class="collapse-btn" id="articles-toggle" onclick="toggleArticlesSection()">▲ 접기</button>
-    </div>
-    <div id="articles-content">
-      {filter_bar_html}
-      {high_html}
-    </div>
-  </div>
-
-  <div class="lower-row">
+  <!-- ===== 탭: 경쟁사 ===== -->
+  <div class="tab-panel" id="tab-brands">
+    <!-- Brand Radar — 모멘텀 기반 티어 신호 -->
     <div class="section">
       <div class="section-title">
-        브랜드 &times; 국가 분포 히트맵
-        <span class="section-sub">셀 클릭 시 HIGH/MED 기사 목록</span>
+        Brand Radar
+        <span class="section-sub">최근 4주 vs 직전 4주 기사량 비율 · ▲Rising / ▶Stable / ▼Cooling</span>
       </div>
-      {heatmap_html}
+      {radar_html}
     </div>
+
+    <div class="lower-row">
+      <div class="section">
+        <div class="section-title">
+          브랜드 &times; 국가 분포 히트맵
+          <span class="section-sub">셀 클릭 시 HIGH/MED 기사 목록</span>
+        </div>
+        {heatmap_html}
+      </div>
+      <div class="section">
+        <div class="section-title">브랜드별 HIGH 비중</div>
+        {brand_high_html}
+      </div>
+    </div>
+
     <div class="section">
-      <div class="section-title">브랜드별 HIGH 비중</div>
-      {brand_high_html}
+      <div class="section-title">
+        브랜드별 활동 유형 구성
+        <span class="section-sub">전략 포지셔닝 비교</span>
+      </div>
+      {brand_act_html}
+      <div class="legend-row" id="stacked-legend"></div>
+    </div>
+
+    <!-- Brand Insight Cards (Claude API 자동생성) -->
+    <div class="section" id="insight-section">
+      <div class="section-title">
+        브랜드별 전략 인사이트
+        <span class="section-sub">스택바 클릭 시 해당 브랜드로 이동</span>
+      </div>
+      <div class="insight-grid" id="insight-grid"></div>
     </div>
   </div>
 
-  <div class="section">
-    <div class="section-title">
-      브랜드별 활동 유형 구성
-      <span class="section-sub">전략 포지셔닝 비교</span>
+  <!-- ===== 탭: 우리 관점 ===== -->
+  <div class="tab-panel" id="tab-strategy">
+    {category_battle_html}
+
+    {expansion_playbook_html}
+
+    <!-- 시장 종합 인사이트 + 셀퓨전씨 맞춤 조언 -->
+    <div class="section" id="market-section">
+      <div class="section-title">
+        🧭 시장 종합 인사이트 &amp; 셀퓨전씨 전략 제언
+        <span class="section-sub">전 경쟁사 종합 분석 → 우리(씨엠에스랩) 관점 조언</span>
+      </div>
+      <div class="market-body" id="market-body"></div>
     </div>
-    {brand_act_html}
-    <div class="legend-row" id="stacked-legend"></div>
   </div>
 
-  <!-- Brand Radar — 모멘텀 기반 티어 신호 -->
-  <div class="section">
-    <div class="section-title">
-      Brand Radar
-      <span class="section-sub">최근 4주 vs 직전 4주 기사량 비율 · ▲Rising / ▶Stable / ▼Cooling</span>
+  <!-- ===== 탭: 기록 ===== -->
+  <div class="tab-panel" id="tab-feed">
+    <div class="section">
+      <div class="section-title">
+        HIGH/MED 기사 목록
+        <span class="section-sub" id="high-count-label">{len(high_articles)}건</span>
+        <button class="collapse-btn" id="articles-toggle" onclick="toggleArticlesSection()">▲ 접기</button>
+      </div>
+      <div id="articles-content">
+        {filter_bar_html}
+        {high_html}
+      </div>
     </div>
-    {radar_html}
-  </div>
 
-  {category_battle_html}
+    {briefing_archive_html}
 
-  {expansion_playbook_html}
-
-  {briefing_archive_html}
-
-  <!-- 시장 종합 인사이트 + 셀퓨전씨 맞춤 조언 -->
-  <div class="section" id="market-section">
-    <div class="section-title">
-      🧭 시장 종합 인사이트 &amp; 셀퓨전씨 전략 제언
-      <span class="section-sub">전 경쟁사 종합 분석 → 우리(씨엠에스랩) 관점 조언</span>
+    <div class="chart-section">
+      <div class="section-title">주별 수집 트렌드<span class="section-sub">전체 브랜드 주간 수집량 추이</span></div>
+      {trend_html}
     </div>
-    <div class="market-body" id="market-body"></div>
-  </div>
-
-  <!-- Brand Insight Cards (Claude API 자동생성) -->
-  <div class="section" id="insight-section">
-    <div class="section-title">
-      브랜드별 전략 인사이트
-      <span class="section-sub">스택바 클릭 시 해당 브랜드로 이동</span>
-    </div>
-    <div class="insight-grid" id="insight-grid"></div>
-  </div>
-
-  <div class="chart-section">
-    <div class="section-title">주별 수집 트렌드<span class="section-sub">전체 브랜드 주간 수집량 추이</span></div>
-    {trend_html}
   </div>
 
 </div>
@@ -2460,6 +2515,19 @@ function toggleArticlesSection() {{
   _applyCollapseAndFilter();
 }}
 
+function switchTab(name) {{
+  document.querySelectorAll('.tab-btn').forEach(function(b) {{
+    b.classList.toggle('active', b.dataset.tab === name);
+  }});
+  document.querySelectorAll('.tab-panel').forEach(function(p) {{
+    p.classList.toggle('active', p.id === 'tab-' + name);
+  }});
+  // 숨겨진 탭에서 width=0으로 그려진 캔버스 차트 재그리기
+  if (name === 'brands' && window._drawStacked) {{ window._drawStacked(); }}
+  try {{ window.dispatchEvent(new Event('resize')); }} catch (e) {{}}
+  window.scrollTo({{ top: 0, behavior: 'smooth' }});
+}}
+
 function toggleRow(i) {{
   var row = document.getElementById('dr-' + i);
   if (row) row.classList.toggle('hidden');
@@ -2565,8 +2633,8 @@ function openHeatmapDrilldown(brand, country, total) {{
     body.innerHTML = arts.map(function(a) {{
       var link = a.url ? '<a class="dd-link" href="' + a.url + '" target="_blank" rel="noopener">원문 보기 ↗</a>' : '';
       var badge = a.imp === 'high'
-        ? '<span style="background:rgba(239,83,83,0.18);color:#ff8a8a;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-right:5px">HIGH</span>'
-        : '<span style="background:rgba(224,160,64,0.18);color:#f0be6e;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-right:5px">MED</span>';
+        ? '<span style="background:rgba(239,83,83,0.15);color:#d0322b;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-right:5px">HIGH</span>'
+        : '<span style="background:rgba(224,160,64,0.18);color:#a86a12;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-right:5px">MED</span>';
       var scoreBadge = a.score ? '<span style="background:rgba(200,169,110,0.16);color:var(--gold);padding:1px 6px;border-radius:3px;font-size:11px;font-weight:700;margin-left:auto">' + a.score + '점</span>' : '';
       var meta = [];
       if (a.channel) meta.push('🏪 ' + a.channel);
