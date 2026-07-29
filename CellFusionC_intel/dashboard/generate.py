@@ -25,6 +25,7 @@ from analytics.queries import (
     get_country_signal_stats,
     get_category_battle,
     get_expansion_playbook,
+    get_briefings_list,
     get_high_articles,
     get_insights_cache,
     get_insights_cache_by_period,
@@ -527,6 +528,77 @@ def _render_expansion_playbook(playbook: list) -> str:
         '<span class="section-sub">경쟁사는 이 시장에 이렇게 들어갔다 — 우리 진출 참고서 (신시장 진출·유통 채널 활동, 중복 제외)</span>'
         '</div>'
         f'<div class="pb-grid">{"".join(cards)}</div>'
+        '</div>'
+    )
+
+
+def _briefing_md_to_html(text: str) -> str:
+    """브리핑 마크다운-라이트(### 헤더 / - 불릿 / *굵게*) → HTML."""
+    import re as _re
+    out, in_ul = [], False
+    for raw in (text or "").split("\n"):
+        ln = raw.rstrip()
+        s = ln.strip()
+        if not s:
+            continue
+        s_html = _esc(s)
+        # *굵게* → <strong> (별표 한 쌍)
+        s_html = _re.sub(r"\*([^*]+)\*", r"<strong>\1</strong>", s_html)
+        if s.startswith("### "):
+            if in_ul:
+                out.append("</ul>"); in_ul = False
+            out.append(f'<h4 class="bfa-h">{s_html[4:].strip()}</h4>')
+        elif s.startswith(("- ", "•")):
+            if not in_ul:
+                out.append('<ul class="bfa-ul">'); in_ul = True
+            item = s_html.lstrip("-• ").strip()
+            out.append(f"<li>{item}</li>")
+        else:
+            if in_ul:
+                out.append("</ul>"); in_ul = False
+            # 들여쓴 분석 줄(→) 등
+            out.append(f'<p class="bfa-p">{s_html}</p>')
+    if in_ul:
+        out.append("</ul>")
+    return "".join(out)
+
+
+def _render_briefing_archive(briefings: list) -> str:
+    """브리핑 아카이브 — 날짜별 주간/일간 리포트 목록(클릭 시 펼침)."""
+    if not briefings:
+        return ""
+    KIND = {"weekly": ("주간", "bfa-weekly"), "daily": ("일간", "bfa-daily")}
+    items = []
+    for b in briefings:
+        kko, kcls = KIND.get(b["kind"], (b["kind"], "bfa-daily"))
+        gen = (b.get("generated_at") or "")[:10]
+        period = ""
+        if b.get("period_from") and b.get("period_to"):
+            period = f'{b["period_from"]} ~ {b["period_to"]}'
+        stats = []
+        if b.get("total") is not None:
+            stats.append(f'{b["total"]}건')
+        if b.get("high") is not None:
+            stats.append(f'HIGH {b["high"]}')
+        stat_str = " · ".join(stats)
+        body = _briefing_md_to_html(b.get("content", ""))
+        items.append(
+            f'<details class="bfa-item">'
+            f'<summary class="bfa-sum">'
+            f'<span class="bfa-badge {kcls}">{kko}</span>'
+            f'<span class="bfa-date">{_esc(gen)}</span>'
+            f'<span class="bfa-period">{_esc(period)}</span>'
+            f'<span class="bfa-stat">{_esc(stat_str)}</span>'
+            f'</summary>'
+            f'<div class="bfa-body">{body}</div>'
+            f'</details>'
+        )
+    return (
+        '<div class="section" id="briefing-archive">'
+        '<div class="section-title">📚 브리핑 아카이브'
+        '<span class="section-sub">지난 주간·일간 브리핑 (클릭하면 전문 펼침)</span>'
+        '</div>'
+        f'<div class="bfa-list">{"".join(items)}</div>'
         '</div>'
     )
 
@@ -1330,6 +1402,29 @@ a:hover { color: var(--gold); }
 .pb-moves a { color: var(--mid); text-decoration: none; }
 .pb-moves a:hover { color: var(--accent); text-decoration: underline; }
 
+/* ── 브리핑 아카이브 ── */
+.bfa-list { display: flex; flex-direction: column; gap: 8px; }
+.bfa-item { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.bfa-sum { list-style: none; cursor: pointer; padding: 11px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bfa-sum::-webkit-details-marker { display: none; }
+.bfa-sum::before { content: '▸'; color: var(--lo); font-size: 12px; transition: transform .15s; }
+.bfa-item[open] .bfa-sum::before { transform: rotate(90deg); }
+.bfa-item[open] .bfa-sum { border-bottom: 1px solid var(--border); }
+.bfa-badge { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; }
+.bfa-weekly { color: #7fb2ff; background: rgba(74,143,212,0.15); border: 1px solid rgba(74,143,212,0.35); }
+.bfa-daily { color: #ffcf8a; background: rgba(224,137,74,0.15); border: 1px solid rgba(224,137,74,0.35); }
+.bfa-date { font-size: 13px; font-weight: 700; color: var(--hi); font-variant-numeric: tabular-nums; }
+.bfa-period { font-size: 11.5px; color: var(--lo); }
+.bfa-stat { font-size: 11.5px; color: var(--mid); margin-left: auto; white-space: nowrap; }
+.bfa-body { padding: 6px 16px 16px; }
+.bfa-h { margin: 14px 0 6px; font-size: 13.5px; color: var(--accent); font-weight: 800; }
+.bfa-h:first-child { margin-top: 4px; }
+.bfa-ul { margin: 0 0 4px; padding-left: 4px; list-style: none; }
+.bfa-ul li { position: relative; padding-left: 14px; margin: 4px 0; font-size: 13px; line-height: 1.6; color: var(--hi); }
+.bfa-ul li::before { content: '·'; position: absolute; left: 3px; color: var(--accent); font-weight: 700; }
+.bfa-p { margin: 3px 0; font-size: 12.5px; color: var(--mid); line-height: 1.6; padding-left: 8px; }
+.bfa-body strong { color: var(--hi); font-weight: 800; }
+
 /* ── 시장 종합 인사이트 (대응/기회/점검 3버킷) ── */
 .market-body { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 800px) { .market-body { grid-template-columns: 1fr; } }
@@ -1952,6 +2047,7 @@ def _build_full_html(
     brand_radar: list = None,
     category_battle: list = None,
     expansion_playbook: list = None,
+    briefing_archive: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -1967,6 +2063,7 @@ def _build_full_html(
     brand_act_html    = _render_brand_activity_bar(brand_act)
     category_battle_html = _render_category_battle(category_battle or [])
     expansion_playbook_html = _render_expansion_playbook(expansion_playbook or [])
+    briefing_archive_html = _render_briefing_archive(briefing_archive or [])
     radar_html        = _render_brand_radar(brand_radar or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
@@ -2117,6 +2214,8 @@ def _build_full_html(
   {category_battle_html}
 
   {expansion_playbook_html}
+
+  {briefing_archive_html}
 
   <!-- 시장 종합 인사이트 + 셀퓨전씨 맞춤 조언 -->
   <div class="section" id="market-section">
@@ -2596,6 +2695,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         category_battle = get_category_battle(session, days=days)
         # 해외 진출 플레이북은 진입 이벤트가 드물어 윈도우를 넓게(최소 90일) 잡아 밀도 확보
         expansion_playbook = get_expansion_playbook(session, days=max(days, 90))
+        briefing_archive = get_briefings_list(session, limit=24)
         try:
             brand_radar = get_brand_radar(session)
         except Exception:
@@ -2711,6 +2811,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brand_radar=brand_radar,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
+        briefing_archive=briefing_archive,
     )
 
     abs_path = os.path.abspath(output_path)

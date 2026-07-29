@@ -128,6 +128,25 @@ def get_expansion_playbook(session: Session, days: int = 90) -> list[dict]:
     return out
 
 
+def get_briefings_list(session: Session, limit: int = 24) -> list[dict]:
+    """보관된 브리핑(주간/일간) 목록 — 대시보드 아카이브용. 최신순. 테이블 없으면 빈 리스트."""
+    try:
+        rows = session.execute(text(f"""
+            SELECT kind, generated_at::text, period_from::date::text, period_to::date::text,
+                   content, total, high, brands, countries, model
+            FROM {DB_SCHEMA}.briefings
+            ORDER BY generated_at DESC
+            LIMIT :lim
+        """), {"lim": max(1, min(limit, 60))}).fetchall()
+    except Exception:
+        return []
+    return [{
+        "kind": r[0], "generated_at": r[1], "period_from": r[2], "period_to": r[3],
+        "content": r[4] or "", "total": r[5], "high": r[6],
+        "brands": r[7], "countries": r[8], "model": r[9],
+    } for r in rows]
+
+
 def get_collection_stats(session: Session, days: int = 30) -> dict:
     """KPI 요약 통계 반환."""
     cutoff = _cutoff_iso(days)
