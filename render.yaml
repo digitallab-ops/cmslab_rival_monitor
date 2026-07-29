@@ -22,3 +22,29 @@ services:
         sync: false
       - key: SLACK_WEBHOOK_URL
         sync: false
+      # MCP 엔드포인트(/mcp) Bearer 보호. 봇 워커와 동일 값으로 설정.
+      - key: MCP_API_KEY
+        sync: false
+
+  # 대화형 Slack 봇 (Socket Mode). HTTP 미서빙 → worker. MCP는 web 서비스 /mcp 조회.
+  - type: worker
+    name: kbeauty-slack-bot
+    runtime: python
+    rootDir: CellFusionC_intel
+    buildCommand: pip install -r requirements.txt
+    startCommand: python slack_bot.py
+    envVars:
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # web 서비스 공개 URL + /mcp  (예: https://kbeauty-intel.onrender.com/mcp)
+      - key: MCP_SERVER_URL
+        sync: false
+      # web 서비스 MCP_API_KEY와 동일 값
+      - key: MCP_API_KEY
+        sync: false
+      - key: SLACK_BOT_MODEL
+        value: gpt-4o
