@@ -154,6 +154,69 @@ class MonitoredBrand(Base):
     note            = Column(Text)
 
 
+class Briefing(Base):
+    """생성된 브리핑 보관 (주간/일간). 기간별 조회·봇 리트리브용."""
+    __tablename__ = "briefings"
+    __table_args__ = (
+        Index("ix_briefings_kind_time", "kind", "generated_at"),
+        {"schema": DB_SCHEMA},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    kind = Column(String(20), nullable=False)            # 'weekly' | 'daily'
+    generated_at = Column(TIMESTAMP(timezone=True), default=datetime.utcnow)
+    period_from = Column(TIMESTAMP(timezone=True))
+    period_to = Column(TIMESTAMP(timezone=True))
+    content = Column(Text, nullable=False)
+    total = Column(Integer)
+    high = Column(Integer)
+    brands = Column(Integer)
+    countries = Column(Integer)
+    model = Column(String(40))
+
+
+def ensure_briefings_table(session) -> None:
+    """briefings 테이블 idempotent 생성 (비파괴적). 저장 전 1회 호출."""
+    from sqlalchemy import text
+    session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.briefings (
+            id BIGSERIAL PRIMARY KEY,
+            kind VARCHAR(20) NOT NULL,
+            generated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            period_from TIMESTAMP WITH TIME ZONE,
+            period_to TIMESTAMP WITH TIME ZONE,
+            content TEXT NOT NULL,
+            total INTEGER, high INTEGER, brands INTEGER, countries INTEGER,
+            model VARCHAR(40)
+        )
+    """))
+    session.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_briefings_kind_time "
+        f"ON {DB_SCHEMA}.briefings (kind, generated_at DESC)"
+    ))
+    session.commit()
+
+
+def save_briefing(session, kind: str, content: str, stats: dict,
+                  period_from=None, period_to=None, model: str = "") -> None:
+    """브리핑 1건 저장 (테이블 없으면 생성)."""
+    from sqlalchemy import text
+    if not (content or "").strip():
+        return
+    ensure_briefings_table(session)
+    session.execute(text(f"""
+        INSERT INTO {DB_SCHEMA}.briefings
+            (kind, period_from, period_to, content, total, high, brands, countries, model)
+        VALUES (:kind, :pf, :pt, :content, :total, :high, :brands, :countries, :model)
+    """), {
+        "kind": kind, "pf": period_from, "pt": period_to, "content": content,
+        "total": stats.get("total"), "high": stats.get("high"),
+        "brands": stats.get("brands"), "countries": stats.get("countries"),
+        "model": model,
+    })
+    session.commit()
+
+
 _engine = None
 
 

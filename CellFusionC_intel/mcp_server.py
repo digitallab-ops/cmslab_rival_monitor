@@ -238,6 +238,44 @@ def get_expansion_playbook_view(country: str = "", days: int = 90) -> dict:
 
 
 @rival_mcp.tool()
+def get_briefings(kind: str = "weekly", limit: int = 1) -> dict:
+    """저장된 브리핑(주간/일간) 전문 반환. '지난주 리포트'·'주간 브리핑 요약' 등에 사용.
+
+    kind: 'weekly'(주간, 기본) 또는 'daily'(일간). 한국어 '주간'/'일간'도 허용.
+    limit: 최근 N건(기본 1=최신). 기간별로 여러 개 보려면 늘림.
+    """
+    k = (kind or "weekly").strip().lower()
+    if k in ("주간", "week", "weekly"):
+        k = "weekly"
+    elif k in ("일간", "day", "daily"):
+        k = "daily"
+    s = get_session()
+    try:
+        rows = s.execute(text(f"""
+            SELECT generated_at::date::text, period_from::date::text, period_to::date::text,
+                   content, total, high, brands, countries, model
+            FROM {DB_SCHEMA}.briefings
+            WHERE kind = :k
+            ORDER BY generated_at DESC
+            LIMIT :lim
+        """), {"k": k, "lim": max(1, min(limit, 8))}).fetchall()
+    except Exception:
+        return {"kind": k, "count": 0,
+                "note": "저장된 브리핑이 아직 없습니다(다음 브리핑 생성 시부터 축적)."}
+    finally:
+        s.close()
+    return {
+        "kind": k, "count": len(rows),
+        "briefings": [
+            {"generated": r[0], "period": f"{r[1]} ~ {r[2]}",
+             "stats": {"total": r[4], "high": r[5], "brands": r[6], "countries": r[7]},
+             "model": r[8], "content": r[3]}
+            for r in rows
+        ],
+    }
+
+
+@rival_mcp.tool()
 def get_brand_momentum_view() -> dict:
     """최근 4주 vs 직전 4주 활동량 기준 급상승/식는 경쟁 브랜드(속도 신호)."""
     s = get_session()

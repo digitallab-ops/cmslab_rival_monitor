@@ -14,7 +14,7 @@ from openai import OpenAI
 from config.settings import OPENAI_API_KEY, DB_SCHEMA
 from config.brands import REGION_MAP
 from notifications.slack import send_weekly_briefing, send_daily_briefing
-from storage.models import get_session
+from storage.models import get_session, save_briefing
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,21 @@ def _build_prompt_by_region(rows, limit: int, detail_len: int) -> str:
         for r in buckets[reg]:
             lines.append(_fmt_line(r, detail_len))
     return "\n".join(lines)
+
+
+def _save(kind: str, content: str, stats: dict, hours: int, model: str) -> None:
+    """생성된 브리핑을 DB에 보관 (실패해도 발송엔 지장 없음)."""
+    if not content or content.startswith("브리핑 생성 오류"):
+        return
+    now = datetime.utcnow()
+    session = get_session()
+    try:
+        save_briefing(session, kind=kind, content=content, stats=stats,
+                      period_from=now - timedelta(hours=hours), period_to=now, model=model)
+    except Exception as e:
+        logger.warning("브리핑 DB 저장 실패(%s): %s", kind, e)
+    finally:
+        session.close()
 
 
 def _openai(model: str, system: str, user: str, max_tokens: int) -> str:
@@ -136,6 +151,7 @@ def generate_weekly_briefing() -> str:
         text_out = f"브리핑 생성 오류: {e}"
 
     logger.info("주간 브리핑 생성 완료 (%d자)", len(text_out))
+    _save(kind="weekly", content=text_out, stats=stats, hours=24 * 7, model="gpt-4o")
     send_weekly_briefing(text_out, stats)
     return text_out
 
@@ -173,5 +189,6 @@ def generate_daily_briefing() -> str:
         text_out = f"브리핑 생성 오류: {e}"
 
     logger.info("일간 브리핑 생성 완료 (%d자)", len(text_out))
+    _save(kind="daily", content=text_out, stats=stats, hours=28, model="gpt-4o-mini")
     send_daily_briefing(text_out, stats)
     return text_out
