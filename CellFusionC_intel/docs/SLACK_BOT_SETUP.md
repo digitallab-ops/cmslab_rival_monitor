@@ -16,9 +16,12 @@
    - `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`
 4. **Event Subscriptions** → Enable → **Subscribe to bot events**에 추가:
    - `app_mention`, `message.im`
-5. **Install to Workspace** (OAuth & Permissions 상단) → 설치 승인.
+   - (Socket Mode면 Request URL 입력 불필요)
+5. **App Home** (Features > App Home) → **Messages Tab ON** → "Allow users to send Slash commands and messages from the messages tab" 체크.
+   - ⚠️ 이걸 켜야 봇에게 **DM**이 작동함.
+6. **Install to Workspace** (OAuth & Permissions 상단) → 설치 승인.
    - 나온 **`xoxb-...`** 토큰 = `SLACK_BOT_TOKEN`.
-6. 봇을 쓸 채널에 초대: 채널에서 `/invite @봇이름`. (DM은 초대 불필요)
+7. 봇을 쓸 채널에 초대: 채널에서 `/invite @봇이름`. (DM은 초대 불필요)
 
 > 발급된 `xapp-...`, `xoxb-...` 두 토큰을 아래 환경변수에 넣으면 끝. (git엔 절대 커밋 금지)
 
