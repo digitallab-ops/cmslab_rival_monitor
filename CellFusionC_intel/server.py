@@ -74,6 +74,13 @@ def _prebuild():
         logger.error("대시보드 사전 생성 실패: %s", e)
 
 
+# ── MCP 서버 (Slack 봇 등 LLM이 데이터를 툴로 조회) ──────────────────────────
+#  기존 쿼리를 감싼 조회 전용 툴을 streamable-http로 /mcp에 노출. stateless 모드.
+from mcp_server import rival_mcp
+
+_mcp_asgi = rival_mcp.streamable_http_app()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 수집 스케줄러는 로컬 PC에서만 실행 (cli.py run).
@@ -81,10 +88,37 @@ async def lifespan(app: FastAPI):
     # 로컬과 이중 수집되어 OpenAI 토큰이 두 배로 소모됨.
     t = threading.Thread(target=_prebuild, daemon=True)
     t.start()
-    yield
+    # 마운트한 MCP 앱의 세션 매니저 task group을 부모 lifespan에서 기동해야 함.
+    async with rival_mcp.session_manager.run():
+        yield
 
 
 app = FastAPI(title="K-뷰티 경쟁사 인텔리전스", docs_url="/docs", lifespan=lifespan)
+
+
+# MCP 엔드포인트 Bearer 인증 (MCP_API_KEY 설정 시에만). 공개 URL 보호.
+_MCP_API_KEY = os.getenv("MCP_API_KEY", "").strip()
+
+
+class _MCPAuthASGI:
+    """마운트된 MCP 앱 앞단 Bearer 인증 래퍼 (키 미설정 시 통과)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and _MCP_API_KEY:
+            headers = dict(scope.get("headers") or [])
+            auth = headers.get(b"authorization", b"").decode()
+            if auth != f"Bearer {_MCP_API_KEY}":
+                await send({"type": "http.response.start", "status": 401,
+                            "headers": [(b"content-type", b"text/plain")]})
+                await send({"type": "http.response.body", "body": b"unauthorized"})
+                return
+        await self.app(scope, receive, send)
+
+
+app.mount("/mcp", _MCPAuthASGI(_mcp_asgi))
 
 
 # ── 대시보드 ────────────────────────────────────────────────────────────────
