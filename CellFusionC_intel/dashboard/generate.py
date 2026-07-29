@@ -2019,6 +2019,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
 
   /* ── Dynamic: markers ── */
   function drawMarkers() {{
+    var labels = [];
     Object.keys(COORDS).forEach(function(cc) {{
       var co = COORDS[cc], st = STATS[cc] || {{total:0,high:0,medium:0}};
       var x = pX(co[1]), y = pY(co[0]);
@@ -2052,17 +2053,38 @@ def _build_worldmap_script(country_stats: dict) -> str:
       ctx.beginPath(); ctx.arc(x, y, base, 0, Math.PI*2);
       ctx.fillStyle = cg; ctx.fill();
 
-      // Label
-      if (W > 440) {{
-        var fs = Math.max(9, Math.round(W * 0.010));
-        ctx.font = 'bold ' + fs + 'px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(0,0,0,0.65)';
-        ctx.fillText(cc, x+0.5, y - base - 3.5);
-        ctx.fillStyle = isH ? '#fca5a5' : isM ? '#fde68a' : '#a5f3fc';
-        ctx.fillText(cc, x, y - base - 4);
-      }}
+      labels.push({{cc: cc, x: x, y: y, base: base, isH: isH, isM: isM,
+                    pri: isH ? st.high * 10 : (isM ? st.medium : 0)}});
     }});
+
+    // ── 라벨: 겹침 회피 (HIGH 우선, 겹치면 아래/위로 비켜서 배치) ──
+    if (W > 440) {{
+      var fs = Math.max(9, Math.round(W * 0.010));
+      ctx.font = 'bold ' + fs + 'px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      labels.sort(function(a, b) {{ return b.pri - a.pri; }});
+      var placed = [];
+      labels.forEach(function(L) {{
+        var w = ctx.measureText(L.cc).width;
+        var cands = [L.y - L.base - 4, L.y + L.base + fs + 2,
+                     L.y - L.base - 4 - (fs + 3), L.y + L.base + fs + 2 + (fs + 3)];
+        var ly = cands[0];
+        for (var ci = 0; ci < cands.length; ci++) {{
+          var yy = cands[ci];
+          var box = [L.x - w/2 - 2, yy - fs, L.x + w/2 + 2, yy + 3];
+          var hit = false;
+          for (var pi = 0; pi < placed.length; pi++) {{
+            var p = placed[pi];
+            if (box[0] < p[2] && box[2] > p[0] && box[1] < p[3] && box[3] > p[1]) {{ hit = true; break; }}
+          }}
+          if (!hit || ci === cands.length - 1) {{ ly = yy; placed.push(box); break; }}
+        }}
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillText(L.cc, L.x + 0.5, ly + 0.5);
+        ctx.fillStyle = L.isH ? '#fca5a5' : L.isM ? '#fde68a' : '#a5f3fc';
+        ctx.fillText(L.cc, L.x, ly);
+      }});
+    }}
   }}
 
   /* ── HUD frame ── */
