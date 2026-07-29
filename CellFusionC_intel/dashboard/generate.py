@@ -603,6 +603,128 @@ def _render_briefing_archive(briefings: list) -> str:
     )
 
 
+def _digest_market_teaser(market_text: str) -> list:
+    """시장 인사이트 첫 섹션의 앞 불릿 2~3개 추출."""
+    if not market_text:
+        return []
+    import re as _re
+    for part in _re.split(r"###\s+", market_text):
+        part = part.strip()
+        if not part:
+            continue
+        nl = part.find("\n")
+        body = part[nl + 1:] if nl >= 0 else ""
+        bullets = [ln.strip().lstrip("-•").strip().replace("**", "")
+                   for ln in body.split("\n") if ln.strip().startswith(("-", "•"))]
+        if bullets:
+            return bullets[:3]
+    return []
+
+
+def _render_overview_digest(stats, momentum, category_battle, expansion_playbook,
+                            high_articles, market_text) -> str:
+    """개요 탭 지도 아래 '종합 요약' — 실데이터 핵심을 한눈에 + 탭 점프."""
+    rising = [m for m in momentum if m.get("signal") == "rising"][:3]
+    cooling = [m for m in momentum if m.get("signal") == "cooling"][:2]
+    cats = [c for c in category_battle if c.get("total")][:3]
+    mkts = [m for m in expansion_playbook if m.get("moves")][:4]
+    moves = (high_articles or [])[:6]
+    teaser = _digest_market_teaser(market_text)
+
+    def jump(tab, label):
+        return f'<button class="dg-jump" onclick="switchTab(\'{tab}\')">{label} →</button>'
+
+    # 1) 모멘텀
+    mo_rows = ""
+    for m in rising:
+        mo_rows += (f'<div class="dg-li"><span class="dg-up">▲</span> '
+                    f'<b>{_esc(m["brand"])}</b> <span class="dg-x">{m["momentum"]}x</span>'
+                    f'<span class="dg-sub">최근 {m["recent_4w"]}건·HIGH {m["recent_high"]}</span></div>')
+    for m in cooling:
+        mo_rows += (f'<div class="dg-li"><span class="dg-down">▼</span> '
+                    f'<b>{_esc(m["brand"])}</b> <span class="dg-x dg-x-dn">{m["momentum"]}x</span>'
+                    f'<span class="dg-sub">최근 {m["recent_4w"]}건</span></div>')
+    mo_rows = mo_rows or '<div class="dg-empty">데이터 축적 중</div>'
+
+    # 2) 카테고리 압박
+    cat_rows = ""
+    for c in cats:
+        lead = (c["moves"][0]["brand"] if c.get("moves") else "?")
+        cat_rows += (f'<div class="dg-li"><b>{_esc(c["category"])}</b> '
+                     f'<span class="dg-cnt">{c["total"]}건 <span class="dg-hi">HIGH {c["high"]}</span></span>'
+                     f'<span class="dg-sub">주도 {_esc(lead)}</span></div>')
+    cat_rows = cat_rows or '<div class="dg-empty">데이터 축적 중</div>'
+
+    # 3) 진출 핫스팟
+    mk_rows = ""
+    for m in mkts:
+        cc = m["country"]
+        flag = COUNTRY_FLAGS.get(cc, "🌐")
+        name = _COUNTRY_KO_LBL.get(cc, cc)
+        chs = " · ".join(m.get("channels", [])[:2]) or "채널 파악중"
+        mk_rows += (f'<div class="dg-li">{flag} <b>{_esc(name)}</b> '
+                    f'<span class="dg-cnt">{m["moves"]}건</span>'
+                    f'<span class="dg-sub">{_esc(chs)}</span></div>')
+    mk_rows = mk_rows or '<div class="dg-empty">데이터 축적 중</div>'
+
+    # 4) 최고 임팩트 무브
+    mv_rows = ""
+    for a in moves:
+        cc = a.get("country", "")
+        flag = COUNTRY_FLAGS.get(cc, "")
+        impc = "dg-imp-high" if a.get("importance") == "high" else "dg-imp-med"
+        impl = "HIGH" if a.get("importance") == "high" else "MED"
+        act = ACTIVITY_LABELS.get(a.get("activity_type", ""), a.get("activity_type", ""))
+        title = _esc((a.get("title_ko") or a.get("title") or "")[:70])
+        url = _esc(a.get("source_url", ""))
+        thtml = f'<a href="{url}" target="_blank" rel="noopener">{title}</a>' if url else title
+        sc = a.get("score") or 0
+        mv_rows += (f'<div class="dg-move"><span class="dg-badge {impc}">{impl}</span>'
+                    f'<span class="dg-sc">{sc}</span>'
+                    f'<span class="dg-mv-b">{_esc(a.get("brand",""))}</span>'
+                    f'<span class="dg-mv-cc">{flag}{_esc(cc)}</span>'
+                    f'<span class="dg-mv-act">{_esc(act)}</span>'
+                    f'<span class="dg-mv-t">{thtml}</span></div>')
+    mv_rows = mv_rows or '<div class="dg-empty">최근 무브먼트 없음</div>'
+
+    # 5) 시장 인사이트 티저
+    teaser_html = ""
+    if teaser:
+        teaser_html = (
+            '<div class="dg-block dg-insight">'
+            '<div class="dg-block-h">🧠 시장 인사이트 한눈' + jump("strategy", "전략 자세히") + '</div>'
+            '<ul class="dg-ins-ul">'
+            + "".join(f"<li>{_esc(t)}</li>" for t in teaser)
+            + '</ul></div>'
+        )
+
+    return f"""
+  <div class="section" id="overview-digest">
+    <div class="section-title">📋 이번 기간 종합 요약
+      <span class="section-sub">핵심만 추렸어요 · 각 항목 '자세히'로 상세 탭 이동</span>
+    </div>
+    <div class="dg-grid">
+      <div class="dg-card">
+        <div class="dg-card-h">📈 브랜드 모멘텀 {jump("brands", "경쟁사")}</div>
+        {mo_rows}
+      </div>
+      <div class="dg-card">
+        <div class="dg-card-h">🥊 우리 카테고리 압박 {jump("strategy", "우리 관점")}</div>
+        {cat_rows}
+      </div>
+      <div class="dg-card">
+        <div class="dg-card-h">🧭 해외 진출 핫스팟 {jump("strategy", "우리 관점")}</div>
+        {mk_rows}
+      </div>
+    </div>
+    <div class="dg-block">
+      <div class="dg-block-h">🔴 이번 기간 최고 임팩트 무브 {jump("feed", "기사 전체")}</div>
+      <div class="dg-moves">{mv_rows}</div>
+    </div>
+    {teaser_html}
+  </div>"""
+
+
 def _render_brand_activity_bar(brand_act: list) -> str:
     """브랜드별 활동 유형 수평 스택바 (Canvas)."""
     if not brand_act:
@@ -989,6 +1111,41 @@ a:hover { color: var(--gold); }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; animation: tabfade 0.18s ease; }
 @keyframes tabfade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ── 개요 종합 요약 (digest) ── */
+.dg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+@media (max-width: 860px) { .dg-grid { grid-template-columns: 1fr; } }
+.dg-card { background: var(--deep); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; }
+.dg-card-h, .dg-block-h { font-size: 13px; font-weight: 800; color: var(--hi); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.dg-jump { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--gold); background: rgba(169,128,63,0.10); border: 1px solid rgba(169,128,63,0.28); border-radius: 999px; padding: 3px 10px; cursor: pointer; font-family: inherit; transition: all .15s; }
+.dg-jump:hover { background: rgba(169,128,63,0.20); }
+.dg-li { display: flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 5px 0; border-top: 1px solid var(--border); color: var(--hi); flex-wrap: wrap; }
+.dg-li:first-of-type { border-top: 0; }
+.dg-li b { font-weight: 800; }
+.dg-up { color: #1f9d6a; font-weight: 800; } .dg-down { color: var(--high); font-weight: 800; }
+.dg-x { color: #1f9d6a; font-weight: 800; font-size: 12px; } .dg-x-dn { color: var(--high); }
+.dg-cnt { font-weight: 700; color: var(--mid); font-variant-numeric: tabular-nums; }
+.dg-hi { color: var(--high); font-weight: 800; }
+.dg-sub { margin-left: auto; font-size: 11px; color: var(--lo); }
+.dg-empty { font-size: 12px; color: var(--lo); font-style: italic; padding: 6px 0; }
+.dg-block { background: var(--deep); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; margin-bottom: 14px; }
+.dg-block:last-child { margin-bottom: 0; }
+.dg-moves { display: flex; flex-direction: column; }
+.dg-move { display: flex; align-items: center; gap: 9px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 12.5px; }
+.dg-move:first-child { border-top: 0; }
+.dg-badge { font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+.dg-imp-high { background: rgba(224,72,63,0.14); color: #d0322b; } .dg-imp-med { background: rgba(224,160,64,0.16); color: #a86a12; }
+.dg-sc { font-weight: 800; color: var(--gold); font-variant-numeric: tabular-nums; min-width: 24px; text-align: right; flex-shrink: 0; }
+.dg-mv-b { font-weight: 800; color: var(--hi); flex-shrink: 0; }
+.dg-mv-cc { color: var(--lo); font-size: 11.5px; flex-shrink: 0; }
+.dg-mv-act { font-size: 10.5px; color: #7a5fc0; font-weight: 700; flex-shrink: 0; }
+.dg-mv-t { color: var(--mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dg-mv-t a { color: var(--mid); } .dg-mv-t a:hover { color: var(--gold); }
+.dg-insight { }
+.dg-ins-ul { margin: 0; padding-left: 2px; list-style: none; }
+.dg-ins-ul li { position: relative; padding-left: 15px; margin: 5px 0; font-size: 13px; line-height: 1.6; color: var(--hi); }
+.dg-ins-ul li::before { content: '▸'; position: absolute; left: 0; color: var(--gold); }
+@media (max-width: 640px) { .dg-mv-t { white-space: normal; } .dg-move { flex-wrap: wrap; } }
 
 .period-row {
   display: flex;
@@ -2082,6 +2239,8 @@ def _build_full_html(
     category_battle: list = None,
     expansion_playbook: list = None,
     briefing_archive: list = None,
+    momentum: list = None,
+    market_text: str = "",
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2098,6 +2257,9 @@ def _build_full_html(
     category_battle_html = _render_category_battle(category_battle or [])
     expansion_playbook_html = _render_expansion_playbook(expansion_playbook or [])
     briefing_archive_html = _render_briefing_archive(briefing_archive or [])
+    overview_digest_html = _render_overview_digest(
+        stats, momentum or [], category_battle or [], expansion_playbook or [],
+        high_articles or [], market_text or "")
     radar_html        = _render_brand_radar(brand_radar or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
@@ -2211,6 +2373,8 @@ def _build_full_html(
     </div>
 
     {worldmap_section}
+
+    {overview_digest_html}
   </div>
 
   <!-- ===== 탭: 경쟁사 ===== -->
@@ -2880,6 +3044,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,
+        momentum=market_momentum,
+        market_text=period_data.get(days, {}).get("market", ""),
     )
 
     abs_path = os.path.abspath(output_path)
