@@ -46,5 +46,6 @@ services:
       # web 서비스 MCP_API_KEY와 동일 값
       - key: MCP_API_KEY
         sync: false
+      # 봇은 질문마다 호출 → 비용 민감 → mini. (주간 브리핑·시장 인사이트만 gpt-4o)
       - key: SLACK_BOT_MODEL
-        value: gpt-4o
+        value: gpt-4o-mini
