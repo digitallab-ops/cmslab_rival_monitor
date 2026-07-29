@@ -128,6 +128,19 @@ def get_expansion_playbook(session: Session, days: int = 90) -> list[dict]:
     return out
 
 
+def get_digest_cache(session: Session, key: str = "__DIGEST7__") -> str:
+    """오늘 생성된 7일 다이제스트 내러티브 캐시 조회(없거나 오래되면 None → 재생성)."""
+    try:
+        row = session.execute(text(f"""
+            SELECT summary FROM {DB_SCHEMA}.brand_insights
+            WHERE brand = :k AND generated_at::date = CURRENT_DATE
+            ORDER BY generated_at DESC LIMIT 1
+        """), {"k": key}).fetchone()
+        return row[0] if row else ""
+    except Exception:
+        return ""
+
+
 def get_briefings_list(session: Session, limit: int = 24) -> list[dict]:
     """보관된 브리핑(주간/일간) 목록 — 대시보드 아카이브용. 최신순. 테이블 없으면 빈 리스트."""
     try:

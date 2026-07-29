@@ -26,6 +26,7 @@ from analytics.queries import (
     get_category_battle,
     get_expansion_playbook,
     get_briefings_list,
+    get_digest_cache,
     get_high_articles,
     get_insights_cache,
     get_insights_cache_by_period,
@@ -622,19 +623,60 @@ def _digest_market_teaser(market_text: str) -> list:
 
 
 def _render_overview_digest(stats, momentum, category_battle, expansion_playbook,
-                            high_articles, market_text) -> str:
-    """개요 탭 지도 아래 '종합 요약' — 실데이터 핵심을 한눈에 + 탭 점프."""
-    rising = [m for m in momentum if m.get("signal") == "rising"][:3]
+                            high_articles, market_text, ref_date="") -> str:
+    """개요 탭 지도 아래 '이번 주(최근 7일) 종합 요약' — 내러티브 중심 + 데이터 + 탭 점프."""
+    rising = [m for m in momentum if m.get("signal") == "rising"][:4]
     cooling = [m for m in momentum if m.get("signal") == "cooling"][:2]
-    cats = [c for c in category_battle if c.get("total")][:3]
+    cats = [c for c in category_battle if c.get("total")][:4]
     mkts = [m for m in expansion_playbook if m.get("moves")][:4]
-    moves = (high_articles or [])[:6]
-    teaser = _digest_market_teaser(market_text)
+    moves = (high_articles or [])[:8]
 
     def jump(tab, label):
         return f'<button class="dg-jump" onclick="switchTab(\'{tab}\')">{label} →</button>'
 
-    # 1) 모멘텀
+    # KPI 라인 (최근 7일)
+    kpi = (f'<div class="dg-kpi">'
+           f'<span>📥 수집 <b>{stats.get("total", 0)}</b></span>'
+           f'<span>🔴 HIGH <b>{stats.get("high", 0)}</b></span>'
+           f'<span>🏷 브랜드 <b>{stats.get("brands_active", 0)}</b></span>'
+           f'<span>🌐 국가 <b>{stats.get("countries_active", 0)}</b></span>'
+           f'</div>')
+
+    # 1) 시장 인사이트 내러티브 (gpt-4o, 주간 브리핑급) — 센터피스
+    narr_html = ""
+    if market_text.strip():
+        narr_html = (
+            '<div class="dg-block dg-narr">'
+            '<div class="dg-block-h">🧠 이번 주 시장 인사이트 &amp; 셀퓨전씨 전략 제언'
+            + jump("strategy", "전략 탭 자세히") + '</div>'
+            '<div class="dg-narr-body">' + _briefing_md_to_html(market_text) + '</div>'
+            '</div>'
+        )
+
+    # 2) 이번 주 최고 임팩트 무브 (top 8, details 포함)
+    mv_rows = ""
+    for a in moves:
+        cc = a.get("country", "")
+        flag = COUNTRY_FLAGS.get(cc, "")
+        impc = "dg-imp-high" if a.get("importance") == "high" else "dg-imp-med"
+        impl = "HIGH" if a.get("importance") == "high" else "MED"
+        act = ACTIVITY_LABELS.get(a.get("activity_type", ""), a.get("activity_type", ""))
+        title = _esc((a.get("title_ko") or a.get("title") or "")[:80])
+        url = _esc(a.get("source_url", ""))
+        thtml = f'<a href="{url}" target="_blank" rel="noopener">{title}</a>' if url else title
+        sc = a.get("score") or 0
+        det = _esc((a.get("details") or "")[:70])
+        det_html = f'<div class="dg-mv-det">{det}</div>' if det else ""
+        mv_rows += (f'<div class="dg-move2"><div class="dg-move2-top">'
+                    f'<span class="dg-badge {impc}">{impl}</span>'
+                    f'<span class="dg-sc">{sc}점</span>'
+                    f'<span class="dg-mv-b">{_esc(a.get("brand",""))}</span>'
+                    f'<span class="dg-mv-cc">{flag}{_esc(cc)}</span>'
+                    f'<span class="dg-mv-act">{_esc(act)}</span></div>'
+                    f'<div class="dg-mv-t">{thtml}</div>{det_html}</div>')
+    mv_rows = mv_rows or '<div class="dg-empty">이번 주 무브먼트 없음</div>'
+
+    # 3) 모멘텀 / 카테고리 / 핫스팟 미니 그리드
     mo_rows = ""
     for m in rising:
         mo_rows += (f'<div class="dg-li"><span class="dg-up">▲</span> '
@@ -646,7 +688,6 @@ def _render_overview_digest(stats, momentum, category_battle, expansion_playbook
                     f'<span class="dg-sub">최근 {m["recent_4w"]}건</span></div>')
     mo_rows = mo_rows or '<div class="dg-empty">데이터 축적 중</div>'
 
-    # 2) 카테고리 압박
     cat_rows = ""
     for c in cats:
         lead = (c["moves"][0]["brand"] if c.get("moves") else "?")
@@ -655,7 +696,6 @@ def _render_overview_digest(stats, momentum, category_battle, expansion_playbook
                      f'<span class="dg-sub">주도 {_esc(lead)}</span></div>')
     cat_rows = cat_rows or '<div class="dg-empty">데이터 축적 중</div>'
 
-    # 3) 진출 핫스팟
     mk_rows = ""
     for m in mkts:
         cc = m["country"]
@@ -667,41 +707,17 @@ def _render_overview_digest(stats, momentum, category_battle, expansion_playbook
                     f'<span class="dg-sub">{_esc(chs)}</span></div>')
     mk_rows = mk_rows or '<div class="dg-empty">데이터 축적 중</div>'
 
-    # 4) 최고 임팩트 무브
-    mv_rows = ""
-    for a in moves:
-        cc = a.get("country", "")
-        flag = COUNTRY_FLAGS.get(cc, "")
-        impc = "dg-imp-high" if a.get("importance") == "high" else "dg-imp-med"
-        impl = "HIGH" if a.get("importance") == "high" else "MED"
-        act = ACTIVITY_LABELS.get(a.get("activity_type", ""), a.get("activity_type", ""))
-        title = _esc((a.get("title_ko") or a.get("title") or "")[:70])
-        url = _esc(a.get("source_url", ""))
-        thtml = f'<a href="{url}" target="_blank" rel="noopener">{title}</a>' if url else title
-        sc = a.get("score") or 0
-        mv_rows += (f'<div class="dg-move"><span class="dg-badge {impc}">{impl}</span>'
-                    f'<span class="dg-sc">{sc}</span>'
-                    f'<span class="dg-mv-b">{_esc(a.get("brand",""))}</span>'
-                    f'<span class="dg-mv-cc">{flag}{_esc(cc)}</span>'
-                    f'<span class="dg-mv-act">{_esc(act)}</span>'
-                    f'<span class="dg-mv-t">{thtml}</span></div>')
-    mv_rows = mv_rows or '<div class="dg-empty">최근 무브먼트 없음</div>'
-
-    # 5) 시장 인사이트 티저
-    teaser_html = ""
-    if teaser:
-        teaser_html = (
-            '<div class="dg-block dg-insight">'
-            '<div class="dg-block-h">🧠 시장 인사이트 한눈' + jump("strategy", "전략 자세히") + '</div>'
-            '<ul class="dg-ins-ul">'
-            + "".join(f"<li>{_esc(t)}</li>" for t in teaser)
-            + '</ul></div>'
-        )
-
+    ref = f' · 기준 {_esc(ref_date)}' if ref_date else ""
     return f"""
   <div class="section" id="overview-digest">
-    <div class="section-title">📋 이번 기간 종합 요약
-      <span class="section-sub">핵심만 추렸어요 · 각 항목 '자세히'로 상세 탭 이동</span>
+    <div class="section-title">📋 이번 주 종합 요약
+      <span class="section-sub">최근 7일{ref} · 매일 수집분 반영 · 항목별 '자세히'로 상세 탭 이동</span>
+    </div>
+    {kpi}
+    {narr_html}
+    <div class="dg-block">
+      <div class="dg-block-h">🔴 이번 주 최고 임팩트 무브 {jump("feed", "기사 전체")}</div>
+      <div class="dg-moves">{mv_rows}</div>
     </div>
     <div class="dg-grid">
       <div class="dg-card">
@@ -717,11 +733,6 @@ def _render_overview_digest(stats, momentum, category_battle, expansion_playbook
         {mk_rows}
       </div>
     </div>
-    <div class="dg-block">
-      <div class="dg-block-h">🔴 이번 기간 최고 임팩트 무브 {jump("feed", "기사 전체")}</div>
-      <div class="dg-moves">{mv_rows}</div>
-    </div>
-    {teaser_html}
   </div>"""
 
 
@@ -1145,6 +1156,19 @@ a:hover { color: var(--gold); }
 .dg-ins-ul { margin: 0; padding-left: 2px; list-style: none; }
 .dg-ins-ul li { position: relative; padding-left: 15px; margin: 5px 0; font-size: 13px; line-height: 1.6; color: var(--hi); }
 .dg-ins-ul li::before { content: '▸'; position: absolute; left: 0; color: var(--gold); }
+/* digest v2: KPI 라인 · 내러티브 · 무브 카드 */
+.dg-kpi { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; color: var(--mid); }
+.dg-kpi b { color: var(--hi); font-weight: 800; font-variant-numeric: tabular-nums; margin-left: 2px; }
+.dg-narr-body .bfa-h { font-size: 13px; color: var(--gold); margin: 15px 0 6px; letter-spacing: 0.02em; }
+.dg-narr-body .bfa-h:first-child { margin-top: 2px; }
+.dg-narr-body .bfa-ul li { font-size: 13px; line-height: 1.68; margin: 5px 0; }
+.dg-narr-body .bfa-p { font-size: 12.5px; }
+.dg-move2 { padding: 9px 0; border-top: 1px solid var(--border); }
+.dg-move2:first-child { border-top: 0; }
+.dg-move2-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.dg-move2 .dg-mv-t { white-space: normal; margin-top: 4px; color: var(--hi); font-weight: 500; font-size: 13px; line-height: 1.5; }
+.dg-move2 .dg-mv-t a { color: var(--hi); } .dg-move2 .dg-mv-t a:hover { color: var(--gold); }
+.dg-mv-det { font-size: 12px; color: var(--lo); margin-top: 3px; line-height: 1.5; }
 @media (max-width: 640px) { .dg-mv-t { white-space: normal; } .dg-move { flex-wrap: wrap; } }
 
 .period-row {
@@ -1757,11 +1781,12 @@ _WORLDMAP_CSS = """
 .wm-legend-overlay {
   position: absolute;
   top: 10px; right: 12px;
-  display: flex; flex-direction: column; gap: 4px; z-index: 5;
-  background: rgba(5,12,24,0.80);
-  padding: 6px 10px;
-  border-radius: 4px;
-  border: 1px solid rgba(30,80,160,0.25);
+  display: flex; flex-direction: column; gap: 5px; z-index: 5;
+  background: rgba(5,12,24,0.85);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(30,80,160,0.30);
+  line-height: 1.5;
 }
 .wm-lo-row { display: flex; gap: 10px; }
 .wm-lo-item {
@@ -2263,6 +2288,7 @@ def _build_full_html(
     briefing_archive: list = None,
     momentum: list = None,
     market_text: str = "",
+    digest: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2279,9 +2305,11 @@ def _build_full_html(
     category_battle_html = _render_category_battle(category_battle or [])
     expansion_playbook_html = _render_expansion_playbook(expansion_playbook or [])
     briefing_archive_html = _render_briefing_archive(briefing_archive or [])
+    _dg = digest or {}
     overview_digest_html = _render_overview_digest(
-        stats, momentum or [], category_battle or [], expansion_playbook or [],
-        high_articles or [], market_text or "")
+        _dg.get("stats") or stats, momentum or [], _dg.get("cat") or [],
+        _dg.get("expansion") or [], _dg.get("high") or [], _dg.get("market") or "",
+        _dg.get("ref_date") or "")
     radar_html        = _render_brand_radar(brand_radar or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
@@ -2960,6 +2988,12 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception:
             market_momentum = []
 
+        # ── 개요 '이번 주 종합 요약' 전용 데이터 (기간 토글과 무관, 최근 7일) ──
+        DG_DAYS = 7
+        dg_stats = get_collection_stats(session, days=DG_DAYS)
+        dg_cat   = get_category_battle(session, days=DG_DAYS)
+        dg_raw   = get_brand_insights_raw(session, days=DG_DAYS)
+
         # 기간 선택기용 멀티 기간 데이터 (30/60/90일 + 현재 days)
         preset_periods = sorted(set([30, 60, 90, days]))
         _today = datetime.utcnow().date()
@@ -2972,6 +3006,10 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             a for a in _all_articles
             if _fmt_date(a.get("published_date", "")) >= (_today - timedelta(days=days)).isoformat()
         ] if days < max_period else _all_articles
+
+        # 다이제스트용 최근 7일 기사 (score순은 _all_articles 정렬 유지)
+        _dg_cut = (_today - timedelta(days=DG_DAYS)).isoformat()
+        dg_high = [a for a in _all_articles if _fmt_date(a.get("published_date", "")) >= _dg_cut]
 
         period_data: dict = {}
         period_insights_raw: dict = {}
@@ -3050,6 +3088,21 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                         "summary": market, "top_act": None, "top_pct": 0, "high_pct": 0.0,
                     })
             period_data[p]["market"] = market
+
+        # ── 개요 다이제스트용 7일 시장 내러티브 (하루 1회 캐시) ──
+        dg_market = get_digest_cache(insight_session, "__DIGEST7__")
+        if not dg_market:
+            try:
+                dg_market = generate_market_overview(
+                    dg_raw, momentum=market_momentum, category_battle=dg_cat)
+            except Exception:
+                dg_market = ""
+            if dg_market:
+                _dg_from = datetime.utcnow() - timedelta(days=DG_DAYS)
+                _dg_to = datetime.utcnow()
+                upsert_insight_cache(insight_session, "__DIGEST7__", _dg_from, _dg_to, {
+                    "summary": dg_market, "top_act": None, "top_pct": 0, "high_pct": 0.0,
+                })
     finally:
         insight_session.close()
 
@@ -3068,6 +3121,12 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         briefing_archive=briefing_archive,
         momentum=market_momentum,
         market_text=period_data.get(days, {}).get("market", ""),
+        digest={
+            "stats": dg_stats, "cat": dg_cat, "high": dg_high,
+            "expansion": expansion_playbook, "market": dg_market,
+            "ref_date": (datetime.utcnow() + timedelta(hours=9)).strftime("%-m/%-d")
+                        if os.name != "nt" else (datetime.utcnow() + timedelta(hours=9)).strftime("%#m/%#d"),
+        },
     )
 
     abs_path = os.path.abspath(output_path)
