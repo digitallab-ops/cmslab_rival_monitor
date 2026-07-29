@@ -138,18 +138,73 @@ def notify_collection_summary(label: str, agg: dict) -> bool:
     return _post(payload)
 
 
-def _text_sections(text: str, limit: int = 2900) -> list:
-    """긴 텍스트를 Slack section 블록(≤3000자)들로 분할."""
-    blocks, buf = [], ""
-    for para in (text or "").split("\n"):
-        if len(buf) + len(para) + 1 > limit:
-            if buf:
-                blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": buf}})
-            buf = para
+import re
+
+# 섹션 라벨 → 이모지 (부분일치)
+_SECTION_EMOJI = [
+    ("Executive", "🎯"), ("권역", "🌍"), ("무브먼트", "🔥"), ("Watchlist", "👀"),
+    ("Implication", "🧭"), ("어제의 핵심", "📰"), ("셀퓨전씨", "🧴"), ("종합", "🧠"),
+]
+
+
+def _sec_emoji(label: str) -> str:
+    for k, e in _SECTION_EMOJI:
+        if k in label:
+            return e
+    return "▪️"
+
+
+def _clean_body(body: str) -> str:
+    """마크다운 본문 → 슬랙 mrkdwn. `- `→`• `, `**`→`*`, 빈 줄 정리, 분석 줄 들여쓰기 유지."""
+    out = []
+    for ln in body.split("\n"):
+        s = ln.rstrip()
+        if not s.strip():
+            continue
+        s = s.replace("**", "*")               # 슬랙 볼드는 별표 하나
+        st = s.lstrip()
+        indent = len(s) - len(st)
+        if st.startswith("- "):
+            out.append("• " + st[2:])
+        elif st.startswith(("→", "↳")) or indent >= 2:
+            out.append("    " + st)             # 무브먼트 2번째 줄(분석) 들여쓰기
         else:
-            buf = f"{buf}\n{para}" if buf else para
+            out.append(st)
+    return "\n".join(out)
+
+
+def _chunk(text: str, limit: int) -> list:
+    """줄 단위로 limit 이하 청크 분할."""
+    chunks, buf = [], ""
+    for ln in text.split("\n"):
+        if len(buf) + len(ln) + 1 > limit:
+            if buf:
+                chunks.append(buf)
+            buf = ln
+        else:
+            buf = f"{buf}\n{ln}" if buf else ln
     if buf:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": buf}})
+        chunks.append(buf)
+    return chunks
+
+
+def _briefing_blocks(text: str, limit: int = 2900) -> list:
+    """`### 섹션` 마크다운 → 섹션별 (구분선 + 볼드 헤더 + 본문) 슬랙 블록."""
+    parts = re.split(r"###\s+", text or "")
+    blocks = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        nl = part.find("\n")
+        label = (part if nl == -1 else part[:nl]).strip()
+        body = "" if nl == -1 else part[nl + 1:].strip()
+        header = f"*{_sec_emoji(label)}  {label}*"
+        body_clean = _clean_body(body)
+        content = header + (f"\n{body_clean}" if body_clean else "")
+        blocks.append({"type": "divider"})
+        for c in _chunk(content, limit):
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": c}})
     return blocks
 
 
@@ -159,17 +214,12 @@ def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
         "text": "📊 CellFusionC 경쟁사 주간 인텔리전스 브리핑",
         "blocks": [
             {"type": "header", "text": {"type": "plain_text", "text": "📊 경쟁사 주간 인텔리전스 브리핑"}},
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*총 수집*\n{stats.get('total',0)}건"},
-                    {"type": "mrkdwn", "text": f"*High Importance*\n{stats.get('high',0)}건"},
-                    {"type": "mrkdwn", "text": f"*활성 브랜드*\n{stats.get('brands',0)}개"},
-                    {"type": "mrkdwn", "text": f"*커버 국가*\n{stats.get('countries',0)}개"},
-                ],
-            },
-            {"type": "divider"},
-            *_text_sections(briefing_text),
+            {"type": "context", "elements": [
+                {"type": "mrkdwn",
+                 "text": (f"🗓 지난 7일  ·  📥 총 *{stats.get('total',0)}*건  ·  "
+                          f"🔴 HIGH *{stats.get('high',0)}*  ·  🏷 브랜드 *{stats.get('brands',0)}*  ·  "
+                          f"🌐 국가 *{stats.get('countries',0)}*")}]},
+            *_briefing_blocks(briefing_text),
         ],
     }
     return _post(payload)
@@ -182,10 +232,9 @@ def send_daily_briefing(briefing_text: str, stats: dict) -> bool:
         "blocks": [
             {"type": "header", "text": {"type": "plain_text", "text": "🌅 경쟁사 일간 브리핑 (어제 수집분)"}},
             {"type": "context", "elements": [
-                {"type": "mrkdwn", "text": f"신규 {stats.get('total',0)}건 · HIGH {stats.get('high',0)}건 · "
-                                           f"브랜드 {stats.get('brands',0)} · 국가 {stats.get('countries',0)}"}]},
-            {"type": "divider"},
-            *_text_sections(briefing_text),
+                {"type": "mrkdwn", "text": f"📥 신규 *{stats.get('total',0)}*건  ·  🔴 HIGH *{stats.get('high',0)}*  ·  "
+                                           f"🏷 브랜드 *{stats.get('brands',0)}*  ·  🌐 국가 *{stats.get('countries',0)}*"}]},
+            *_briefing_blocks(briefing_text),
         ],
     }
     return _post(payload)
