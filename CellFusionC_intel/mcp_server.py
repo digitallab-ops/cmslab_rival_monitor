@@ -11,6 +11,7 @@ FastAPI(server.py)에 streamable-http로 마운트되며(/mcp), stateless 모드
 import logging
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import text
 
 from storage.models import get_session
@@ -31,6 +32,9 @@ rival_mcp = FastMCP(
     stateless_http=True,
     json_response=True,
     streamable_http_path="/",
+    # Render 프록시 뒤에서 Host 헤더가 도메인이라 기본 DNS 리바인딩 보호가 421 거부함.
+    # 프록시 신뢰 + 자체 Bearer(MCP_API_KEY) 보호로 대체 → 보호 비활성.
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     instructions=(
         "씨엠에스랩(더마 선케어 브랜드 '셀퓨전씨')의 K-뷰티 경쟁사 인텔리전스 데이터.\n"
         "경쟁 브랜드의 해외 활동(신시장 진출·유통 채널·신제품·인플루언서·투자 등)을 "
