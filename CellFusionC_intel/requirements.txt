@@ -15,5 +15,6 @@ python-multipart>=0.0.9
 # MCP 서버 (Slack 봇 데이터 툴). mcp 2.0은 starlette 1.x를 끌어와 FastAPI와 충돌 → 1.x 핀.
 mcp>=1.9,<2.0
 starlette>=0.40,<0.42
-# Slack 봇 (Socket Mode)
+# Slack 봇 (Socket Mode) — aiohttp는 slack-bolt async/Socket Mode 런타임 의존성
 slack-bolt>=1.18
+aiohttp>=3.9
