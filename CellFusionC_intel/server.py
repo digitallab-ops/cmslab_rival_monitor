@@ -6,6 +6,7 @@ K-뷰티 경쟁사 인텔리전스 — FastAPI 서버
     uvicorn server:app --host 0.0.0.0 --port 8000  # 배포
 """
 
+import asyncio
 import html as html_lib
 import logging
 import os
@@ -81,6 +82,33 @@ from mcp_server import rival_mcp
 _mcp_asgi = rival_mcp.streamable_http_app()
 
 
+def _start_slack_bot_inprocess():
+    """Slack 봇을 web 프로세스 내 백그라운드 태스크로 기동 (토큰 있을 때만).
+
+    별도 워커/추가 비용 없이 web 상시가동에 얹혀 24/7. 봇은 같은 프로세스의
+    MCP 마운트를 localhost로 호출(공개 URL 왕복 회피). 토큰 없으면 조용히 스킵.
+    """
+    bot_token = os.getenv("SLACK_BOT_TOKEN", "").strip()
+    app_token = os.getenv("SLACK_APP_TOKEN", "").strip()
+    if not (bot_token and app_token):
+        logger.info("Slack 봇 토큰 미설정 → 봇 미기동 (대시보드/MCP만 실행)")
+        return None
+    try:
+        port = os.getenv("PORT", "8000")
+        # 같은 프로세스의 MCP를 localhost로 조회하도록 강제 (import 전에 설정)
+        os.environ["MCP_SERVER_URL"] = f"http://127.0.0.1:{port}/mcp"
+        import slack_bot
+        from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+        handler = AsyncSocketModeHandler(slack_bot.app, app_token)
+        task = asyncio.create_task(handler.start_async())
+        logger.info("Slack 봇 in-process 기동 (model=%s, mcp=%s)",
+                    slack_bot.MODEL, os.environ["MCP_SERVER_URL"])
+        return task
+    except Exception as e:
+        logger.error("Slack 봇 기동 실패(무시하고 web 계속): %s", e)
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 수집 스케줄러는 로컬 PC에서만 실행 (cli.py run).
@@ -90,7 +118,12 @@ async def lifespan(app: FastAPI):
     t.start()
     # 마운트한 MCP 앱의 세션 매니저 task group을 부모 lifespan에서 기동해야 함.
     async with rival_mcp.session_manager.run():
-        yield
+        bot_task = _start_slack_bot_inprocess()   # Slack 봇 in-process 기동
+        try:
+            yield
+        finally:
+            if bot_task and not bot_task.done():
+                bot_task.cancel()
 
 
 app = FastAPI(title="K-뷰티 경쟁사 인텔리전스", docs_url="/docs", lifespan=lifespan)

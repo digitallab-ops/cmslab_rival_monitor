@@ -22,30 +22,16 @@ services:
         sync: false
       - key: SLACK_WEBHOOK_URL
         sync: false
-      # MCP 엔드포인트(/mcp) Bearer 보호. 봇 워커와 동일 값으로 설정.
+      # MCP 엔드포인트(/mcp) Bearer 보호.
       - key: MCP_API_KEY
         sync: false
-
-  # 대화형 Slack 봇 (Socket Mode). HTTP 미서빙 → worker. MCP는 web 서비스 /mcp 조회.
-  - type: worker
-    name: kbeauty-slack-bot
-    runtime: python
-    rootDir: CellFusionC_intel
-    buildCommand: pip install -r requirements.txt
-    startCommand: python slack_bot.py
-    envVars:
+      # ── 대화형 Slack 봇 (Socket Mode) — web 프로세스 내 in-process 기동 ──
+      # 별도 워커 없이 web 상시가동에 얹혀 24/7. MCP는 자기 자신(localhost) 조회.
+      # web 서비스 env에 아래 두 토큰만 추가하면 봇이 자동 기동됨.
       - key: SLACK_BOT_TOKEN
         sync: false
       - key: SLACK_APP_TOKEN
         sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      # web 서비스 공개 URL + /mcp  (예: https://kbeauty-intel.onrender.com/mcp)
-      - key: MCP_SERVER_URL
-        sync: false
-      # web 서비스 MCP_API_KEY와 동일 값
-      - key: MCP_API_KEY
-        sync: false
-      # 봇은 질문마다 호출 → 비용 민감 → mini. (주간 브리핑·시장 인사이트만 gpt-4o)
+      # 봇 모델: 질문마다 호출 → 비용 위해 mini (브리핑·인사이트만 gpt-4o)
       - key: SLACK_BOT_MODEL
         value: gpt-4o-mini
