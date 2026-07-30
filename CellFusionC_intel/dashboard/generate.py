@@ -1984,9 +1984,8 @@ def _build_worldmap_script(country_stats: dict) -> str:
   var off  = document.createElement('canvas').getContext('2d');
   var activeCC = [];
 
-  // 너덜너덜한 북극권 해안(캐나다 북부 군도·그린란드·북시베리아)을 뷰포트 위로 크롭.
-  // 위도 62N까지만 → 상단이 대륙을 매끄럽게 가로지름. 추적 국가는 모두 위도 56 이하라 표시 영향 없음.
-  var LAT_TOP = 62, LAT_BOT = -56;
+  // 전 위도(-90~90) 전개 — 대륙 안 자름 (원본 방식 복원).
+  var LAT_TOP = 90, LAT_BOT = -90;
   function pX(lon) {{ return (lon + 180) / 360 * W; }}
   function pY(lat) {{ return (LAT_TOP - lat) / (LAT_TOP - LAT_BOT) * H; }}
 
@@ -2003,20 +2002,36 @@ def _build_worldmap_script(country_stats: dict) -> str:
     oc.height = H * DPR;
     off.setTransform(DPR, 0, 0, DPR, 0, 0);
 
-    // Ocean (더 어둡게 — 땅과 대비 강화)
+    // Ocean
     var bg = off.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#05080f'); bg.addColorStop(1, '#03060c');
+    bg.addColorStop(0, '#060c1a'); bg.addColorStop(1, '#030810');
     off.fillStyle = bg; off.fillRect(0, 0, W, H);
 
-    // Land polygons (밝게 — 바다와 확실히 구분되게)
+    // Dot intersections at grid nodes
+    off.fillStyle = 'rgba(80,140,230,0.2)';
+    for (var glon = -180; glon <= 180; glon += 30)
+      for (var glat = -90; glat <= 90; glat += 30) {{
+        off.beginPath(); off.arc(pX(glon), pY(glat), 0.9, 0, Math.PI*2); off.fill();
+      }}
+
+    // Grid
+    off.strokeStyle = 'rgba(50,110,210,0.07)'; off.lineWidth = 0.5;
+    [-60,-30,30,60].forEach(function(lat) {{
+      off.beginPath(); off.moveTo(0,pY(lat)); off.lineTo(W,pY(lat)); off.stroke();
+    }});
+    [-120,-60,60,120].forEach(function(lon) {{
+      off.beginPath(); off.moveTo(pX(lon),0); off.lineTo(pX(lon),H); off.stroke();
+    }});
+
+    // Land polygons (은은하게 — 원본)
     LAND.forEach(function(poly) {{
       off.beginPath();
       poly.forEach(function(pt, i) {{
         i === 0 ? off.moveTo(pX(pt[0]),pY(pt[1])) : off.lineTo(pX(pt[0]),pY(pt[1]));
       }});
       off.closePath();
-      off.fillStyle = '#213a56'; off.fill();
-      off.strokeStyle = '#38597f'; off.lineWidth = 0.8; off.stroke();
+      off.fillStyle = '#0d1c2e'; off.fill();
+      off.strokeStyle = '#17304d'; off.lineWidth = 0.7; off.stroke();
     }});
 
     // Country signal glows (radial blobs on land)
@@ -2151,7 +2166,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
     // Blit static layer
     ctx.save(); ctx.setTransform(1,0,0,1,0,0);
     ctx.drawImage(off.canvas, 0, 0); ctx.restore();
-    drawMarkers(); drawHUD();
+    drawArcs(); drawMarkers(); drawHUD();
     tick++;
     animId = requestAnimationFrame(loop);
   }}
