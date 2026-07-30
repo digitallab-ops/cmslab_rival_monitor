@@ -161,12 +161,17 @@ async def health():
     return {"status": "ok", "ready": bool(_dashboard_html)}
 
 
+# 브라우저가 옛 대시보드를 캐시해 갱신이 안 보이는 문제 방지 — 항상 최신 제공.
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+             "Pragma": "no-cache", "Expires": "0"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     """메인 대시보드."""
     if not _dashboard_html:
-        return HTMLResponse(_LOADING_PAGE, status_code=200)
-    return _dashboard_html
+        return HTMLResponse(_LOADING_PAGE, status_code=200, headers=_NO_CACHE)
+    return HTMLResponse(_dashboard_html, headers=_NO_CACHE)
 
 
 @app.post("/api/refresh")
