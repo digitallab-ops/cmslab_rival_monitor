@@ -625,11 +625,20 @@ def _digest_market_teaser(market_text: str) -> list:
 def _render_overview_digest(stats, momentum, category_battle, expansion_playbook,
                             high_articles, market_text, ref_date="") -> str:
     """개요 탭 지도 아래 '이번 주(최근 7일) 종합 요약' — 내러티브 중심 + 데이터 + 탭 점프."""
+    import re as _re
     rising = [m for m in momentum if m.get("signal") == "rising"][:4]
     cooling = [m for m in momentum if m.get("signal") == "cooling"][:2]
     cats = [c for c in category_battle if c.get("total")][:4]
     mkts = [m for m in expansion_playbook if m.get("moves")][:4]
-    moves = (high_articles or [])[:8]
+    # 최고 무브: 같은 사건 반복 방지 — (브랜드·국가·활동) 조합당 1건
+    _seen, moves = set(), []
+    for a in (high_articles or []):
+        k = (a.get("brand", ""), a.get("country", ""), a.get("activity_type", ""))
+        if k in _seen:
+            continue
+        _seen.add(k); moves.append(a)
+        if len(moves) >= 6:
+            break
 
     def jump(tab, label):
         return f'<button class="dg-jump" onclick="switchTab(\'{tab}\')">{label} →</button>'
@@ -642,16 +651,39 @@ def _render_overview_digest(stats, momentum, category_battle, expansion_playbook
            f'<span>🌐 국가 <b>{stats.get("countries_active", 0)}</b></span>'
            f'</div>')
 
-    # 1) 시장 인사이트 내러티브 (gpt-4o, 주간 브리핑급) — 센터피스
+    # 1) 시장 인사이트 → 3색 컬럼(🚨대응/🎯기회/👀점검)으로 직관화
     narr_html = ""
     if market_text.strip():
-        narr_html = (
-            '<div class="dg-block dg-narr">'
-            '<div class="dg-block-h">🧠 이번 주 시장 인사이트 &amp; 셀퓨전씨 전략 제언'
-            + jump("strategy", "전략 탭 자세히") + '</div>'
-            '<div class="dg-narr-body">' + _briefing_md_to_html(market_text) + '</div>'
-            '</div>'
-        )
+        cols = []
+        for part in _re.split(r"###\s+", market_text):
+            part = part.strip()
+            if not part:
+                continue
+            nl = part.find("\n")
+            label = (part if nl < 0 else part[:nl]).strip()
+            body = "" if nl < 0 else part[nl + 1:]
+            bullets = [ln.strip().lstrip("-•").strip().replace("**", "")
+                       for ln in body.split("\n") if ln.strip().startswith(("-", "•"))]
+            if not bullets:
+                continue
+            if "대응" in label:
+                kind, icon = "respond", "🚨"
+            elif "기회" in label or "확장" in label:
+                kind, icon = "opportunity", "🎯"
+            else:
+                kind, icon = "check", "👀"
+            lis = "".join(f"<li>{_esc(b)}</li>" for b in bullets[:3])
+            cols.append(f'<div class="dg-col dg-col-{kind}">'
+                        f'<div class="dg-col-h">{icon} {_esc(label)}</div>'
+                        f'<ul>{lis}</ul></div>')
+        if cols:
+            narr_html = (
+                '<div class="dg-block dg-narr">'
+                '<div class="dg-block-h">🧠 이번 주 시장 인사이트 · 셀퓨전씨 액션'
+                + jump("strategy", "전략 탭 자세히") + '</div>'
+                '<div class="dg-cols">' + "".join(cols) + '</div>'
+                '</div>'
+            )
 
     # 2) 이번 주 최고 임팩트 무브 (top 8, details 포함)
     mv_rows = ""
@@ -1159,10 +1191,20 @@ a:hover { color: var(--gold); }
 /* digest v2: KPI 라인 · 내러티브 · 무브 카드 */
 .dg-kpi { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; font-size: 13px; color: var(--mid); }
 .dg-kpi b { color: var(--hi); font-weight: 800; font-variant-numeric: tabular-nums; margin-left: 2px; }
-.dg-narr-body .bfa-h { font-size: 13px; color: var(--gold); margin: 15px 0 6px; letter-spacing: 0.02em; }
-.dg-narr-body .bfa-h:first-child { margin-top: 2px; }
-.dg-narr-body .bfa-ul li { font-size: 13px; line-height: 1.68; margin: 5px 0; }
-.dg-narr-body .bfa-p { font-size: 12.5px; }
+/* 3색 인사이트 컬럼 */
+.dg-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 860px) { .dg-cols { grid-template-columns: 1fr; } }
+.dg-col { border-radius: 10px; padding: 13px 15px; border: 1px solid var(--border); }
+.dg-col-respond { background: rgba(224,72,63,0.06); border-color: rgba(224,72,63,0.22); }
+.dg-col-opportunity { background: rgba(31,157,106,0.06); border-color: rgba(31,157,106,0.22); }
+.dg-col-check { background: rgba(169,128,63,0.06); border-color: rgba(169,128,63,0.22); }
+.dg-col-h { font-size: 12.5px; font-weight: 800; margin-bottom: 9px; letter-spacing: 0.01em; }
+.dg-col-respond .dg-col-h { color: #d0322b; }
+.dg-col-opportunity .dg-col-h { color: #1f9d6a; }
+.dg-col-check .dg-col-h { color: #9a7433; }
+.dg-col ul { margin: 0; padding-left: 2px; list-style: none; }
+.dg-col li { position: relative; padding-left: 14px; margin: 7px 0; font-size: 12.5px; line-height: 1.6; color: var(--hi); }
+.dg-col li::before { content: '▸'; position: absolute; left: 0; opacity: 0.6; }
 .dg-move2 { padding: 9px 0; border-top: 1px solid var(--border); }
 .dg-move2:first-child { border-top: 0; }
 .dg-move2-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
@@ -1815,36 +1857,36 @@ _WORLDMAP_CSS = """
 .wm-alert-card {
   position: relative;
   padding: 11px 13px 11px 16px;
-  background: var(--elevated);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--high);
-  border-radius: 4px;
+  background: rgba(255,255,255,0.045);
+  border: 1px solid rgba(120,150,220,0.16);
+  border-left: 3px solid #ef5a5a;
+  border-radius: 6px;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s, transform 0.1s;
 }
 .wm-alert-card:hover {
-  background: #1f2438;
-  border-color: var(--bhi);
-  border-left-color: var(--high);
+  background: rgba(255,255,255,0.09);
+  border-color: rgba(120,150,220,0.4);
+  border-left-color: #ef5a5a;
   transform: translateY(-1px);
 }
 .wm-alert-badges { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
 .wm-alert-brand {
-  font-size: 11px; font-weight: 700; color: var(--gold);
-  background: rgba(212,184,126,0.12); border-radius: 3px; padding: 2px 8px;
+  font-size: 11px; font-weight: 700; color: #e2c185;
+  background: rgba(212,184,126,0.14); border-radius: 3px; padding: 2px 8px;
   letter-spacing: 0.02em;
 }
 .wm-alert-cc {
-  font-size: 11px; font-weight: 600; color: var(--mid);
-  background: rgba(255,255,255,0.05); border-radius: 3px; padding: 2px 8px;
+  font-size: 11px; font-weight: 600; color: #c2ccdf;
+  background: rgba(255,255,255,0.08); border-radius: 3px; padding: 2px 8px;
 }
 .wm-alert-title {
-  font-size: 13.5px; color: var(--hi); line-height: 1.5; font-weight: 500;
+  font-size: 13.5px; color: #eaf0fb; line-height: 1.5; font-weight: 500;
   overflow: hidden; display: -webkit-box;
   -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
-.wm-alert-meta { font-size: 10.5px; color: var(--lo); margin-top: 6px; font-variant-numeric: tabular-nums; }
-.wm-alert-empty { padding: 16px; color: var(--lo); font-size: 12px; grid-column: 1 / -1; }
+.wm-alert-meta { font-size: 10.5px; color: #8b95b0; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.wm-alert-empty { padding: 16px; color: #8b95b0; font-size: 12px; grid-column: 1 / -1; }
 """
 
 
@@ -2057,19 +2099,19 @@ def _build_worldmap_script(country_stats: dict) -> str:
       var glC  = isH ? 'rgba(248,113,113,' : isM ? 'rgba(251,191,36,' : 'rgba(34,211,238,';
       var base = isH ? 5 + Math.min(Math.sqrt(st.high)*1.6, 7) : 4;
 
-      // 3 staggered pulse rings
+      // 3 staggered pulse rings (반경 축소 → 밀집 지역 뭉침 방지)
       [0, 0.33, 0.66].forEach(function(off2) {{
         var ph = ((tick / 65) + off2) % 1;
-        var pr = base + ph * 28, pa = (1 - ph) * (isH ? 0.7 : 0.45);
+        var pr = base + ph * 17, pa = (1 - ph) * (isH ? 0.6 : 0.4);
         ctx.beginPath(); ctx.arc(x, y, pr, 0, Math.PI*2);
         ctx.strokeStyle = glC + pa + ')';
-        ctx.lineWidth = isH ? 1.6 : 1.0; ctx.stroke();
+        ctx.lineWidth = isH ? 1.5 : 1.0; ctx.stroke();
       }});
 
-      // Outer glow halo
-      var grd = ctx.createRadialGradient(x, y, 0, x, y, base*5.5);
-      grd.addColorStop(0, glC+'0.55)'); grd.addColorStop(1, glC+'0)');
-      ctx.beginPath(); ctx.arc(x, y, base*5.5, 0, Math.PI*2);
+      // Outer glow halo (축소)
+      var grd = ctx.createRadialGradient(x, y, 0, x, y, base*3.4);
+      grd.addColorStop(0, glC+'0.5)'); grd.addColorStop(1, glC+'0)');
+      ctx.beginPath(); ctx.arc(x, y, base*3.4, 0, Math.PI*2);
       ctx.fillStyle = grd; ctx.fill();
 
       // Core — bright highlight + color
