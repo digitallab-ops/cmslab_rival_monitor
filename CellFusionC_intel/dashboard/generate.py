@@ -2005,28 +2005,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
     bg.addColorStop(0, '#060c1a'); bg.addColorStop(1, '#030810');
     off.fillStyle = bg; off.fillRect(0, 0, W, H);
 
-    // Dot intersections at grid nodes
-    off.fillStyle = 'rgba(80,140,230,0.2)';
-    for (var glon = -180; glon <= 180; glon += 30)
-      for (var glat = -90; glat <= 90; glat += 30) {{
-        off.beginPath(); off.arc(pX(glon), pY(glat), 0.9, 0, Math.PI*2); off.fill();
-      }}
-
-    // Grid
-    off.strokeStyle = 'rgba(50,110,210,0.07)'; off.lineWidth = 0.5;
-    [-60,-30,30,60].forEach(function(lat) {{
-      off.beginPath(); off.moveTo(0,pY(lat)); off.lineTo(W,pY(lat)); off.stroke();
-    }});
-    [-120,-60,60,120].forEach(function(lon) {{
-      off.beginPath(); off.moveTo(pX(lon),0); off.lineTo(pX(lon),H); off.stroke();
-    }});
-    // Equator + tropics
-    off.strokeStyle = 'rgba(60,130,220,0.22)'; off.lineWidth = 0.9;
-    off.beginPath(); off.moveTo(0,pY(0)); off.lineTo(W,pY(0)); off.stroke();
-    off.strokeStyle = 'rgba(60,130,220,0.1)'; off.lineWidth = 0.5;
-    [23.4,-23.4].forEach(function(lat) {{
-      off.beginPath(); off.moveTo(0,pY(lat)); off.lineTo(W,pY(lat)); off.stroke();
-    }});
+    // (격자·적도선 제거 — 가로줄 스트릭 방지, 깔끔한 배경)
 
     // Land polygons
     LAND.forEach(function(poly) {{
@@ -2154,23 +2133,11 @@ def _build_worldmap_script(country_stats: dict) -> str:
     }}
   }}
 
-  /* ── HUD frame ── */
+  /* ── 은은한 비네트 (깊이감만, 코너·좌표라벨 제거) ── */
   function drawHUD() {{
-    var L = 16;
-    ctx.strokeStyle = 'rgba(99,179,237,0.35)'; ctx.lineWidth = 1.5;
-    [[0,0,1,1],[W,0,-1,1],[0,H,1,-1],[W,H,-1,-1]].forEach(function(c) {{
-      ctx.beginPath();
-      ctx.moveTo(c[0], c[1]+c[3]*L); ctx.lineTo(c[0], c[1]); ctx.lineTo(c[0]+c[2]*L, c[1]);
-      ctx.stroke();
-    }});
-    // Vignette
-    var vig = ctx.createRadialGradient(W/2, H/2, H*0.28, W/2, H/2, H*0.9);
-    vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+    var vig = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+    vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.35)');
     ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
-    // Coord label bottom-left
-    ctx.fillStyle = 'rgba(60,110,180,0.45)';
-    ctx.font = '9px monospace'; ctx.textAlign = 'left';
-    ctx.fillText('EQUIRECT / WGS84', 6, H - 5);
   }}
 
   /* ── Main loop ── */
@@ -2180,7 +2147,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
     // Blit static layer
     ctx.save(); ctx.setTransform(1,0,0,1,0,0);
     ctx.drawImage(off.canvas, 0, 0); ctx.restore();
-    drawScan(); drawArcs(); drawMarkers(); drawHUD();
+    drawMarkers(); drawHUD();
     tick++;
     animId = requestAnimationFrame(loop);
   }}
