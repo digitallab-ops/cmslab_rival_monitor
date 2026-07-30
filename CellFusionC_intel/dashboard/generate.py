@@ -1984,8 +1984,9 @@ def _build_worldmap_script(country_stats: dict) -> str:
   var off  = document.createElement('canvas').getContext('2d');
   var activeCC = [];
 
-  // 극지 공백·거친 북극 해안 크롭 (추적 국가는 모두 위도 56 이하) → 대륙이 화면을 꽉 채움
-  var LAT_TOP = 72, LAT_BOT = -56;
+  // 너덜너덜한 북극권 해안(캐나다 북부 군도·그린란드·북시베리아)을 뷰포트 위로 크롭.
+  // 위도 62N까지만 → 상단이 대륙을 매끄럽게 가로지름. 추적 국가는 모두 위도 56 이하라 표시 영향 없음.
+  var LAT_TOP = 62, LAT_BOT = -56;
   function pX(lon) {{ return (lon + 180) / 360 * W; }}
   function pY(lat) {{ return (LAT_TOP - lat) / (LAT_TOP - LAT_BOT) * H; }}
 
@@ -2112,8 +2113,11 @@ def _build_worldmap_script(country_stats: dict) -> str:
       var placed = [];
       labels.forEach(function(L) {{
         var w = ctx.measureText(L.cc).width;
-        var cands = [L.y - L.base - 4, L.y + L.base + fs + 2,
-                     L.y - L.base - 4 - (fs + 3), L.y + L.base + fs + 2 + (fs + 3)];
+        var above = L.y - L.base - 4, below = L.y + L.base + fs + 2;
+        // 상단 가까운 마커는 라벨을 아래로(윗잘림 방지)
+        var cands = (L.y < fs + L.base + 10)
+          ? [below, below + (fs + 3), above]
+          : [above, below, above - (fs + 3), below + (fs + 3)];
         var ly = cands[0];
         for (var ci = 0; ci < cands.length; ci++) {{
           var yy = cands[ci];
