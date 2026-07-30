@@ -1984,10 +1984,27 @@ def _build_worldmap_script(country_stats: dict) -> str:
   var off  = document.createElement('canvas').getContext('2d');
   var activeCC = [];
 
-  // 전 위도(-90~90) 전개 — 대륙 안 자름 (원본 방식 복원).
-  var LAT_TOP = 90, LAT_BOT = -90;
+  // 도트 매트릭스 지도 — 대륙을 '점'으로 (해안 폴리곤 없음 → 각짐/찢김 원천 차단)
+  var LAT_TOP = 80, LAT_BOT = -57;
   function pX(lon) {{ return (lon + 180) / 360 * W; }}
   function pY(lat) {{ return (LAT_TOP - lat) / (LAT_TOP - LAT_BOT) * H; }}
+  // 점이 육지 안에 있는지 (ray-casting)
+  function inLand(lon, lat) {{
+    for (var p = 0; p < LAND.length; p++) {{
+      var poly = LAND[p], inside = false;
+      for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {{
+        var xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+        if (((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+      }}
+      if (inside) return true;
+    }}
+    return false;
+  }}
+  // 육지 도트 좌표 1회 사전계산 (위경도 격자 → 육지 점만)
+  var landDots = [];
+  for (var _la = LAT_BOT; _la <= LAT_TOP; _la += 2.0)
+    for (var _lo = -179; _lo <= 179; _lo += 2.0)
+      if (inLand(_lo, _la)) landDots.push([_lo, _la]);
 
   function rebuildActive() {{
     activeCC = Object.keys(COORDS).filter(function(cc) {{
@@ -2004,34 +2021,16 @@ def _build_worldmap_script(country_stats: dict) -> str:
 
     // Ocean
     var bg = off.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#060c1a'); bg.addColorStop(1, '#030810');
+    bg.addColorStop(0, '#070d1c'); bg.addColorStop(1, '#04070f');
     off.fillStyle = bg; off.fillRect(0, 0, W, H);
 
-    // Dot intersections at grid nodes
-    off.fillStyle = 'rgba(80,140,230,0.2)';
-    for (var glon = -180; glon <= 180; glon += 30)
-      for (var glat = -90; glat <= 90; glat += 30) {{
-        off.beginPath(); off.arc(pX(glon), pY(glat), 0.9, 0, Math.PI*2); off.fill();
-      }}
-
-    // Grid
-    off.strokeStyle = 'rgba(50,110,210,0.07)'; off.lineWidth = 0.5;
-    [-60,-30,30,60].forEach(function(lat) {{
-      off.beginPath(); off.moveTo(0,pY(lat)); off.lineTo(W,pY(lat)); off.stroke();
-    }});
-    [-120,-60,60,120].forEach(function(lon) {{
-      off.beginPath(); off.moveTo(pX(lon),0); off.lineTo(pX(lon),H); off.stroke();
-    }});
-
-    // Land polygons (은은하게 — 원본)
-    LAND.forEach(function(poly) {{
+    // 대륙 = 도트 매트릭스 (경위도 간격 일정 → 화면상 점 간격은 위도별로 자연스러움)
+    var dotR = Math.max(1.0, W / 900);
+    landDots.forEach(function(d) {{
       off.beginPath();
-      poly.forEach(function(pt, i) {{
-        i === 0 ? off.moveTo(pX(pt[0]),pY(pt[1])) : off.lineTo(pX(pt[0]),pY(pt[1]));
-      }});
-      off.closePath();
-      off.fillStyle = '#0d1c2e'; off.fill();
-      off.strokeStyle = '#17304d'; off.lineWidth = 0.7; off.stroke();
+      off.arc(pX(d[0]), pY(d[1]), dotR, 0, Math.PI * 2);
+      off.fillStyle = 'rgba(99,138,205,0.55)';
+      off.fill();
     }});
 
     // Country signal glows (radial blobs on land)
@@ -2166,7 +2165,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
     // Blit static layer
     ctx.save(); ctx.setTransform(1,0,0,1,0,0);
     ctx.drawImage(off.canvas, 0, 0); ctx.restore();
-    drawArcs(); drawMarkers(); drawHUD();
+    drawMarkers(); drawHUD();
     tick++;
     animId = requestAnimationFrame(loop);
   }}
