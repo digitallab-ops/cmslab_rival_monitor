@@ -1984,8 +1984,10 @@ def _build_worldmap_script(country_stats: dict) -> str:
   var off  = document.createElement('canvas').getContext('2d');
   var activeCC = [];
 
+  // 극지 공백·거친 북극 해안 크롭 (추적 국가는 모두 위도 56 이하) → 대륙이 화면을 꽉 채움
+  var LAT_TOP = 72, LAT_BOT = -56;
   function pX(lon) {{ return (lon + 180) / 360 * W; }}
-  function pY(lat) {{ return (90  - lat) / 180 * H; }}
+  function pY(lat) {{ return (LAT_TOP - lat) / (LAT_TOP - LAT_BOT) * H; }}
 
   function rebuildActive() {{
     activeCC = Object.keys(COORDS).filter(function(cc) {{
@@ -2154,7 +2156,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
 
   function resize() {{
     W = container.clientWidth || 800;
-    H = Math.round(W * 0.50);
+    H = Math.round(W * (LAT_TOP - LAT_BOT) / 360);
     canvas.width  = W * DPR; canvas.height = H * DPR;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     container.style.height = H + 'px';
