@@ -2002,22 +2002,20 @@ def _build_worldmap_script(country_stats: dict) -> str:
     oc.height = H * DPR;
     off.setTransform(DPR, 0, 0, DPR, 0, 0);
 
-    // Ocean
+    // Ocean (더 어둡게 — 땅과 대비 강화)
     var bg = off.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#060c1a'); bg.addColorStop(1, '#030810');
+    bg.addColorStop(0, '#05080f'); bg.addColorStop(1, '#03060c');
     off.fillStyle = bg; off.fillRect(0, 0, W, H);
 
-    // (격자·적도선 제거 — 가로줄 스트릭 방지, 깔끔한 배경)
-
-    // Land polygons
+    // Land polygons (밝게 — 바다와 확실히 구분되게)
     LAND.forEach(function(poly) {{
       off.beginPath();
       poly.forEach(function(pt, i) {{
         i === 0 ? off.moveTo(pX(pt[0]),pY(pt[1])) : off.lineTo(pX(pt[0]),pY(pt[1]));
       }});
       off.closePath();
-      off.fillStyle = '#0d1c2e'; off.fill();
-      off.strokeStyle = '#17304d'; off.lineWidth = 0.7; off.stroke();
+      off.fillStyle = '#213a56'; off.fill();
+      off.strokeStyle = '#38597f'; off.lineWidth = 0.8; off.stroke();
     }});
 
     // Country signal glows (radial blobs on land)
