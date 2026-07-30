@@ -1984,8 +1984,8 @@ def _build_worldmap_script(country_stats: dict) -> str:
   var off  = document.createElement('canvas').getContext('2d');
   var activeCC = [];
 
-  // 도트 매트릭스 지도 — 대륙을 '점'으로 (해안 폴리곤 없음 → 각짐/찢김 원천 차단)
-  var LAT_TOP = 80, LAT_BOT = -57;
+  // 크롭 + 상단 페이드로 북극권 가로 이음새를 어둠에 녹임. 국가는 전부 위도 56 이하.
+  var LAT_TOP = 74, LAT_BOT = -56;
   function pX(lon) {{ return (lon + 180) / 360 * W; }}
   function pY(lat) {{ return (LAT_TOP - lat) / (LAT_TOP - LAT_BOT) * H; }}
   // 부드러운 곡선 대륙 path — 거친 정점을 곡선으로 라운딩(중점 경유 2차 베지어) → 매끄러운 해안
@@ -2031,6 +2031,14 @@ def _build_worldmap_script(country_stats: dict) -> str:
     // 부드러운 해안선 하이라이트
     off.strokeStyle = 'rgba(140,180,235,0.30)'; off.lineWidth = 0.9;
     LAND.forEach(function(poly) {{ off.beginPath(); landPath(off, poly); off.stroke(); }});
+
+    // 상·하단 페이드 — 북극권 해안선 '가로 이음새'와 크롭 경계를 어둠으로 부드럽게 녹임
+    var topf = off.createLinearGradient(0, 0, 0, H * 0.22);
+    topf.addColorStop(0, '#060a14'); topf.addColorStop(1, 'rgba(6,10,20,0)');
+    off.fillStyle = topf; off.fillRect(0, 0, W, H * 0.22);
+    var botf = off.createLinearGradient(0, H * 0.80, 0, H);
+    botf.addColorStop(0, 'rgba(6,10,20,0)'); botf.addColorStop(1, '#060a14');
+    off.fillStyle = botf; off.fillRect(0, H * 0.80, W, H * 0.20);
 
     // Country signal glows (radial blobs on land)
     Object.keys(COORDS).forEach(function(cc) {{
