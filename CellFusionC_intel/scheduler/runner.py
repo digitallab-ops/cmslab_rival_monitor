@@ -246,12 +246,12 @@ def job_weekly_dedup() -> None:
 def create_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 
-    # 매일 18:00 KST (피크 16시 이후 — 하루치 기사 다 올라온 뒤 수집)
+    # 매일 09:00 & 18:00 KST — 하루 2회 수집(오전·저녁) → HIGH 속보를 오전/저녁 두 번 포착
     scheduler.add_job(
         job_daily_tier1,
-        trigger=CronTrigger(hour=18, minute=0),
+        trigger=CronTrigger(hour="9,18", minute=0),
         id="daily_tier1",
-        name="[일별] Tier1 브랜드x국가 수집",
+        name="[일별] Tier1 브랜드x국가 수집 (오전·저녁)",
         max_instances=1,
         coalesce=True,
     )
