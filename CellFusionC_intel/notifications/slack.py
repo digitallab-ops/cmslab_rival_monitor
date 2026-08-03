@@ -38,10 +38,8 @@ def _get_webhook_url() -> str:
     return os.getenv("SLACK_WEBHOOK_URL", "")
 
 
-def _post(payload: dict) -> bool:
-    url = _get_webhook_url()
+def _post_to(url: str, payload: dict) -> bool:
     if not url:
-        logger.debug("SLACK_WEBHOOK_URL 미설정 — 알림 스킵")
         return False
     try:
         resp = requests.post(url, json=payload, timeout=8)
@@ -49,6 +47,22 @@ def _post(payload: dict) -> bool:
     except Exception as e:
         logger.warning("Slack 전송 실패: %s", e)
         return False
+
+
+def _post(payload: dict, secondary: bool = False) -> bool:
+    """기본 채널로 전송. secondary=True면 두 번째 채널(SLACK_WEBHOOK_URL_2)에도 함께 전송.
+
+    두 번째 웹훅은 브리핑·HIGH 속보만 받고, 수집·시스템 요약은 기본 채널만.
+    """
+    primary = _get_webhook_url()
+    if not primary:
+        logger.debug("SLACK_WEBHOOK_URL 미설정 — 알림 스킵")
+    ok = _post_to(primary, payload)
+    if secondary:
+        url2 = os.getenv("SLACK_WEBHOOK_URL_2", "").strip()
+        if url2:
+            _post_to(url2, payload)
+    return ok
 
 
 def notify_high_importance(article) -> bool:
@@ -76,7 +90,7 @@ def notify_high_importance(article) -> bool:
             {"type": "divider"},
         ],
     }
-    return _post(payload)
+    return _post(payload, secondary=True)
 
 
 def notify_collection_summary(label: str, agg: dict) -> bool:
@@ -232,7 +246,7 @@ def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
             *_briefing_blocks(briefing_text),
         ],
     }
-    return _post(payload)
+    return _post(payload, secondary=True)
 
 
 def send_daily_briefing(briefing_text: str, stats: dict) -> bool:
@@ -250,4 +264,4 @@ def send_daily_briefing(briefing_text: str, stats: dict) -> bool:
             *_briefing_blocks(briefing_text),
         ],
     }
-    return _post(payload)
+    return _post(payload, secondary=True)
