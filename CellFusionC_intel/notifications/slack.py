@@ -208,17 +208,27 @@ def _briefing_blocks(text: str, limit: int = 2900) -> list:
     return blocks
 
 
+def _kst_date_label() -> str:
+    """KST 기준 'M/D(요일)' 라벨."""
+    from datetime import datetime, timedelta
+    now = datetime.utcnow() + timedelta(hours=9)
+    wd = ["월", "화", "수", "목", "금", "토", "일"][now.weekday()]
+    return f"{now.month}/{now.day}({wd})"
+
+
 def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
     """주간 브리핑 Slack 전송 (긴 본문 자동 분할)."""
+    d = _kst_date_label()
     payload = {
-        "text": "📊 CellFusionC 경쟁사 주간 인텔리전스 브리핑",
+        "text": f"📊 위클리 심층 브리핑 · {d}",
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": "📊 경쟁사 주간 인텔리전스 브리핑"}},
+            {"type": "header", "text": {"type": "plain_text", "text": f"📊 위클리 심층 브리핑 · {d}"}},
             {"type": "context", "elements": [
                 {"type": "mrkdwn",
-                 "text": (f"🗓 지난 7일  ·  📥 총 *{stats.get('total',0)}*건  ·  "
+                 "text": (f"🗓 *지난 7일 종합* · 매주 월요일 아침  ·  📥 총 *{stats.get('total',0)}*건  ·  "
                           f"🔴 HIGH *{stats.get('high',0)}*  ·  🏷 브랜드 *{stats.get('brands',0)}*  ·  "
                           f"🌐 국가 *{stats.get('countries',0)}*")}]},
+            {"type": "divider"},
             *_briefing_blocks(briefing_text),
         ],
     }
@@ -227,13 +237,16 @@ def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
 
 def send_daily_briefing(briefing_text: str, stats: dict) -> bool:
     """일간 브리핑 Slack 전송."""
+    d = _kst_date_label()
     payload = {
-        "text": "🌅 경쟁사 일간 브리핑",
+        "text": f"🌅 데일리 브리핑 · {d}",
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": "🌅 경쟁사 일간 브리핑 (어제 수집분)"}},
+            {"type": "header", "text": {"type": "plain_text", "text": f"🌅 데일리 브리핑 · {d}"}},
             {"type": "context", "elements": [
-                {"type": "mrkdwn", "text": f"📥 신규 *{stats.get('total',0)}*건  ·  🔴 HIGH *{stats.get('high',0)}*  ·  "
+                {"type": "mrkdwn", "text": f"📅 *어제 수집분 요약* · 매일 아침  ·  📥 신규 *{stats.get('total',0)}*건  ·  "
+                                           f"🔴 HIGH *{stats.get('high',0)}*  ·  "
                                            f"🏷 브랜드 *{stats.get('brands',0)}*  ·  🌐 국가 *{stats.get('countries',0)}*"}]},
+            {"type": "divider"},
             *_briefing_blocks(briefing_text),
         ],
     }
