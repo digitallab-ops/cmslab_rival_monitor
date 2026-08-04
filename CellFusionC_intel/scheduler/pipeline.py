@@ -25,7 +25,7 @@ from classifier.claude_classifier import classify_articles
 from deduplication.url_hasher import url_hash, deduplicate_batch
 from storage.models import NewsArticle, CollectionRun, get_session
 from storage.repository import article_exists, save_article, get_recent_titles, save_collection_run
-from config.settings import CLASSIFIER_MODEL_DETAIL
+from config.settings import CLASSIFIER_MODEL_DETAIL, HIGH_ALERT_MIN_SCORE
 from notifications.slack import notify_high_importance
 
 logger = logging.getLogger(__name__)
@@ -131,13 +131,16 @@ def _run_single(
             save_article(session, article)
             stats.saved += 1
 
-            # high importance → 즉시 Slack 알림
+            # high importance → 즉시 Slack 알림 (단, '완전 하이'만: score 문턱 이상 + 스쳐언급 제외)
             if clf.importance == "high":
                 stats.high += 1
-                try:
-                    notify_high_importance(article)
-                except Exception:
-                    pass
+                _score = getattr(clf, "strategic_score", 0) or 0
+                _focus = getattr(clf, "brand_focus", None)
+                if _score >= HIGH_ALERT_MIN_SCORE and _focus != "incidental":
+                    try:
+                        notify_high_importance(article)
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.error("저장 실패 (%s): %s", raw.title[:60], e)

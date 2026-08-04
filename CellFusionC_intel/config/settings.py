@@ -36,6 +36,10 @@ CLASSIFIER_MODEL_DETAIL = "gpt-4o-mini"
 INSIGHT_MODEL_MARKET = os.getenv("INSIGHT_MODEL_MARKET", "gpt-4o")
 INSIGHT_MODEL_BRAND  = os.getenv("INSIGHT_MODEL_BRAND", "gpt-4o-mini")
 
+# HIGH 속보 Slack 즉시알림 문턱 — 이 strategic_score 이상만 발송('완전 하이'만).
+# 나머지 HIGH는 일간 브리핑으로 요약됨. (실측: 85↑ 하루 ~5건, 88↑ 하루 <1건)
+HIGH_ALERT_MIN_SCORE = int(os.getenv("HIGH_ALERT_MIN_SCORE", "85"))
+
 # 의미 중복 병합
 EMBED_MODEL = "text-embedding-3-small"
 DEDUP_COSINE_THRESHOLD = 0.60   # 전이적(union-find) 병합 임계값. 브랜드 내 같은 사건 체인
