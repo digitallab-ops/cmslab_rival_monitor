@@ -24,7 +24,10 @@ from collectors.body_fetcher import fetch_body
 from classifier.claude_classifier import classify_articles
 from deduplication.url_hasher import url_hash, deduplicate_batch
 from storage.models import NewsArticle, CollectionRun, get_session
-from storage.repository import article_exists, save_article, get_recent_titles, save_collection_run
+from storage.repository import (
+    article_exists, save_article, get_recent_titles, save_collection_run,
+    high_alert_is_duplicate, record_high_alert,
+)
 from config.settings import CLASSIFIER_MODEL_DETAIL, HIGH_ALERT_MIN_SCORE
 from notifications.slack import notify_high_importance
 
@@ -138,7 +141,14 @@ def _run_single(
                 _focus = getattr(clf, "brand_focus", None)
                 if _score >= HIGH_ALERT_MIN_SCORE and _focus != "incidental":
                     try:
-                        notify_high_importance(article)
+                        # 같은 사건 중복 속보 억제(발송 로그 대조) — 첫 건만 발송
+                        if high_alert_is_duplicate(session, article):
+                            logger.info("HIGH 속보 중복 억제: %s/%s %s",
+                                        article.brand, article.country,
+                                        (getattr(article, "title_ko", "") or "")[:40])
+                        else:
+                            notify_high_importance(article)
+                            record_high_alert(session, article)
                     except Exception:
                         pass
 
