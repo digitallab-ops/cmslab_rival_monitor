@@ -194,6 +194,17 @@ def _notify_tier_changes(promoted: list[str], demoted: list[str]) -> None:
         logger.warning("티어 변경 Slack 알림 실패: %s", e)
 
 
+def job_search_trends() -> None:
+    """네이버 데이터랩 검색 트렌드 수집 (수요 신호). 주 2회 — 뉴스(공급)와 대조용."""
+    logger.info("=== [주2회] 네이버 검색 트렌드 수집 시작 ===")
+    try:
+        from signals.naver_trends import run as run_search_trends
+        r = run_search_trends(days=120)
+        logger.info("검색 트렌드 수집 완료: 그룹 %d / 행 %d", r["groups"], r["rows"])
+    except Exception as e:
+        logger.warning("검색 트렌드 수집 스킵(자격증명/네트워크 확인): %s", e)
+
+
 def job_profile_sync() -> None:
     """Cafe24 → 자사 제품 라인 자동 동기화 (company_profile.md). 실패해도 파이프라인 무영향."""
     logger.info("=== 자사 제품 프로필 동기화 시작 ===")
@@ -272,6 +283,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day_of_week="mon", hour=19, minute=0),
         id="weekly_momentum",
         name="[주간] 브랜드 모멘텀 계산",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 월·목 07:00 KST — 네이버 검색 트렌드 수집(수요 신호). 월요일분은 주간 브리핑(08:00) 전.
+    scheduler.add_job(
+        job_search_trends,
+        trigger=CronTrigger(day_of_week="mon,thu", hour=7, minute=0),
+        id="search_trends",
+        name="[주2회] 네이버 검색 트렌드 수집",
         max_instances=1,
         coalesce=True,
     )

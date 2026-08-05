@@ -33,6 +33,7 @@ from analytics.queries import (
     get_weekly_trend,
     upsert_insight_cache,
     compute_brand_momentum,
+    get_demand_triangulation,
 )
 from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
 from storage.models import get_session
@@ -424,6 +425,53 @@ def _render_brand_radar(radar: list) -> str:
             f'</div>'
         )
     return '<div class="radar-list">' + "".join(rows) + '</div>'
+
+
+def _render_demand_signal(tri: list) -> str:
+    """수요 검증 — 뉴스(공급/PR) vs 네이버 검색(수요) 삼각검증."""
+    if not tri or all(t.get("search_momentum") is None for t in tri):
+        return ('<p class="no-data">검색 수요 데이터 없음 '
+                '(네이버 검색 트렌드 첫 수집 전 · 월·목 07:00 KST 갱신)</p>')
+
+    VERDICT = {
+        "real":   ("실질",     "ds-real",   "뉴스도 검색도 상승 — 진짜 무브"),
+        "latent": ("숨은수요",  "ds-latent", "검색은 느는데 보도 적음 — 선제 주목"),
+        "pr":     ("PR우세",   "ds-pr",     "보도는 뜨는데 검색 수요는 식음 — 노이즈 의심"),
+        "stable": ("안정",     "ds-stable", ""),
+    }
+    SIG = {"rising": "▲", "stable": "▶", "cooling": "▼"}
+    SIGC = {"rising": "#4ab884", "stable": "#8891a8", "cooling": "#e05353"}
+
+    def _row(t):
+        v = t.get("verdict") or "stable"
+        label, cls, _ = VERDICT.get(v, VERDICT["stable"])
+        ns = t["news_signal"]; ss = t["search_signal"]
+        sm = t["search_momentum"]
+        sm_txt = f'{sm:.2f}x' if sm is not None else '—'
+        idx = t["search_recent"]
+        idx_txt = f'검색지수 {idx:.0f}' if idx is not None else ''
+        return (
+            f'<div class="ds-row">'
+            f'<span class="ds-brand">{_esc(t["brand"])}</span>'
+            f'<span class="ds-badge {cls}">{label}</span>'
+            f'<span class="ds-leg">뉴스 <b style="color:{SIGC.get(ns)}">{SIG.get(ns,"")} {t["news_momentum"]}x</b></span>'
+            f'<span class="ds-leg">검색 <b style="color:{SIGC.get(ss)}">{SIG.get(ss,"")} {sm_txt}</b></span>'
+            f'<span class="ds-idx">{idx_txt}</span>'
+            f'</div>'
+        )
+
+    flagged = [t for t in tri if t.get("verdict") in ("real", "latent", "pr")]
+    body = "".join(_row(t) for t in flagged) if flagged else (
+        '<p class="no-data" style="margin:6px 0">이번 주 뉴스·검색이 엇갈리는 브랜드 없음 '
+        '(대부분 안정). 검색 이력이 쌓일수록 판별력이 올라갑니다.</p>')
+
+    legend = (
+        '<div class="ds-help">'
+        '<span class="ds-badge ds-real">실질</span> 뉴스↑·검색↑ &nbsp; '
+        '<span class="ds-badge ds-latent">숨은수요</span> 검색↑·보도정체 &nbsp; '
+        '<span class="ds-badge ds-pr">PR우세</span> 뉴스↑·검색↓'
+        '</div>')
+    return legend + '<div class="ds-list">' + body + '</div>'
 
 
 def _render_brand_high_ratio(brand_high: list) -> str:
@@ -1608,6 +1656,22 @@ a:hover { color: var(--gold); }
   background: rgba(224,83,83,0.12); color: #e05353; letter-spacing: 0.04em; flex-shrink: 0;
 }
 
+/* ── 수요 검증 (뉴스 vs 검색) ── */
+.ds-help { font-size: 10.5px; color: var(--lo); margin-bottom: 9px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.ds-list { display: flex; flex-direction: column; gap: 7px; }
+.ds-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 10px; background: var(--elevated); border: 1px solid var(--border); border-radius: 3px;
+}
+.ds-brand { font-size: 12px; font-weight: 600; color: var(--hi); min-width: 130px; white-space: nowrap; }
+.ds-badge { font-size: 9px; font-weight: 700; padding: 1px 7px; border-radius: 2px; letter-spacing: 0.04em; white-space: nowrap; flex-shrink: 0; }
+.ds-real   { background: rgba(74,184,132,0.16); color: #4ab884; }
+.ds-latent { background: rgba(200,169,110,0.16); color: var(--gold); }
+.ds-pr     { background: rgba(224,83,83,0.13); color: #e05353; }
+.ds-stable { background: rgba(78,88,112,0.28); color: var(--mid); }
+.ds-leg { font-size: 11px; color: var(--lo); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ds-idx { font-size: 10px; color: var(--lo); margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
 /* ── 카테고리 대결 뷰 ── */
 .catb-list { display: flex; flex-direction: column; gap: 12px; }
 .catb-row { display: grid; grid-template-columns: 96px 1fr; gap: 12px 14px; align-items: center; }
@@ -2323,6 +2387,7 @@ def _build_full_html(
     momentum: list = None,
     market_text: str = "",
     digest: dict = None,
+    demand_tri: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2345,6 +2410,7 @@ def _build_full_html(
         _dg.get("expansion") or [], _dg.get("high") or [], _dg.get("market") or "",
         _dg.get("ref_date") or "")
     radar_html        = _render_brand_radar(brand_radar or [])
+    demand_html       = _render_demand_signal(demand_tri or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
@@ -2470,6 +2536,14 @@ def _build_full_html(
         <span class="section-sub">최근 4주 vs 직전 4주 기사량 비율 · ▲Rising / ▶Stable / ▼Cooling</span>
       </div>
       {radar_html}
+    </div>
+
+    <!-- 수요 검증 — 뉴스(공급/PR) vs 네이버 검색(수요) 삼각검증 -->
+    <div class="section">
+      <div class="section-title">
+        📡 수요 검증 <span class="section-sub">보도량(공급) vs 네이버 검색량(수요) 대조 — "진짜 무브인가, PR 노이즈인가"</span>
+      </div>
+      {demand_html}
     </div>
 
     <div class="lower-row">
@@ -3016,6 +3090,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             brand_radar = get_brand_radar(session)
         except Exception:
             brand_radar = []
+        # 수요 검증(뉴스 vs 네이버 검색 트렌드) — search_trends 없으면 빈 리스트
+        try:
+            demand_tri = get_demand_triangulation(session)
+        except Exception:
+            demand_tri = []
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -3150,6 +3229,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         country_stats=country_stats,
         period_data=period_data,
         brand_radar=brand_radar,
+        demand_tri=demand_tri,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,

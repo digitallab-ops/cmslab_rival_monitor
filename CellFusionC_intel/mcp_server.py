@@ -22,6 +22,7 @@ from analytics.queries import (
     get_category_battle,
     get_expansion_playbook,
     compute_brand_momentum,
+    get_demand_triangulation,
 )
 from analytics.summarizer import generate_brand_strategy_summary
 
@@ -290,6 +291,43 @@ def get_brand_momentum_view() -> dict:
             "cooling": [_fmt(m) for m in mo if m["signal"] == "cooling"][:6],
             "all_ranked": [_fmt(m) for m in mo][:15],
         }
+    finally:
+        s.close()
+
+
+@rival_mcp.tool()
+def get_demand_signal(brand: str = "") -> dict:
+    """
+    수요 신호(네이버 검색 트렌드) vs 공급 신호(뉴스 보도량) 삼각검증.
+
+    "실제로 검색·수요가 느는가, 아니면 보도만 뜨는가?"를 판별한다.
+    verdict: real(뉴스↑+검색↑=진짜 무브) / pr(뉴스↑+검색↓=PR노이즈 의심) /
+             latent(검색↑+보도 정체=숨은 수요, 선제 주목) / stable(안정).
+    brand 지정 시 해당 브랜드만, 없으면 판별된 것(real/pr/latent) 위주로 반환.
+    """
+    s = get_session()
+    try:
+        tri = get_demand_triangulation(s)
+        if not any(t["search_momentum"] is not None for t in tri):
+            return {"available": False,
+                    "note": "검색 트렌드 데이터 없음(아직 수집 전이거나 네이버 API 미설정)."}
+        _LABEL = {"real": "실질(뉴스↑·검색↑)", "pr": "PR우세(뉴스↑·검색↓)",
+                  "latent": "숨은수요(검색↑·보도정체)", "stable": "안정"}
+        def _fmt(t):
+            return {"brand": t["brand"], "verdict": t["verdict"],
+                    "verdict_ko": _LABEL.get(t["verdict"], t["verdict"]),
+                    "news_momentum_x": t["news_momentum"], "news_signal": t["news_signal"],
+                    "search_momentum_x": t["search_momentum"], "search_signal": t["search_signal"],
+                    "search_index_recent": t["search_recent"], "tier": t["tier"]}
+        if brand:
+            by_brand = {t["brand"]: t for t in tri}
+            resolved = _resolve_brand(by_brand, brand)
+            return {"available": True, "brand": resolved or brand,
+                    "result": _fmt(by_brand[resolved]) if resolved else None}
+        flagged = [t for t in tri if t["verdict"] in ("real", "pr", "latent")]
+        return {"available": True,
+                "flagged": [_fmt(t) for t in flagged],
+                "all_ranked": [_fmt(t) for t in tri][:15]}
     finally:
         s.close()
 

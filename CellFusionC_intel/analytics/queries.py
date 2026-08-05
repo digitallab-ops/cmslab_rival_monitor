@@ -837,6 +837,95 @@ def get_country_signal_stats(session: Session, days: int = 30) -> dict:
     return {r[0]: {"total": r[1] or 0, "high": r[2] or 0, "medium": r[3] or 0} for r in rows}
 
 
+def get_search_momentum(session: Session) -> dict:
+    """
+    네이버 검색 트렌드(수요 신호) 모멘텀 — 브랜드별 최근4주 vs 직전4주 평균 검색지수.
+
+    search_trends 테이블(kind='brand')이 없거나 비면 빈 dict 반환(비파괴).
+    반환: {brand: {recent, prev, momentum, signal}}  signal ∈ rising|stable|cooling
+    """
+    try:
+        rows = session.execute(text(f"""
+            WITH ranked AS (
+                SELECT term, ratio,
+                       ROW_NUMBER() OVER (PARTITION BY term ORDER BY period DESC) rn
+                FROM {DB_SCHEMA}.search_trends
+                WHERE kind = 'brand'
+            )
+            SELECT term,
+                   AVG(ratio) FILTER (WHERE rn <= 4)              AS recent,
+                   AVG(ratio) FILTER (WHERE rn BETWEEN 5 AND 8)   AS prev
+            FROM ranked GROUP BY term
+        """)).fetchall()
+    except Exception:
+        return {}
+
+    out = {}
+    for term, recent, prev in rows:
+        recent = float(recent or 0)
+        prev = float(prev or 0)
+        momentum = round(recent / prev, 2) if prev >= 1 else 1.0
+        if momentum > 1.3:
+            signal = "rising"
+        elif momentum < 0.77:
+            signal = "cooling"
+        else:
+            signal = "stable"
+        out[term] = {"recent": round(recent, 1), "prev": round(prev, 1),
+                     "momentum": momentum, "signal": signal}
+    return out
+
+
+def get_demand_triangulation(session: Session) -> list[dict]:
+    """
+    뉴스(공급/PR) vs 검색(수요) 삼각검증. 브랜드별로 두 모멘텀을 대조해 라벨링:
+
+      - 뉴스↑ & 검색↑   → '실질'    (real: PR과 실수요 동반 — 진짜 무브)
+      - 뉴스↑ & 검색↓   → 'PR우세'  (pr: 보도는 뜨는데 검색 수요는 식음 — 노이즈 의심)
+      - 검색↑ & 뉴스 정체 → '숨은수요' (latent: 검색은 느는데 보도 적음 — 선제 주목)
+      - 그 외           → '안정'
+
+    주의: 뉴스 모멘텀은 수집빈도 변화에 민감(최근 부풀림)하므로 판별의 핵심은 검색 방향.
+    'PR우세'는 검색이 실제로 *식을 때*만(단순 정체 아님) 붙여 오탐을 줄인다.
+    검색 데이터 없으면(테이블 부재) 각 브랜드 verdict=None. 대시보드/브리핑 공용.
+    """
+    news = compute_brand_momentum(session)
+    search = get_search_momentum(session)
+
+    out = []
+    for n in news:
+        b = n["brand"]
+        s = search.get(b)
+        news_up = n["signal"] == "rising"
+        verdict = None
+        if s is not None:
+            search_up = s["signal"] == "rising"
+            search_down = s["signal"] == "cooling"
+            if news_up and search_up:
+                verdict = "real"
+            elif news_up and search_down:
+                verdict = "pr"
+            elif search_up and not news_up:
+                verdict = "latent"
+            else:
+                verdict = "stable"
+        out.append({
+            "brand":          b,
+            "tier":           n["tier"],
+            "news_momentum":  n["momentum"],
+            "news_signal":    n["signal"],
+            "news_recent_4w": n["recent_4w"],
+            "search_momentum": s["momentum"] if s else None,
+            "search_signal":   s["signal"] if s else None,
+            "search_recent":   s["recent"] if s else None,
+            "verdict":         verdict,
+        })
+    # 검증된 실질 무브 우선 정렬: real > latent > pr > stable, 그 안에서 뉴스 활동량순
+    rank = {"real": 0, "latent": 1, "pr": 2, "stable": 3, None: 4}
+    out.sort(key=lambda x: (rank.get(x["verdict"], 4), -x["news_recent_4w"]))
+    return out
+
+
 def compute_brand_momentum(session: Session) -> list[dict]:
     """
     브랜드별 모멘텀 스코어 계산.
