@@ -837,6 +837,48 @@ def get_country_signal_stats(session: Session, days: int = 30) -> dict:
     return {r[0]: {"total": r[1] or 0, "high": r[2] or 0, "medium": r[3] or 0} for r in rows}
 
 
+def get_market_export_growth(session: Session, hs_like: str = "330499",
+                             trailing: int = 3) -> list[dict]:
+    """
+    관세청 화장품 수출 YoY — 국가별 최근 trailing개월 합 vs 전년 동기.
+
+    hs_like: '330499'(스킨케어·기타, 기본) / '3304%'(화장품 전체). export_stats 없으면 [].
+    반환: [{country_code, country_name, exp_usd_3m, prev_usd_3m, yoy_pct}], 수출액 desc.
+    """
+    try:
+        rows = session.execute(text(f"""
+            WITH mx AS (SELECT MAX(period) m FROM {DB_SCHEMA}.export_stats),
+            cur AS (
+                SELECT country_code, MAX(country_name) country_name, SUM(exp_usd)::float e
+                FROM {DB_SCHEMA}.export_stats, mx
+                WHERE hs_cd LIKE :hs AND period > (m - make_interval(months => :t))
+                GROUP BY country_code),
+            prv AS (
+                SELECT country_code, SUM(exp_usd)::float e
+                FROM {DB_SCHEMA}.export_stats, mx
+                WHERE hs_cd LIKE :hs
+                  AND period > (m - make_interval(months => :t12))
+                  AND period <= (m - make_interval(months => 12))
+                GROUP BY country_code)
+            SELECT cur.country_code, cur.country_name, cur.e, COALESCE(prv.e, 0)
+            FROM cur LEFT JOIN prv USING (country_code)
+            ORDER BY cur.e DESC
+        """), {"hs": hs_like, "t": trailing, "t12": trailing + 12}).fetchall()
+    except Exception:
+        return []
+
+    out = []
+    for cc, name, cur_e, prv_e in rows:
+        cur_e = float(cur_e or 0)
+        prv_e = float(prv_e or 0)
+        yoy = round((cur_e / prv_e - 1) * 100, 1) if prv_e > 0 else None
+        out.append({
+            "country_code": cc, "country_name": name,
+            "exp_usd_3m": cur_e, "prev_usd_3m": prv_e, "yoy_pct": yoy,
+        })
+    return out
+
+
 def get_search_momentum(session: Session) -> dict:
     """
     네이버 검색 트렌드(수요 신호) 모멘텀 — 브랜드별 최근4주 vs 직전4주 평균 검색지수.

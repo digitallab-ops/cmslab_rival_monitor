@@ -34,6 +34,7 @@ from analytics.queries import (
     upsert_insight_cache,
     compute_brand_momentum,
     get_demand_triangulation,
+    get_market_export_growth,
 )
 from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
 from storage.models import get_session
@@ -578,6 +579,44 @@ def _render_expansion_playbook(playbook: list) -> str:
         '</div>'
         f'<div class="pb-grid">{"".join(cards)}</div>'
         '</div>'
+    )
+
+
+def _render_export_growth(growth: list) -> str:
+    """관세청 화장품 수출 성장 — 국가별 최근3M 수출액 + 전년 YoY (성과 신호)."""
+    if not growth:
+        return ('<p class="no-data">수출통계 데이터 없음 '
+                '(관세청 수집 전 · 매월 3일 갱신)</p>')
+
+    # 수출 규모순 상위 12개국 표시, YoY 성장률로 색상
+    rows = []
+    top = growth[:12]
+    max_e = max((g["exp_usd_3m"] for g in top), default=1.0) or 1.0
+    for g in top:
+        cc = g["country_code"]
+        flag = COUNTRY_FLAGS.get(cc, "🌐")
+        name = _COUNTRY_KO_LBL.get(cc, g["country_name"] or cc)
+        musd = g["exp_usd_3m"] / 1e6
+        yoy = g["yoy_pct"]
+        if yoy is None:
+            yoy_txt, yoy_col = "—", "var(--lo)"
+        else:
+            yoy_col = "#4ab884" if yoy >= 15 else ("#e05353" if yoy <= -10 else "var(--mid)")
+            yoy_txt = f'{"+" if yoy >= 0 else ""}{yoy:.0f}%'
+        w = max(3, musd / max_e * 100)
+        rows.append(
+            f'<div class="xg-row">'
+            f'<span class="xg-flag">{flag}</span>'
+            f'<span class="xg-name">{_esc(name)}</span>'
+            f'<div class="xg-bar-bg"><div class="xg-bar-fill" style="width:{w:.1f}%"></div></div>'
+            f'<span class="xg-usd">${musd:,.0f}M</span>'
+            f'<span class="xg-yoy" style="color:{yoy_col}">{yoy_txt}</span>'
+            f'</div>'
+        )
+    return (
+        '<div class="xg-help">최근 3개월 누적 수출액(USD) · YoY = 전년 동기 대비 · '
+        '<b style="color:#4ab884">+15%↑ 성장</b> / <b style="color:#e05353">-10%↓ 둔화</b></div>'
+        '<div class="xg-list">' + "".join(rows) + '</div>'
     )
 
 
@@ -1672,6 +1711,19 @@ a:hover { color: var(--gold); }
 .ds-leg { font-size: 11px; color: var(--lo); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ds-idx { font-size: 10px; color: var(--lo); margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
+/* ── 화장품 수출 성장 (관세청) ── */
+.xg-help { font-size: 10.5px; color: var(--lo); margin-bottom: 9px; }
+.xg-list { display: flex; flex-direction: column; gap: 6px; }
+.xg-row { display: flex; align-items: center; gap: 9px; padding: 6px 10px;
+  background: var(--elevated); border: 1px solid var(--border); border-radius: 3px; }
+.xg-flag { font-size: 15px; flex-shrink: 0; }
+.xg-name { font-size: 12px; font-weight: 600; color: var(--hi); min-width: 92px; white-space: nowrap; }
+.xg-bar-bg { flex: 1; height: 7px; background: var(--deep); border-radius: 1px; overflow: hidden; min-width: 50px; }
+.xg-bar-fill { height: 100%; border-radius: 1px;
+  background: linear-gradient(90deg, rgba(111,176,236,0.4), rgba(111,176,236,0.7)); }
+.xg-usd { font-size: 11.5px; font-weight: 700; color: var(--mid); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+.xg-yoy { font-size: 11.5px; font-weight: 700; min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+
 /* ── 카테고리 대결 뷰 ── */
 .catb-list { display: flex; flex-direction: column; gap: 12px; }
 .catb-row { display: grid; grid-template-columns: 96px 1fr; gap: 12px 14px; align-items: center; }
@@ -2388,6 +2440,7 @@ def _build_full_html(
     market_text: str = "",
     digest: dict = None,
     demand_tri: list = None,
+    export_growth: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2411,6 +2464,7 @@ def _build_full_html(
         _dg.get("ref_date") or "")
     radar_html        = _render_brand_radar(brand_radar or [])
     demand_html       = _render_demand_signal(demand_tri or [])
+    export_growth_html = _render_export_growth(export_growth or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
@@ -2582,6 +2636,14 @@ def _build_full_html(
   <!-- ===== 탭: 우리 관점 ===== -->
   <div class="tab-panel" id="tab-strategy">
     {category_battle_html}
+
+    <!-- 화장품 수출 성장 시장 (관세청 성과 신호) -->
+    <div class="section">
+      <div class="section-title">
+        🌍 화장품 수출 성장 시장 <span class="section-sub">관세청 실수출액(스킨케어·기초 HS 330499) — "어느 시장이 실제로 크고 있나" · 진출 우선순위 하드데이터</span>
+      </div>
+      {export_growth_html}
+    </div>
 
     {expansion_playbook_html}
 
@@ -3095,6 +3157,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             demand_tri = get_demand_triangulation(session)
         except Exception:
             demand_tri = []
+        # 화장품 수출 성장(관세청, 스킨케어 330499) — export_stats 없으면 빈 리스트
+        try:
+            export_growth = get_market_export_growth(session, hs_like="330499", trailing=3)
+        except Exception:
+            export_growth = []
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -3230,6 +3297,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         period_data=period_data,
         brand_radar=brand_radar,
         demand_tri=demand_tri,
+        export_growth=export_growth,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,

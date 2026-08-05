@@ -23,6 +23,7 @@ from analytics.queries import (
     get_expansion_playbook,
     compute_brand_momentum,
     get_demand_triangulation,
+    get_market_export_growth,
 )
 from analytics.summarizer import generate_brand_strategy_summary
 
@@ -328,6 +329,39 @@ def get_demand_signal(brand: str = "") -> dict:
         return {"available": True,
                 "flagged": [_fmt(t) for t in flagged],
                 "all_ranked": [_fmt(t) for t in tri][:15]}
+    finally:
+        s.close()
+
+
+@rival_mcp.tool()
+def get_export_growth(scope: str = "skincare", top: int = 10) -> dict:
+    """
+    관세청 화장품 수출 성장(성과 신호) — 국가별 최근 3개월 수출액 vs 전년 동기 YoY.
+
+    "어느 시장이 실제로 크고 있나"를 하드데이터(USD)로 확인. 진출 뉴스 검증·시장 우선순위용.
+    scope: 'skincare'(HS 330499 기초·기타 = 셀퓨전씨 카테고리, 기본) / 'all'(HS 3304 화장품 전체).
+    수출액 규모순 상위 top개 + 성장률순 상위를 함께 반환.
+    """
+    hs = "3304%" if scope == "all" else "330499"
+    s = get_session()
+    try:
+        rows = get_market_export_growth(s, hs_like=hs, trailing=3)
+        if not rows:
+            return {"available": False,
+                    "note": "수출통계 데이터 없음(아직 수집 전이거나 DATA_GO_KR_KEY 미설정)."}
+
+        def _fmt(r):
+            return {"country": r["country_name"], "country_code": r["country_code"],
+                    "exp_usd_3m_musd": round(r["exp_usd_3m"] / 1e6, 1),
+                    "prev_usd_3m_musd": round(r["prev_usd_3m"] / 1e6, 1),
+                    "yoy_pct": r["yoy_pct"]}
+
+        by_size = [_fmt(r) for r in rows][:top]
+        growers = sorted([r for r in rows if r["yoy_pct"] is not None],
+                         key=lambda r: r["yoy_pct"], reverse=True)
+        by_growth = [_fmt(r) for r in growers][:top]
+        return {"available": True, "scope": scope, "unit": "USD 백만(최근 3개월 합)",
+                "top_by_size": by_size, "top_by_growth": by_growth}
     finally:
         s.close()
 

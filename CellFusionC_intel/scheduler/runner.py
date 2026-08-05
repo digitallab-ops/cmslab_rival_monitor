@@ -205,6 +205,17 @@ def job_search_trends() -> None:
         logger.warning("검색 트렌드 수집 스킵(자격증명/네트워크 확인): %s", e)
 
 
+def job_export_stats() -> None:
+    """관세청 화장품 수출통계 수집 (성과 신호). 월1회 — 데이터 월1회 갱신."""
+    logger.info("=== [월간] 관세청 수출통계 수집 시작 ===")
+    try:
+        from signals.export_stats import run as run_export_stats
+        r = run_export_stats()
+        logger.info("수출통계 수집 완료: 행 %d", r["rows"])
+    except Exception as e:
+        logger.warning("수출통계 수집 스킵(DATA_GO_KR_KEY/네트워크 확인): %s", e)
+
+
 def job_profile_sync() -> None:
     """Cafe24 → 자사 제품 라인 자동 동기화 (company_profile.md). 실패해도 파이프라인 무영향."""
     logger.info("=== 자사 제품 프로필 동기화 시작 ===")
@@ -293,6 +304,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day_of_week="mon,thu", hour=7, minute=0),
         id="search_trends",
         name="[주2회] 네이버 검색 트렌드 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매월 3일 06:30 KST — 관세청 화장품 수출통계(성과 신호). 관세청 월1회 갱신.
+    scheduler.add_job(
+        job_export_stats,
+        trigger=CronTrigger(day=3, hour=6, minute=30),
+        id="export_stats",
+        name="[월간] 관세청 화장품 수출통계 수집",
         max_instances=1,
         coalesce=True,
     )
