@@ -35,6 +35,7 @@ from analytics.queries import (
     compute_brand_momentum,
     get_demand_triangulation,
     get_market_export_growth,
+    get_market_growth_story,
 )
 from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
 from storage.models import get_session
@@ -617,6 +618,95 @@ def _render_export_growth(growth: list) -> str:
         '<div class="xg-help">최근 3개월 누적 수출액(USD) · YoY = 전년 동기 대비 · '
         '<b style="color:#4ab884">+15%↑ 성장</b> / <b style="color:#e05353">-10%↓ 둔화</b></div>'
         '<div class="xg-list">' + "".join(rows) + '</div>'
+    )
+
+
+def _yoy_badge_color(yoy) -> str:
+    if yoy is None:
+        return "var(--lo)"
+    return "#4ab884" if yoy >= 15 else ("#e05353" if yoy <= -10 else "var(--mid)")
+
+
+def _render_growth_story(story: dict) -> str:
+    """시장 성장 스토리 — 수출 YoY(성과) + 그 시장의 경쟁사 활동(뉴스)을 카드로 엮음."""
+    markets = (story or {}).get("markets") or []
+    if not markets:
+        return ('<p class="no-data">수출·활동 연계 데이터 없음 '
+                '(관세청 수집 후 표시 · 매월 3일 갱신)</p>')
+
+    cards = []
+    for m in markets:
+        cc = m["country_code"]
+        flag = COUNTRY_FLAGS.get(cc, "🌐")
+        name = _COUNTRY_KO_LBL.get(cc, m["country_name"] or cc)
+        yoy = m["yoy_pct"]
+        yoy_txt = f'{"+" if (yoy or 0) >= 0 else ""}{yoy:.0f}%' if yoy is not None else "—"
+        col = _yoy_badge_color(yoy)
+        moves = []
+        for mv in m["moves"][:4]:
+            act = ACTIVITY_LABELS.get(mv["activity_type"], mv["activity_type"])
+            title = _esc(mv["title"])
+            title_html = (f'<a href="{_esc(mv["url"])}" target="_blank" rel="noopener">{title}</a>'
+                          if mv["url"] else title)
+            hi = ' gs-mv-hi' if mv["importance"] == "high" else ''
+            moves.append(
+                f'<li class="gs-move{hi}">'
+                f'<span class="gs-mv-brand">{_esc(mv["brand"])}</span>'
+                f'<span class="gs-mv-act">{_esc(act)}</span>'
+                f'<span class="gs-mv-title">{title_html}</span></li>'
+            )
+        moves_html = ("<ul class='gs-moves'>" + "".join(moves) + "</ul>") if moves else \
+            "<div class='gs-nomv'>이 시장 경쟁사 활동 기사 없음(수집 축적 중)</div>"
+        cards.append(
+            f'<div class="gs-card">'
+            f'<div class="gs-head">'
+            f'<span class="gs-flag">{flag}</span>'
+            f'<span class="gs-name">{_esc(name)}</span>'
+            f'<span class="gs-yoy" style="color:{col}">{yoy_txt}</span>'
+            f'</div>'
+            f'<div class="gs-exp">수출 ${m["exp_musd"]:,.0f}M '
+            f'<span class="gs-delta">(전년 대비 +${m["delta_musd"]:,.0f}M)</span></div>'
+            f'<div class="gs-why">이 시장에서 경쟁사가 한 일</div>'
+            f'{moves_html}'
+            f'</div>'
+        )
+    return f'<div class="gs-grid">{"".join(cards)}</div>'
+
+
+def _render_growth_headline(story: dict) -> str:
+    """개요 상단 배너 — 전체 수출 YoY + 성장 top 시장(경쟁사 활동 맥락) 요약."""
+    o = (story or {}).get("overall")
+    markets = (story or {}).get("markets") or []
+    if not o or o.get("yoy_pct") is None:
+        return ""
+    yoy = o["yoy_pct"]
+    col = _yoy_badge_color(yoy)
+    arrow = "▲" if yoy >= 0 else "▼"
+    chips = []
+    for m in markets[:4]:
+        cc = m["country_code"]
+        flag = COUNTRY_FLAGS.get(cc, "🌐")
+        name = _COUNTRY_KO_LBL.get(cc, m["country_name"] or cc)
+        top_brand = m["moves"][0]["brand"] if m["moves"] else ""
+        ctx = f'<span class="gh-chip-ctx">{_esc(top_brand)} 등 {len(m["moves"])}건</span>' if top_brand else ""
+        chips.append(
+            f'<button class="gh-chip" onclick="switchTab(\'strategy\')">'
+            f'<span class="gh-chip-flag">{flag}</span>'
+            f'<span class="gh-chip-name">{_esc(name)}</span>'
+            f'<span class="gh-chip-yoy" style="color:{_yoy_badge_color(m["yoy_pct"])}">'
+            f'{"+" if (m["yoy_pct"] or 0) >= 0 else ""}{m["yoy_pct"]:.0f}%</span>'
+            f'{ctx}</button>'
+        )
+    return (
+        '<div class="gh-band">'
+        '<div class="gh-left">'
+        '<div class="gh-label">주요국 화장품 수출 (관세청 · 최근 3개월 YoY)</div>'
+        f'<div class="gh-big" style="color:{col}">{arrow} {"+" if yoy >= 0 else ""}{yoy:.1f}%</div>'
+        f'<div class="gh-sub">${o["cur_musd"]:,.0f}M · 성장 {o["growers"]}개국 / 둔화 {o["decliners"]}개국</div>'
+        '</div>'
+        f'<div class="gh-right"><div class="gh-right-lbl">🔥 뜨는 시장 — 실수출↑ 그리고 경쟁사 활동↑</div>'
+        f'<div class="gh-chips">{"".join(chips)}</div></div>'
+        '</div>'
     )
 
 
@@ -1724,6 +1814,51 @@ a:hover { color: var(--gold); }
 .xg-usd { font-size: 11.5px; font-weight: 700; color: var(--mid); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
 .xg-yoy { font-size: 11.5px; font-weight: 700; min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
 
+/* ── 시장 성장 스토리 (수출 x 활동) ── */
+.gs-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 13px; }
+@media (max-width: 760px) { .gs-grid { grid-template-columns: 1fr; } }
+.gs-card { background: rgba(0,0,0,0.02); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; }
+.gs-head { display: flex; align-items: center; gap: 9px; }
+.gs-flag { font-size: 20px; }
+.gs-name { font-size: 15px; font-weight: 700; color: var(--hi); }
+.gs-yoy { font-size: 19px; font-weight: 800; margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.gs-exp { font-size: 12px; color: var(--mid); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.gs-delta { color: #4ab884; font-weight: 600; }
+.gs-why { font-size: 10.5px; font-weight: 700; color: var(--lo); letter-spacing: 0.04em;
+  text-transform: uppercase; margin: 11px 0 6px; padding-top: 9px; border-top: 1px solid var(--border); }
+.gs-moves { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.gs-move { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; font-size: 12px; line-height: 1.4; }
+.gs-mv-brand { font-weight: 700; color: var(--hi); flex-shrink: 0; }
+.gs-mv-act { font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 2px; flex-shrink: 0;
+  background: rgba(111,176,236,0.14); color: #6fb0ec; letter-spacing: 0.03em; }
+.gs-move.gs-mv-hi .gs-mv-act { background: rgba(224,83,83,0.14); color: #e05353; }
+.gs-mv-title { color: var(--mid); flex: 1; min-width: 160px; }
+.gs-mv-title a { color: var(--mid); text-decoration: none; border-bottom: 1px dotted var(--border); }
+.gs-mv-title a:hover { color: var(--hi); }
+.gs-nomv { font-size: 11.5px; color: var(--lo); font-style: italic; }
+
+/* ── 개요 성장 헤드라인 배너 ── */
+.gh-band { display: flex; gap: 20px; flex-wrap: wrap; align-items: stretch;
+  background: linear-gradient(120deg, rgba(74,184,132,0.07), rgba(111,176,236,0.05));
+  border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; margin-bottom: 18px; }
+.gh-left { display: flex; flex-direction: column; justify-content: center; min-width: 190px;
+  padding-right: 20px; border-right: 1px solid var(--border); }
+.gh-label { font-size: 11px; color: var(--lo); letter-spacing: 0.02em; }
+.gh-big { font-size: 38px; font-weight: 800; line-height: 1.05; margin: 4px 0; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.gh-sub { font-size: 11.5px; color: var(--mid); font-variant-numeric: tabular-nums; }
+.gh-right { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 8px; }
+.gh-right-lbl { font-size: 11px; font-weight: 700; color: var(--mid); letter-spacing: 0.02em; }
+.gh-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.gh-chip { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  background: var(--elevated); border: 1px solid var(--border); border-radius: 20px;
+  padding: 5px 12px; font-size: 12px; color: var(--hi); transition: border-color 0.15s, background 0.15s; }
+.gh-chip:hover { border-color: rgba(74,184,132,0.5); background: rgba(74,184,132,0.08); }
+.gh-chip-flag { font-size: 14px; }
+.gh-chip-name { font-weight: 700; }
+.gh-chip-yoy { font-weight: 800; font-variant-numeric: tabular-nums; }
+.gh-chip-ctx { font-size: 10.5px; color: var(--lo); }
+@media (max-width: 640px) { .gh-left { border-right: none; padding-right: 0; } .gh-big { font-size: 30px; } }
+
 /* ── 카테고리 대결 뷰 ── */
 .catb-list { display: flex; flex-direction: column; gap: 12px; }
 .catb-row { display: grid; grid-template-columns: 96px 1fr; gap: 12px 14px; align-items: center; }
@@ -2441,6 +2576,7 @@ def _build_full_html(
     digest: dict = None,
     demand_tri: list = None,
     export_growth: list = None,
+    growth_story: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2465,6 +2601,8 @@ def _build_full_html(
     radar_html        = _render_brand_radar(brand_radar or [])
     demand_html       = _render_demand_signal(demand_tri or [])
     export_growth_html = _render_export_growth(export_growth or [])
+    growth_story_html  = _render_growth_story(growth_story or {})
+    growth_headline_html = _render_growth_headline(growth_story or {})
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
@@ -2576,6 +2714,8 @@ def _build_full_html(
       {kpi_html}
     </div>
 
+    {growth_headline_html}
+
     {worldmap_section}
 
     {overview_digest_html}
@@ -2637,10 +2777,18 @@ def _build_full_html(
   <div class="tab-panel" id="tab-strategy">
     {category_battle_html}
 
-    <!-- 화장품 수출 성장 시장 (관세청 성과 신호) -->
+    <!-- 시장 성장 스토리 — 수출 성장(성과) x 그 시장 경쟁사 활동(뉴스) -->
     <div class="section">
       <div class="section-title">
-        🌍 화장품 수출 성장 시장 <span class="section-sub">관세청 실수출액(스킨케어·기초 HS 330499) — "어느 시장이 실제로 크고 있나" · 진출 우선순위 하드데이터</span>
+        🔥 뜨는 시장, 왜 크는가 <span class="section-sub">관세청 실수출 성장(YoY) + 같은 시장에서 경쟁사가 한 진출·입점·마케팅 — 발표(뉴스)·성과(수출)를 한눈에 대조</span>
+      </div>
+      {growth_story_html}
+    </div>
+
+    <!-- 화장품 수출 규모·성장 전체 랭킹 (스킨케어 330499) -->
+    <div class="section">
+      <div class="section-title">
+        🌍 화장품 수출 시장 랭킹 <span class="section-sub">관세청 실수출액(스킨케어·기초 HS 330499) 규모순 + YoY · 진출 우선순위 하드데이터</span>
       </div>
       {export_growth_html}
     </div>
@@ -3162,6 +3310,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             export_growth = get_market_export_growth(session, hs_like="330499", trailing=3)
         except Exception:
             export_growth = []
+        # 시장 성장 스토리(수출 YoY x 그 시장 경쟁사 활동) — 삼각검증 통합 뷰
+        try:
+            growth_story = get_market_growth_story(session)
+        except Exception:
+            growth_story = {"overall": None, "markets": []}
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -3298,6 +3451,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brand_radar=brand_radar,
         demand_tri=demand_tri,
         export_growth=export_growth,
+        growth_story=growth_story,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,

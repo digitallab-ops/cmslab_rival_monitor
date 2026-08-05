@@ -879,6 +879,80 @@ def get_market_export_growth(session: Session, hs_like: str = "330499",
     return out
 
 
+# 성장 '왜'를 설명하는 전략 활동 유형 (실적공시·기타 제외)
+_STORY_ACTS = ("신시장_진출", "유통_채널", "신제품_런칭", "브랜드_마케팅",
+               "인플루언서_협업", "투자_BD", "가격_프로모션")
+
+
+def get_market_growth_story(session: Session, top_n: int = 6,
+                            window_days: int = 150, trailing: int = 3) -> dict:
+    """
+    시장 성장 스토리 — 국가별 화장품 수출 YoY(성과) + 같은 시장의 경쟁사 활동(뉴스).
+
+    "이 시장이 왜 크는가"를 삼각으로 엮음: 실제 수출 성장 + 그 시장에서 경쟁사가
+    한 진출·입점·신제품·마케팅 활동을 함께 제시(인과 아님, 동반 맥락).
+
+    반환: {overall: {yoy_pct, cur_musd, prev_musd, growers, decliners},
+           markets: [{country_code, country_name, exp_musd, yoy_pct, delta_musd,
+                      moves: [{brand, activity_type, title, url, date, importance}]}]}
+    export_stats 없으면 markets=[], overall=None.
+    """
+    growth = get_market_export_growth(session, hs_like="3304%", trailing=trailing)
+    if not growth:
+        return {"overall": None, "markets": []}
+
+    # 전체(주요국 합) YoY
+    cur_tot = sum(g["exp_usd_3m"] for g in growth)
+    prv_tot = sum(g["prev_usd_3m"] for g in growth)
+    overall = {
+        "yoy_pct": round((cur_tot / prv_tot - 1) * 100, 1) if prv_tot > 0 else None,
+        "cur_musd": round(cur_tot / 1e6, 1),
+        "prev_musd": round(prv_tot / 1e6, 1),
+        "growers": sum(1 for g in growth if (g["yoy_pct"] or 0) >= 15),
+        "decliners": sum(1 for g in growth if (g["yoy_pct"] or 0) <= -10),
+    }
+
+    # 성장 시장 선별: 규모 하한(월 $3M↑=3M누적 $9M↑)으로 미세시장 노이즈 제거 후 YoY순
+    sizable = [g for g in growth if g["exp_usd_3m"] >= 9_000_000 and g["yoy_pct"] is not None]
+    sizable.sort(key=lambda g: g["yoy_pct"], reverse=True)
+    picked = sizable[:top_n]
+
+    cutoff = _cutoff_iso(window_days)
+    acts_ph = ", ".join(f"'{a}'" for a in _STORY_ACTS)
+    markets = []
+    for g in picked:
+        cc = g["country_code"]
+        rows = session.execute(text(f"""
+            SELECT brand, activity_type, title_ko, title, source_url,
+                   published_date, importance, strategic_score
+            FROM {DB_SCHEMA}.news_articles
+            WHERE country = :cc
+              AND published_date >= :cutoff
+              AND is_duplicate IS NOT TRUE
+              AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+              AND activity_type IN ({acts_ph})
+            ORDER BY (importance = 'high') DESC,
+                     COALESCE(strategic_score, 0) DESC,
+                     published_date DESC
+            LIMIT 5
+        """), {"cc": cc, "cutoff": cutoff}).fetchall()
+        moves = [{
+            "brand": r[0], "activity_type": r[1],
+            "title": (r[2] or r[3] or "")[:90],
+            "url": r[4] or "",
+            "date": str(r[5])[:10] if r[5] else "",
+            "importance": r[6],
+        } for r in rows]
+        markets.append({
+            "country_code": cc, "country_name": g["country_name"],
+            "exp_musd": round(g["exp_usd_3m"] / 1e6, 1),
+            "yoy_pct": g["yoy_pct"],
+            "delta_musd": round((g["exp_usd_3m"] - g["prev_usd_3m"]) / 1e6, 1),
+            "moves": moves,
+        })
+    return {"overall": overall, "markets": markets}
+
+
 def get_search_momentum(session: Session) -> dict:
     """
     네이버 검색 트렌드(수요 신호) 모멘텀 — 브랜드별 최근4주 vs 직전4주 평균 검색지수.

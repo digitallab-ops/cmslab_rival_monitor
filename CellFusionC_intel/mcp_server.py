@@ -24,6 +24,7 @@ from analytics.queries import (
     compute_brand_momentum,
     get_demand_triangulation,
     get_market_export_growth,
+    get_market_growth_story,
 )
 from analytics.summarizer import generate_brand_strategy_summary
 
@@ -362,6 +363,40 @@ def get_export_growth(scope: str = "skincare", top: int = 10) -> dict:
         by_growth = [_fmt(r) for r in growers][:top]
         return {"available": True, "scope": scope, "unit": "USD 백만(최근 3개월 합)",
                 "top_by_size": by_size, "top_by_growth": by_growth}
+    finally:
+        s.close()
+
+
+@rival_mcp.tool()
+def get_growth_story(top: int = 6) -> dict:
+    """
+    시장 성장 스토리 — 어느 시장이 왜 크는가. 수출 성장(성과)과 그 시장 경쟁사 활동(뉴스)을 엮음.
+
+    "요즘 뜨는 시장 왜 커?" / "폴란드 왜 성장해?" 류 질문에 답용. 각 시장에 대해
+    실수출 YoY + 그 시장에서 경쟁사가 한 진출·입점·신제품·마케팅 활동을 함께 반환한다.
+    (인과 아님 — 동반 맥락. 수출은 국가단위 전체 화장품, 활동은 개별 경쟁사.)
+    """
+    s = get_session()
+    try:
+        story = get_market_growth_story(s, top_n=top)
+        if not story.get("markets"):
+            return {"available": False,
+                    "note": "수출·활동 연계 데이터 없음(관세청 수집 전이거나 DATA_GO_KR_KEY 미설정)."}
+        o = story["overall"]
+        return {
+            "available": True,
+            "overall": {"yoy_pct": o["yoy_pct"], "cur_musd": o["cur_musd"],
+                        "growers": o["growers"], "decliners": o["decliners"]},
+            "markets": [{
+                "country": m["country_name"], "yoy_pct": m["yoy_pct"],
+                "exp_musd": m["exp_musd"], "delta_musd": m["delta_musd"],
+                "competitor_moves": [
+                    {"brand": mv["brand"], "activity": mv["activity_type"],
+                     "title": mv["title"], "date": mv["date"]}
+                    for mv in m["moves"]
+                ],
+            } for m in story["markets"]],
+        }
     finally:
         s.close()
 
