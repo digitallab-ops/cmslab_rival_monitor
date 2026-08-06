@@ -593,7 +593,7 @@ def _render_export_growth(growth: list) -> str:
         return ('<p class="no-data">수출통계 데이터 없음 '
                 '(관세청 수집 전 · 매월 3일 갱신)</p>')
 
-    # 수출 규모순 상위 12개국 표시, YoY 성장률로 색상
+    # 수출 규모순 상위 12개국. 바 = 현재(틸) 위에 전년(회색) 오버레이 → 성장분이 틸로 드러남.
     rows = []
     top = growth[:12]
     max_e = max((g["exp_usd_3m"] for g in top), default=1.0) or 1.0
@@ -601,26 +601,31 @@ def _render_export_growth(growth: list) -> str:
         cc = g["country_code"]
         flag = COUNTRY_FLAGS.get(cc, "🌐")
         name = _COUNTRY_KO_LBL.get(cc, g["country_name"] or cc)
-        musd = g["exp_usd_3m"] / 1e6
+        cur = g["exp_usd_3m"] / 1e6
+        prev = g["prev_usd_3m"] / 1e6
         yoy = g["yoy_pct"]
         if yoy is None:
             yoy_txt, yoy_col = "—", "var(--lo)"
         else:
-            yoy_col = "#4ab884" if yoy >= 15 else ("#e05353" if yoy <= -10 else "var(--mid)")
+            yoy_col = "var(--teal)" if yoy >= 15 else ("var(--coral)" if yoy <= -10 else "var(--mid)")
             yoy_txt = f'{"+" if yoy >= 0 else ""}{yoy:.0f}%'
-        w = max(3, musd / max_e * 100)
+        curw = max(3, cur / max_e * 100)
+        prevw = min(max(prev / max_e * 100, 0), 100)
         rows.append(
             f'<div class="xg-row">'
             f'<span class="xg-flag">{flag}</span>'
             f'<span class="xg-name">{_esc(name)}</span>'
-            f'<div class="xg-bar-bg"><div class="xg-bar-fill" style="width:{w:.1f}%"></div></div>'
-            f'<span class="xg-usd">${musd:,.0f}M</span>'
+            f'<div class="xg-bar-bg">'
+            f'<div class="xg-bar-cur" style="width:{curw:.1f}%"></div>'
+            f'<div class="xg-bar-prev" style="width:{prevw:.1f}%"></div></div>'
+            f'<span class="xg-val"><span class="xg-prevv">${prev:,.0f}M →</span> ${cur:,.0f}M</span>'
             f'<span class="xg-yoy" style="color:{yoy_col}">{yoy_txt}</span>'
             f'</div>'
         )
     return (
-        '<div class="xg-help">최근 3개월 누적 수출액(USD) · YoY = 전년 동기 대비 · '
-        '<b style="color:#4ab884">+15%↑ 성장</b> / <b style="color:#e05353">-10%↓ 둔화</b></div>'
+        '<div class="xg-help">최근 3개월 누적 수출액(USD) · '
+        '<b style="color:var(--mid)">회색=전년</b> <b style="color:var(--teal)">틸=현재</b> (틸 초과분 = 성장) · '
+        'YoY <b style="color:var(--teal)">+15%↑</b> / <b style="color:var(--coral)">-10%↓</b></div>'
         '<div class="xg-list">' + "".join(rows) + '</div>'
     )
 
@@ -1925,12 +1930,15 @@ a:hover { color: var(--gold); }
 .xg-row { display: flex; align-items: center; gap: 9px; padding: 6px 10px;
   background: var(--elevated); border: 1px solid var(--border); border-radius: 3px; }
 .xg-flag { font-size: 15px; flex-shrink: 0; }
-.xg-name { font-size: 12px; font-weight: 600; color: var(--hi); min-width: 92px; white-space: nowrap; }
-.xg-bar-bg { flex: 1; height: 7px; background: var(--deep); border-radius: 1px; overflow: hidden; min-width: 50px; }
-.xg-bar-fill { height: 100%; border-radius: 1px;
-  background: linear-gradient(90deg, rgba(111,176,236,0.4), rgba(111,176,236,0.7)); }
-.xg-usd { font-size: 11.5px; font-weight: 700; color: var(--mid); min-width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
-.xg-yoy { font-size: 11.5px; font-weight: 700; min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+.xg-name { font-size: 12px; font-weight: 600; color: var(--hi); min-width: 84px; white-space: nowrap; }
+.xg-bar-bg { position: relative; flex: 1; height: 11px; background: var(--deep); border-radius: 2px; overflow: hidden; min-width: 60px; }
+.xg-bar-cur { position: absolute; left: 0; top: 0; height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, rgba(70,214,195,.5), rgba(70,214,195,.85)); }
+.xg-bar-prev { position: absolute; left: 0; top: 0; height: 100%; border-radius: 2px 0 0 2px;
+  background: rgba(154,164,166,.32); }
+.xg-val { font-size: 11.5px; font-weight: 700; color: var(--hi); min-width: 128px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.xg-val .xg-prevv { color: var(--lo); font-weight: 500; font-size: 10.5px; }
+.xg-yoy { font-size: 12px; font-weight: 700; min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ── 시장 성장 스토리 (수출 x 활동) ── */
 .gs-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 13px; }
@@ -2232,7 +2240,13 @@ a:hover { color: var(--gold); }
 .synth .lead h2 { font-size:22px; line-height:1.4; margin:0; font-weight:650; letter-spacing:-.01em;
   border-left:2px solid var(--champ); padding-left:16px; color:var(--hi); }
 .synth .lead h2 b { color:var(--champ2); }
-.synth .lead .by { font-family:var(--mono); font-size:10px; color:var(--lo); margin-top:14px; letter-spacing:.05em; }
+.synth .lead .synth-body { font-size:13px; line-height:1.7; color:var(--mid); margin:14px 0 0; max-width:64ch; }
+.synth .lead .synth-body b { color:var(--hi); font-weight:600; }
+.synth .lead .synth-facts { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+.synth .lead .sf { font-family:var(--mono); font-size:11px; color:var(--hi); background:rgba(216,184,120,.08);
+  border:1px solid var(--border); border-radius:5px; padding:5px 11px; display:inline-flex; gap:7px; align-items:baseline; }
+.synth .lead .sf i { font-style:normal; font-size:9px; letter-spacing:.1em; color:var(--champ-d); text-transform:uppercase; }
+.synth .lead .by { font-family:var(--mono); font-size:10px; color:var(--lo); margin-top:16px; letter-spacing:.05em; }
 .synth .cols { display:flex; flex-direction:column; }
 .synth .scol { padding:12px 20px; border-bottom:1px solid var(--border); }
 .synth .scol:last-child { border-bottom:none; }
@@ -2893,14 +2907,38 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
     top_brand = composite[0] if composite else None
     yoy = o.get("yoy_pct")
 
+    high7 = (stats7 or {}).get("high", 0)
+    growers = o.get("growers")
+    top3 = ", ".join(_esc(b["brand"]) for b in composite[:3]) if composite else ""
+    top_mkt_name = _esc(_COUNTRY_KO_LBL.get(top_mkt["country_code"], top_mkt["country_name"])) if top_mkt else ""
+
     bits = []
     if yoy is not None:
         bits.append(f'주요국 화장품 수출 <b>{"+" if yoy>=0 else ""}{yoy:.0f}%</b>')
     if top_mkt:
-        bits.append(f'최고 성장 <b>{_esc(_COUNTRY_KO_LBL.get(top_mkt["country_code"], top_mkt["country_name"]))} +{top_mkt["yoy_pct"]:.0f}%</b>')
+        bits.append(f'최고 성장 <b>{top_mkt_name} +{top_mkt["yoy_pct"]:.0f}%</b>')
     if top_brand:
         bits.append(f'종합 스코어 1위 <b>{_esc(top_brand["brand"])}</b>')
     lead = " · ".join(bits) if bits else "최근 7일 경쟁 신호를 5축(뉴스·검색·수출·재무·상표)으로 교차검증했습니다."
+
+    # 데이터 기반 합성 문단 (드라마틱 문구 배제)
+    sents = []
+    if high7:
+        sents.append(f'최근 7일 HIGH 신호 <b>{high7}건</b>이 포착됐습니다.')
+    if top_mkt and growers is not None:
+        sents.append(f'주요국 화장품 수출은 <b>{growers}개국</b>에서 늘었고, 그중 <b>{top_mkt_name}</b>가 전년 대비 <b>+{top_mkt["yoy_pct"]:.0f}%</b>로 가장 가팔랐습니다 — 발표(뉴스)가 실제 성과(수출)로 이어지는지 함께 검증됩니다.')
+    if top3:
+        sents.append(f'브랜드 종합 스코어(모멘텀·실적·상표선행·수요 통합)는 <b>{top3}</b> 순으로 높습니다.')
+    body = " ".join(sents) or "관세청·DART·KIPRIS·검색 신호를 뉴스와 교차검증해 정리했습니다."
+
+    facts = []
+    if high7:
+        facts.append(f'<span class="sf"><i>HIGH</i>{high7}건</span>')
+    if growers is not None:
+        facts.append(f'<span class="sf"><i>수출 성장국</i>{growers}개</span>')
+    if composite:
+        facts.append(f'<span class="sf"><i>종합 스코어</i>{len(composite)}브랜드</span>')
+    facts_html = f'<div class="synth-facts">{"".join(facts)}</div>' if facts else ""
 
     # 대응/기회/점검 3열 (기존 파싱 재사용)
     cols = []
@@ -2929,6 +2967,8 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
         '<div class="synth hud">'
         '<div class="lead"><div class="tl">Weekly Synthesis · AI 종합</div>'
         f'<h2>{lead}</h2>'
+        f'<p class="synth-body">{body}</p>'
+        f'{facts_html}'
         '<div class="by">최근 7일 · 뉴스·검색·수출·재무·상표 5축 교차검증</div></div>'
         f'<div class="cols">{cols_html}</div>'
         '</div>'
@@ -3558,7 +3598,7 @@ var _ddToken = 0;
 function _renderCellSummary(brand, country) {{
   var sumEl = document.getElementById('dd-summary');
   if (!sumEl) return;
-  if (brand === 'all') {{ sumEl.style.display = 'none'; sumEl.innerHTML = ''; return; }}
+  if (brand === 'all' || country === 'all') {{ sumEl.style.display = 'none'; sumEl.innerHTML = ''; return; }}
   var myToken = ++_ddToken;
   sumEl.style.display = '';
   sumEl.innerHTML = '<div class="dd-sum-label">전략 인사이트</div>'
@@ -3587,8 +3627,8 @@ function _renderCellSummary(brand, country) {{
 
 function openHeatmapDrilldown(brand, country, total) {{
   var _CN = _CN2;
-  var arts = HIGH_DATA.filter(function(a) {{ return (brand === 'all' || a.brand === brand) && a.country === country; }});
-  document.getElementById('dd-title').textContent = brand === 'all' ? (_CN[country] || country) + ' 전체' : brand + ' · ' + (_CN[country] || country);
+  var arts = HIGH_DATA.filter(function(a) {{ return (brand === 'all' || a.brand === brand) && (country === 'all' || a.country === country); }});
+  document.getElementById('dd-title').textContent = brand === 'all' ? (_CN[country] || country) + ' 전체' : brand + ' · ' + (country === 'all' ? '전체 시장' : (_CN[country] || country));
   var highCount = arts.filter(function(a){{ return a.imp === 'high'; }}).length;
   var medCount  = arts.length - highCount;
   var countText = (typeof total === 'number' ? '전체 ' + total + '건 · ' : '') + 'HIGH ' + highCount + '건' + (medCount > 0 ? ' · MED ' + medCount + '건' : '');
