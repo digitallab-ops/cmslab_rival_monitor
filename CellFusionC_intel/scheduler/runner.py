@@ -227,6 +227,48 @@ def job_dart_financials() -> None:
         logger.warning("DART 재무 수집 스킵(OPENDART_KEY/네트워크 확인): %s", e)
 
 
+def job_google_trends() -> None:
+    """구글 트렌드(글로벌 수요) 수집 + 강한 검색 급등 Slack 알림. 주3회."""
+    logger.info("=== [주3회] 구글 트렌드 수집 시작 ===")
+    try:
+        from signals.google_trends import run as run_gt
+        r = run_gt()
+        logger.info("구글 트렌드 수집 완료: 행 %d (실패배치 %d)", r["rows"], r["failed"])
+    except Exception as e:
+        logger.warning("구글 트렌드 수집 스킵(pytrends/네트워크 확인): %s", e)
+        return
+    # 강한 급등만 알림(오탐 억제): 급등 2배↑ & 최근지수 30↑
+    try:
+        from analytics.queries import get_google_spikes
+        session = get_session()
+        try:
+            spikes = [x for x in get_google_spikes(session, spike_ratio=2.0, floor=30.0)]
+        finally:
+            session.close()
+        if spikes:
+            _notify_search_spikes(spikes[:6])
+    except Exception as e:
+        logger.warning("검색 급등 알림 스킵: %s", e)
+    logger.info("=== [주3회] 구글 트렌드 완료 ===")
+
+
+def _notify_search_spikes(spikes: list) -> None:
+    """글로벌 검색 급등 Slack 알림(webhook 없으면 스킵)."""
+    url = os.getenv("SLACK_WEBHOOK_URL_2") or os.getenv("SLACK_WEBHOOK_URL", "")
+    if not url:
+        return
+    lines = [f"• *{s['brand']}* ({s['geo']}) 검색 {s['spike_ratio']}배↑ "
+             f"(최근 {s['recent']} ← {s['baseline']})" for s in spikes]
+    text_msg = "🔺 *글로벌 검색 급등 감지* (구글 트렌드, 최근7일 vs 직전28일)\n" + "\n".join(lines)
+    try:
+        import json
+        data = json.dumps({"text": text_msg}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        logger.warning("검색 급등 Slack 전송 실패: %s", e)
+
+
 def job_trademark() -> None:
     """KIPRIS 해외상표 수집 (진출 선행신호). 월1회 — 상표 갱신 매월."""
     logger.info("=== [월간] KIPRIS 해외상표 수집 시작 ===")
@@ -320,12 +362,22 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # 월·목 07:00 KST — 네이버 검색 트렌드 수집(수요 신호). 월요일분은 주간 브리핑(08:00) 전.
+    # 월·목 07:00 KST — 네이버 검색 트렌드 수집(국내 수요 신호). 월요일분은 주간 브리핑(08:00) 전.
     scheduler.add_job(
         job_search_trends,
         trigger=CronTrigger(day_of_week="mon,thu", hour=7, minute=0),
         id="search_trends",
         name="[주2회] 네이버 검색 트렌드 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 월·수·금 07:20 KST — 구글 트렌드(글로벌 수요) 수집 + 검색 급등 알림.
+    scheduler.add_job(
+        job_google_trends,
+        trigger=CronTrigger(day_of_week="mon,wed,fri", hour=7, minute=20),
+        id="google_trends",
+        name="[주3회] 구글 트렌드(글로벌) 수집·급등감지",
         max_instances=1,
         coalesce=True,
     )

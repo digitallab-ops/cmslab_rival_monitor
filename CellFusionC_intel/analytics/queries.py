@@ -884,6 +884,44 @@ _STORY_ACTS = ("신시장_진출", "유통_채널", "신제품_런칭", "브랜�
                "인플루언서_협업", "투자_BD", "가격_프로모션")
 
 
+def get_google_spikes(session: Session, spike_ratio: float = 1.5,
+                      floor: float = 20.0) -> list[dict]:
+    """
+    구글 트렌드 검색 급등 감지 — (브랜드×지역)별 최근 7일 평균 vs 직전 28일 평균.
+
+    글로벌·US·JP 시장별 검색 급등 = 뭔가 터지는 조짐(수출·진출 선행). google_trends 없으면 [].
+    반환: spike_ratio 이상 & 최근값 floor 이상만. 급등 강도순.
+    """
+    try:
+        rows = session.execute(text(f"""
+            WITH ranked AS (
+                SELECT brand, geo, period, ratio,
+                       ROW_NUMBER() OVER (PARTITION BY brand, geo ORDER BY period DESC) rn
+                FROM {DB_SCHEMA}.google_trends
+                WHERE brand IS NOT NULL
+            )
+            SELECT brand, geo,
+                   AVG(ratio) FILTER (WHERE rn <= 7)                AS recent,
+                   AVG(ratio) FILTER (WHERE rn BETWEEN 8 AND 35)    AS baseline
+            FROM ranked GROUP BY brand, geo
+        """)).fetchall()
+    except Exception:
+        return []
+
+    out = []
+    for brand, geo, recent, baseline in rows:
+        recent = float(recent or 0)
+        baseline = float(baseline or 0)
+        if recent < floor or baseline < 1:
+            continue
+        ratio = round(recent / baseline, 2)
+        if ratio >= spike_ratio:
+            out.append({"brand": brand, "geo": geo, "recent": round(recent, 1),
+                        "baseline": round(baseline, 1), "spike_ratio": ratio})
+    out.sort(key=lambda x: x["spike_ratio"], reverse=True)
+    return out
+
+
 def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -> dict:
     """
     해외 상표 출원 = 진출 선행신호(KIPRIS). 자기출원(is_own)·화장품류(is_cosmetic)만.

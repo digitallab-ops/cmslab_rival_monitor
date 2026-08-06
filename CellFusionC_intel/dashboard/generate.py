@@ -38,6 +38,7 @@ from analytics.queries import (
     get_market_growth_story,
     get_competitor_financials,
     get_trademark_signals,
+    get_google_spikes,
 )
 from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
 from storage.models import get_session
@@ -666,6 +667,25 @@ def _render_financials(fins: list) -> str:
         '일부라 수치가 회사 전체임(예: 구달=클리오, 센텔리안24=동국제약, 에스트라=아모레퍼시픽). '
         '비상장 외감법인(아누아·조선미녀·토리든 등)은 표준 재무 API 미제공으로 제외.</div>'
     )
+
+
+def _render_search_spikes(spikes: list) -> str:
+    """글로벌 검색 급등(구글) — 최근7일 vs 직전28일 급증 브랜드×시장."""
+    if not spikes:
+        return ('<p class="no-data">현재 급등 브랜드 없음 '
+                '(또는 구글 트렌드 수집 전 · 월·수·금 갱신)</p>')
+    _GEO = {"GLOBAL": "🌐 글로벌", "US": "🇺🇸 미국", "JP": "🇯🇵 일본"}
+    rows = []
+    for s in spikes[:12]:
+        rows.append(
+            f'<div class="sp-row">'
+            f'<span class="sp-brand">{_esc(s["brand"])}</span>'
+            f'<span class="sp-geo">{_GEO.get(s["geo"], s["geo"])}</span>'
+            f'<span class="sp-x">▲ {s["spike_ratio"]}배</span>'
+            f'<span class="sp-idx">지수 {s["recent"]:.0f} ← {s["baseline"]:.0f}</span>'
+            f'</div>'
+        )
+    return '<div class="sp-list">' + "".join(rows) + '</div>'
 
 
 def _render_trademark(sig: dict) -> str:
@@ -1932,6 +1952,15 @@ a:hover { color: var(--gold); }
 .fin-whole { font-size: 9px; color: var(--lo); margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; }
 .fin-note { font-size: 10.5px; color: var(--lo); line-height: 1.5; margin-top: 8px; }
 
+/* ── 글로벌 검색 급등(구글) ── */
+.sp-list { display: flex; flex-direction: column; gap: 6px; }
+.sp-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+  background: var(--elevated); border: 1px solid var(--border); border-radius: 3px; }
+.sp-brand { font-size: 12px; font-weight: 700; color: var(--hi); min-width: 120px; white-space: nowrap; }
+.sp-geo { font-size: 11.5px; color: var(--mid); min-width: 74px; white-space: nowrap; }
+.sp-x { font-size: 12px; font-weight: 800; color: #e0533a; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sp-idx { font-size: 10.5px; color: var(--lo); margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
 /* ── 해외 상표 출원 선행신호 ── */
 .tm-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 11px; }
 .tm-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
@@ -2689,6 +2718,7 @@ def _build_full_html(
     growth_story: dict = None,
     financials: list = None,
     trademark_sig: dict = None,
+    search_spikes: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2717,6 +2747,7 @@ def _build_full_html(
     growth_headline_html = _render_growth_headline(growth_story or {})
     financials_html   = _render_financials(financials or [])
     trademark_html    = _render_trademark(trademark_sig or {})
+    search_spikes_html = _render_search_spikes(search_spikes or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
@@ -2852,6 +2883,14 @@ def _build_full_html(
         📡 수요 검증 <span class="section-sub">보도량(공급) vs 네이버 검색량(수요) 대조 — "진짜 무브인가, PR 노이즈인가"</span>
       </div>
       {demand_html}
+    </div>
+
+    <!-- 글로벌 검색 급등 (구글 트렌드) — 네이버(국내) 보완 -->
+    <div class="section">
+      <div class="section-title">
+        🔺 글로벌 검색 급등 <span class="section-sub">구글 트렌드 글로벌·미국·일본 — 최근7일 vs 직전28일 급증(네이버=국내 보완, 해외 수요 조기신호)</span>
+      </div>
+      {search_spikes_html}
     </div>
 
     <!-- 경쟁사 실적 (DART 전자공시 성과 신호) -->
@@ -3455,6 +3494,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             trademark_sig = get_trademark_signals(session)
         except Exception:
             trademark_sig = {"feed": [], "brands": []}
+        # 글로벌 검색 급등(구글 트렌드) — google_trends 없으면 빈 리스트
+        try:
+            search_spikes = get_google_spikes(session)
+        except Exception:
+            search_spikes = []
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -3594,6 +3638,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         growth_story=growth_story,
         financials=financials,
         trademark_sig=trademark_sig,
+        search_spikes=search_spikes,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,

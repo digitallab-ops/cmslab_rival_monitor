@@ -27,6 +27,7 @@ from analytics.queries import (
     get_market_growth_story,
     get_competitor_financials,
     get_trademark_signals,
+    get_google_spikes,
 )
 from analytics.summarizer import generate_brand_strategy_summary
 
@@ -450,6 +451,31 @@ def get_trademark_signals_view(months: int = 18) -> dict:
         return {"available": True, "scope": "US·JP · 자기출원·화장품류",
                 "recent_filings": sig["feed"],
                 "by_brand": sig["brands"]}
+    finally:
+        s.close()
+
+
+@rival_mcp.tool()
+def get_search_spikes(scope: str = "all") -> dict:
+    """
+    글로벌 검색 급등(구글 트렌드) — 최근 7일 vs 직전 28일 검색 관심도 급증 브랜드×시장.
+
+    "요즘 해외에서 갑자기 검색 뜨는 브랜드 있어?" 류 질문용. 네이버(국내)와 달리
+    글로벌·미국·일본 시장 수요를 봄. 급등 = 진출·바이럴·수출 증가의 조기 신호.
+    scope: 'all' / 'GLOBAL' / 'US' / 'JP'.
+    """
+    s = get_session()
+    try:
+        spikes = get_google_spikes(s)
+        if scope != "all":
+            spikes = [x for x in spikes if x["geo"] == scope]
+        if not spikes:
+            return {"available": True, "spikes": [],
+                    "note": "현재 급등 브랜드 없음(또는 구글 트렌드 미수집)."}
+        return {"available": True,
+                "spikes": [{"brand": x["brand"], "market": x["geo"],
+                            "spike_x": x["spike_ratio"], "recent_index": x["recent"],
+                            "baseline_index": x["baseline"]} for x in spikes]}
     finally:
         s.close()
 

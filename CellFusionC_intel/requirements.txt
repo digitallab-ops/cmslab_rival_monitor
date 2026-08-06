@@ -18,3 +18,5 @@ starlette>=0.40,<0.42
 # Slack 봇 (Socket Mode) — aiohttp는 slack-bolt async/Socket Mode 런타임 의존성
 slack-bolt>=1.18
 aiohttp>=3.9
+# 구글 트렌드(글로벌 검색 수요) 수집 — signals/google_trends.py, 로컬 스케줄러 전용(비공식)
+pytrends>=4.9
