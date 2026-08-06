@@ -227,6 +227,17 @@ def job_dart_financials() -> None:
         logger.warning("DART 재무 수집 스킵(OPENDART_KEY/네트워크 확인): %s", e)
 
 
+def job_trademark() -> None:
+    """KIPRIS 해외상표 수집 (진출 선행신호). 월1회 — 상표 갱신 매월."""
+    logger.info("=== [월간] KIPRIS 해외상표 수집 시작 ===")
+    try:
+        from signals.trademark import run as run_tm
+        r = run_tm()
+        logger.info("해외상표 수집 완료: 저장 %d(자기출원 %d)", r["saved"], r.get("own", 0))
+    except Exception as e:
+        logger.warning("해외상표 수집 스킵(KIPRIS_KEY/네트워크 확인): %s", e)
+
+
 def job_profile_sync() -> None:
     """Cafe24 → 자사 제품 라인 자동 동기화 (company_profile.md). 실패해도 파이프라인 무영향."""
     logger.info("=== 자사 제품 프로필 동기화 시작 ===")
@@ -335,6 +346,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day=4, hour=6, minute=40),
         id="dart_financials",
         name="[월간] DART 경쟁사 재무 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매월 4일 06:50 KST — KIPRIS 해외상표(진출 선행신호). DART 다음.
+    scheduler.add_job(
+        job_trademark,
+        trigger=CronTrigger(day=4, hour=6, minute=50),
+        id="trademark",
+        name="[월간] KIPRIS 해외상표 수집",
         max_instances=1,
         coalesce=True,
     )

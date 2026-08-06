@@ -26,6 +26,7 @@ from analytics.queries import (
     get_market_export_growth,
     get_market_growth_story,
     get_competitor_financials,
+    get_trademark_signals,
 )
 from analytics.summarizer import generate_brand_strategy_summary
 
@@ -427,6 +428,28 @@ def get_financials() -> dict:
                     "op_income": f["op_income"], "opm_pct": f["opm"],
                     "revenue_yoy_pct": f["rev_yoy_pct"],
                 } for f in fins]}
+    finally:
+        s.close()
+
+
+@rival_mcp.tool()
+def get_trademark_signals_view(months: int = 18) -> dict:
+    """
+    해외 상표 출원 = 진출 선행신호(KIPRIS, 미국·일본). 뉴스보다 먼저 잡히는 신호.
+
+    "요즘 어느 브랜드가 미국 진출 준비해?", "아누아 신제품 뭐 나와?" 류 질문용.
+    자기출원(운영사 명의)·화장품류만 필터해 스쿼터·오탐 제외. 상표명으로 신제품 라인도 엿봄.
+    한계: 미국·일본만(EU·중국 없음), 등록공보 기반이라 약간의 시차 가능.
+    """
+    s = get_session()
+    try:
+        sig = get_trademark_signals(s, months=months)
+        if not sig["feed"] and not sig["brands"]:
+            return {"available": False,
+                    "note": "상표 데이터 없음(수집 전이거나 KIPRIS_KEY 미설정)."}
+        return {"available": True, "scope": "US·JP · 자기출원·화장품류",
+                "recent_filings": sig["feed"],
+                "by_brand": sig["brands"]}
     finally:
         s.close()
 

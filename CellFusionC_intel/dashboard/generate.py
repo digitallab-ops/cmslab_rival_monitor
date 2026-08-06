@@ -37,6 +37,7 @@ from analytics.queries import (
     get_market_export_growth,
     get_market_growth_story,
     get_competitor_financials,
+    get_trademark_signals,
 )
 from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
 from storage.models import get_session
@@ -665,6 +666,41 @@ def _render_financials(fins: list) -> str:
         '일부라 수치가 회사 전체임(예: 구달=클리오, 센텔리안24=동국제약, 에스트라=아모레퍼시픽). '
         '비상장 외감법인(아누아·조선미녀·토리든 등)은 표준 재무 API 미제공으로 제외.</div>'
     )
+
+
+def _render_trademark(sig: dict) -> str:
+    """해외 상표 출원 선행신호 — 최근 자기출원(화장품) 피드 + 브랜드 요약."""
+    feed = (sig or {}).get("feed") or []
+    brands = (sig or {}).get("brands") or []
+    if not feed and not brands:
+        return ('<p class="no-data">해외 상표 데이터 없음 '
+                '(KIPRIS 수집 전 · 매월 4일 갱신)</p>')
+
+    # 브랜드 요약 칩 (최근 출원 많은 순)
+    chips = []
+    for b in brands[:10]:
+        if not b["recent"]:
+            continue
+        flag = COUNTRY_FLAGS.get(b["country"], "🌐")
+        chips.append(
+            f'<span class="tm-chip"><span class="tm-chip-flag">{flag}</span>'
+            f'<b>{_esc(b["brand"])}</b> <span class="tm-chip-n">최근 {b["recent"]}건</span></span>'
+        )
+    chips_html = f'<div class="tm-chips">{"".join(chips)}</div>' if chips else ""
+
+    # 최근 출원 피드
+    rows = []
+    for f in feed:
+        flag = COUNTRY_FLAGS.get(f["country"], "🌐")
+        rows.append(
+            f'<div class="tm-row">'
+            f'<span class="tm-date">{_esc(f["date"])}</span>'
+            f'<span class="tm-flag">{flag}</span>'
+            f'<span class="tm-brand">{_esc(f["brand"])}</span>'
+            f'<span class="tm-mark">{_esc(f["mark"] or "")}</span>'
+            f'</div>'
+        )
+    return chips_html + '<div class="tm-list">' + "".join(rows) + '</div>'
 
 
 def _yoy_badge_color(yoy) -> str:
@@ -1896,6 +1932,21 @@ a:hover { color: var(--gold); }
 .fin-whole { font-size: 9px; color: var(--lo); margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; }
 .fin-note { font-size: 10.5px; color: var(--lo); line-height: 1.5; margin-top: 8px; }
 
+/* ── 해외 상표 출원 선행신호 ── */
+.tm-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 11px; }
+.tm-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
+  background: rgba(200,169,110,0.10); border: 1px solid rgba(200,169,110,0.28);
+  color: var(--hi); border-radius: 20px; padding: 4px 11px; }
+.tm-chip-flag { font-size: 13px; }
+.tm-chip-n { color: var(--gold); font-weight: 700; font-variant-numeric: tabular-nums; }
+.tm-list { display: flex; flex-direction: column; gap: 5px; }
+.tm-row { display: flex; align-items: baseline; gap: 10px; padding: 6px 10px;
+  background: var(--elevated); border: 1px solid var(--border); border-radius: 3px; font-size: 12px; }
+.tm-date { color: var(--lo); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0; font-size: 11px; }
+.tm-flag { flex-shrink: 0; }
+.tm-brand { font-weight: 700; color: var(--hi); min-width: 120px; white-space: nowrap; flex-shrink: 0; }
+.tm-mark { color: var(--mid); letter-spacing: 0.02em; }
+
 /* ── 개요 성장 헤드라인 배너 ── */
 .gh-band { display: flex; gap: 20px; flex-wrap: wrap; align-items: stretch;
   background: linear-gradient(120deg, rgba(74,184,132,0.07), rgba(111,176,236,0.05));
@@ -2637,6 +2688,7 @@ def _build_full_html(
     export_growth: list = None,
     growth_story: dict = None,
     financials: list = None,
+    trademark_sig: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2664,6 +2716,7 @@ def _build_full_html(
     growth_story_html  = _render_growth_story(growth_story or {})
     growth_headline_html = _render_growth_headline(growth_story or {})
     financials_html   = _render_financials(financials or [])
+    trademark_html    = _render_trademark(trademark_sig or {})
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
@@ -2852,6 +2905,14 @@ def _build_full_html(
         🔥 뜨는 시장, 왜 크는가 <span class="section-sub">관세청 실수출 성장(YoY) + 같은 시장에서 경쟁사가 한 진출·입점·마케팅 — 발표(뉴스)·성과(수출)를 한눈에 대조</span>
       </div>
       {growth_story_html}
+    </div>
+
+    <!-- 해외 상표 출원 = 진출 선행신호 (KIPRIS) -->
+    <div class="section">
+      <div class="section-title">
+        🪧 해외 상표 출원 = 진출 선행신호 <span class="section-sub">경쟁사가 미국·일본에 낸 상표(자기출원·화장품류) — 뉴스보다 먼저 잡히는 진출·신제품 조짐</span>
+      </div>
+      {trademark_html}
     </div>
 
     <!-- 화장품 수출 규모·성장 전체 랭킹 (스킨케어 330499) -->
@@ -3389,6 +3450,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             financials = get_competitor_financials(session)
         except Exception:
             financials = []
+        # 해외 상표 출원 선행신호(KIPRIS) — trademark_filings 없으면 빈 dict
+        try:
+            trademark_sig = get_trademark_signals(session)
+        except Exception:
+            trademark_sig = {"feed": [], "brands": []}
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -3527,6 +3593,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         export_growth=export_growth,
         growth_story=growth_story,
         financials=financials,
+        trademark_sig=trademark_sig,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,

@@ -884,6 +884,42 @@ _STORY_ACTS = ("신시장_진출", "유통_채널", "신제품_런칭", "브랜�
                "인플루언서_협업", "투자_BD", "가격_프로모션")
 
 
+def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -> dict:
+    """
+    해외 상표 출원 = 진출 선행신호(KIPRIS). 자기출원(is_own)·화장품류(is_cosmetic)만.
+
+    trademark_filings 없으면 {feed:[], brands:[]}.
+    반환: {feed:[{brand,country,mark,date}], brands:[{brand,country,recent,total,latest}]}
+    """
+    try:
+        feed_rows = session.execute(text(f"""
+            SELECT brand, country, mark_name, app_date
+            FROM {DB_SCHEMA}.trademark_filings
+            WHERE is_own AND is_cosmetic AND app_date IS NOT NULL
+              AND app_date >= (CURRENT_DATE - make_interval(months => :m))
+            ORDER BY app_date DESC LIMIT :lim
+        """), {"m": months, "lim": limit}).fetchall()
+        brand_rows = session.execute(text(f"""
+            SELECT brand, country,
+                   COUNT(*) FILTER (WHERE app_date >= (CURRENT_DATE - make_interval(months => :m))) recent,
+                   COUNT(*) total, MAX(app_date) latest
+            FROM {DB_SCHEMA}.trademark_filings
+            WHERE is_own AND is_cosmetic
+            GROUP BY brand, country
+            HAVING MAX(app_date) IS NOT NULL
+            ORDER BY recent DESC, latest DESC
+        """), {"m": months}).fetchall()
+    except Exception:
+        return {"feed": [], "brands": []}
+
+    feed = [{"brand": r[0], "country": r[1], "mark": r[2], "date": str(r[3])}
+            for r in feed_rows]
+    brands = [{"brand": r[0], "country": r[1], "recent": r[2] or 0,
+               "total": r[3] or 0, "latest": str(r[4]) if r[4] else None}
+              for r in brand_rows]
+    return {"feed": feed, "brands": brands}
+
+
 def get_competitor_financials(session: Session) -> list[dict]:
     """
     경쟁사 실적(DART) — 브랜드별 최신 매출·영업이익·영업이익률 + 매출 YoY.
