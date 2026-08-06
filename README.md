@@ -1,189 +1,194 @@
-# K-Beauty Intel — 경쟁사 인텔리전스 시스템
+# K-Beauty Competitor Intelligence — 경쟁사 인텔리전스 시스템
 
-셀퓨전씨(씨엠에스랩)의 글로벌 경쟁 브랜드 동향을 **자동으로 수집·AI 분류·한국어 번역·시각화**하는 모니터링 시스템.
-매일 저녁 국내외 주요 미디어를 스캔하고, 매일 아침·매주 월요일 아침 Slack으로 브리핑을 발송합니다.
+> 더마 선케어 브랜드 **셀퓨전씨(씨엠에스랩)** 를 위한, K-뷰티 경쟁 브랜드의 글로벌 동향을
+> **자동 수집 → AI 분류·번역 → 다축 신호 삼각검증 → 대시보드·Slack 브리핑·Q&A 봇**으로
+> 연결하는 엔드투엔드 경쟁 인텔리전스 파이프라인.
 
-**대시보드:** https://cmslab-rival-monitor.onrender.com
+**🔗 라이브 대시보드:** https://cmslab-rival-monitor.onrender.com
+
+이 문서는 **무엇을 만들었는가**뿐 아니라 **왜 그렇게 설계했는가(의사결정 로그)** 를 함께 담았습니다.
 
 ---
 
-## 무엇을 해주는가 (한눈에)
+## 목차
+1. [한눈에](#한눈에)
+2. [핵심 아이디어 — 5축 삼각검증](#핵심-아이디어--5축-삼각검증)
+3. [개발 스토리 & 의사결정 로그](#개발-스토리--의사결정-로그)
+4. [아키텍처](#아키텍처)
+5. [계층별 상세](#계층별-상세)
+6. [하드-원 레슨(트러블슈팅 하이라이트)](#하드-원-레슨트러블슈팅-하이라이트)
+7. [기술 스택 · 설치](#기술-스택--설치)
+
+---
+
+## 한눈에
 
 | | 내용 |
 |---|---|
-| 🌍 **수집** | 21개 브랜드 × 23개국 × 6종 수집기 — 매일 저녁 자동 |
-| 🤖 **AI 분류** | 활동유형·중요도·전략스코어·근거수준 판정 + 한국어 번역 |
-| 🧹 **중복 병합** | 같은 사건을 다른 제목으로 보도한 기사를 하나로 묶음 (의미 임베딩) |
-| 📊 **대시보드** | 브랜드 모멘텀·국가 히트맵·세계 신호지도·카테고리 대결 뷰 |
-| 📨 **브리핑** | 매일 아침 8시 일간 + 매주 월 아침 8시 심층 주간 (Slack) |
+| 🌍 **수집** | 21개 브랜드 × 23개국 × 8종 수집기 — 매일 자동 (공개 RSS/API) |
+| 🤖 **AI 분류** | 활동유형·중요도·전략스코어·근거수준 판정 + 전량 한국어 번역 (gpt-4o-mini) |
+| 🧹 **중복 병합** | 같은 사건을 다른 제목으로 보도한 기사를 의미 임베딩으로 하나로 |
+| 📡 **외부 신호 5축** | 뉴스(공급) · 검색수요(네이버+구글) · 수출(관세청) · 재무(DART) · 상표(KIPRIS 선행) |
+| 📊 **대시보드** | 브랜드 모멘텀 · 세계 신호지도 · "왜 크는가" 성장 스토리 · 수요검증 · 실적 · 상표 선행신호 |
+| 📨 **브리핑** | 매일 아침 일간 + 매주 월 심층 주간 (Slack) |
+| 💬 **Q&A 봇** | Slack에서 자연어 질문 → MCP 툴로 데이터 조회·답변 (gpt-4o) |
 
 ---
 
-## 수집 소스 (6종 수집기)
+## 핵심 아이디어 — 5축 삼각검증
 
-전부 공개 RSS / 공개 API 기반 — 인증 불필요.
+이 프로젝트의 출발점이자 차별점. **뉴스만 보면 "발표(PR)"에 속는다**는 문제의식에서 시작했다.
 
-| # | 수집기 | 소스 | 범위 |
-|---|--------|------|------|
-| 1 | `google_rss.py` | Google News RSS (브랜드 × 국가) | 전 국가. 국가별 언어·지역 파라미터로 현지 기사 수집 |
-| 2 | `media_rss.py` | 글로벌 뷰티 전문지 RSS **30개 피드** | 국가 비종속 — 기사 내용으로 시장 판정 |
-| 3 | `jangup.py` | 장업신문 (국내 뷰티 전문지) | KR |
-| 4 | `prtimes.py` | PRTimes Japan (일본 PR 배포) | JP |
-| 5 | `naver_news.py` | 네이버 뉴스 검색 API | KR |
-| 6 | `reddit_collector.py` | Reddit (r/AsianBeauty 등) | 소비자 커뮤니티 반응 |
-
-**전문지 30개 피드 (media_rss):** BeautyMatter, WWD Beauty, Glossy, Global Cosmetics News, Cosmetics Business, Premium Beauty News, CosmeticsDesign Asia/Europe, PR Newswire, BusinessWire, WWD Japan, Korea Herald, SCMP Lifestyle, Nikkei Asia, TheIndustry.beauty(UK), RetailDetail(Benelux), Inside Retail Asia, ET BrandEquity(IN), Campaign ME, Bizcommunity(AF) 등.
-- **확장시장 보강(2026-07):** Pambianco Beauty(IT), Wiadomości Kosmetyczne(PL), Mercado & Consumo·Cosmetic Innovation(BR), Communicate·Arabian Business(ME), afaqs!(IN), Brand Communicator(NG), Female Daily(ID) — RSS 실응답 검증된 것만 채택. Atualidade Cosmética·IndiaRetailing 등은 RSS 미제공/차단으로 제외(Google News가 간접 커버).
-
-### 현지어 심층 수집
-주간 풀스캔 시 브랜드명을 **현지어 활동 키워드**와 결합해 recall을 높입니다.
-예) 브라질 `"cosméticos coreanos" "lançamento"`, 태국 `"เครื่องสำอางเกาหลี" "เปิดตัว"`, 사우디 아랍어 키워드 등.
-
----
-
-## 파이프라인 흐름
+경쟁사가 "브라질 진출!"이라고 보도자료를 뿌려도, 그게 **진짜 무브인지 PR 노이즈인지** 뉴스만으론 알 수 없다. 그래서 서로 다른 성격의 신호를 겹쳐 **교차검증**한다:
 
 ```
-수집기 6종
-  ↓  URL 해시 중복 제거 (SHA-256)
-  ↓  제목 유사도 1차 필터 (SequenceMatcher ≥ 0.85)
-  ↓  기사 본문 fetch (BeautifulSoup)
-  ↓  AI 분류 — 2단계 (gpt-4o-mini, 배치 8건/콜)
-  │    Stage 1: 관련성 필터 (브랜드 실제 언급 여부)
-  │    Stage 2: 구조화 분류 (아래 필드)
-  ↓  PostgreSQL 저장 (Supabase · rival_intel 스키마)
-  ↓  [23:00] 의미 임베딩 중복 병합 (같은 사건 → 대표 1건)
-  ↓
-대시보드 (FastAPI)      Slack 브리핑 (일간/주간)
+         발표/의도                     실제 성과                    선행
+  ┌─────────────────┐        ┌──────────────────────┐      ┌────────────┐
+  │  📰 뉴스(공급)   │        │  📦 수출 (관세청)     │      │ 🪧 상표출원 │
+  │  🔍 검색 (수요)  │  ──▶   │  💰 재무 (DART)       │ ◀──  │  (KIPRIS)  │
+  │  네이버(국내)    │        │  실제로 팔리고 있나?  │      │ 진출 임박? │
+  │  구글(글로벌)    │        │  실제로 크고 있나?    │      │(뉴스보다 앞)│
+  └─────────────────┘        └──────────────────────┘      └────────────┘
+        수요·의도                    하드 아웃컴                조기 신호
 ```
 
-### AI가 뽑아내는 필드
-| 필드 | 설명 |
-|------|------|
-| `activity_type` | **9종**: 신시장_진출 · 유통_채널 · 신제품_런칭 · 인플루언서_협업 · 투자_BD · 브랜드_마케팅 · 실적_공시 · 가격_프로모션 · 기타 |
-| `importance` | high / medium / low |
-| `strategic_score` | **0~100 전략 중요도** (75+ high · 55~74 medium 정합) |
-| `evidence_level` | **근거 수준**: official(공식) · editorial(편집기사) · pr(보도자료) · rehash(재게재) |
-| `brand_focus` | primary(주인공) · secondary · incidental(스쳐 언급) |
-| `channel` | 입점·유통 채널/리테일러 (Sephora, Watsons, Nykaa …) |
-| `price_info` `city` `product_name` | 가격·프로모션 / 도시 / 제품명 (있을 때만) |
-| `country` vs `source_country` | 기사가 **다루는 시장** vs 수집이 실행된 국가 조합 (크로스마켓 분류) |
-| `title_ko` `article_body_ko` | 제목·본문 한국어 번역 (영·일 포함 전량) |
-
-> **국가 분류:** `country`는 기사 언어·출처가 아니라 **기사가 다루는 실제 시장** 기준. 한국어 기사라도 "미국 세포라 입점"이면 → `US`.
-
-### 의미 임베딩 중복 병합 (`semantic_dedup.py`)
-제목 문자열 유사도로는 **같은 사건을 다른 제목으로 보도한 기사**(매체별 재보도)를 못 잡습니다.
-→ `title+details` 임베딩(text-embedding-3-small) 코사인 유사도로 **브랜드 내 같은 사건을 클러스터링**, 대표 1건(최고 strategic_score)만 남기고 나머지는 `is_duplicate` 플래그(삭제 아님 — 되돌리기 가능).
-- 전이적(union-find) 클러스터링 + **같은 활동유형만** 병합 → 교차토픽 오병합 방지.
-- incidental(다이제스트·나열형) 제외 → 클러스터 오염 방지.
-- 매일 23:00 자동 실행. (실측: 최근분 약 31% 중복 병합, 오병합 0)
+**대표 예시 (실제 수집 데이터):**
+> "조선미녀 브라질 진출" 뉴스 → 🔍 브라질 관련 검색 확인 → 📦 **브라질 화장품 수출 +89% YoY**(관세청) 동반 → **실질 무브로 검증**.
+> 반대로 뉴스는 뜨는데 검색 수요가 식으면(예: 일부 브랜드 뉴스↑·검색↓) → **PR 노이즈 의심**으로 라벨링.
 
 ---
 
-## 모니터링 대상
+## 개발 스토리 & 의사결정 로그
 
-**Tier 1 브랜드 (매일 수집, 7개)**
-Anua · Mediheal · Dalba · Beauty of Joseon · Skin1004 · Dr.Jart+ · Torriden
+시간순으로, **각 기능이 왜 추가됐고 어떤 판단을 했는지**.
 
-**Tier 2 브랜드 (주간 수집, 14개)**
-Cos de Baha · By Wishtrend · Roundlab · Centellian24 · VT Cosmetics · Numbuzin · b.plain · Goodal · Abib · Rejuran · Mixsoon · Aestura · Zeroid · Celimax
+### 1단계 · 뉴스 수집 + AI 분류 (기반)
+- **문제:** 경쟁사 해외 동향이 여러 나라·언어·매체에 흩어져 있어 수작업 추적 불가.
+- **결정:** 인증 불필요한 **공개 RSS/API 8종**으로 수집(구글뉴스·전문지 30피드·장업신문·PRTimes·네이버·Reddit·YouTube). 유료 크롤링/스크래핑 배제 → 유지보수 부담 최소화.
+- **결정:** 수집 즉시 저장하지 않고 **2단계 AI 분류**(gpt-4o-mini). Stage1 관련성 필터(브랜드 실제 언급?) → Stage2 구조화(활동유형·중요도·전략스코어·근거수준·번역). *왜 2단계?* 노이즈 기사를 싸게 먼저 거르고 비싼 구조화는 통과분만 → 비용 절감.
+- **결정:** `country`(기사가 다루는 시장) ≠ `source_country`(수집 실행 국가)로 분리. "한국어 기사인데 미국 세포라 입점" → `US`로 분류해야 크로스마켓 추적이 됨.
 
-> 티어는 `monitored_brands` 테이블에서 **모멘텀 기반으로 자동 승급/강등**됩니다 (쿨다운 14일, 플립플롭 방지).
+### 2단계 · 중복 병합 (신호 품질)
+- **문제:** 같은 사건을 20개 매체가 조금씩 다른 제목으로 보도 → 대시보드·브리핑이 중복으로 오염.
+- **1차 시도:** 제목 문자열 유사도(SequenceMatcher ≥ 0.85). → **한계:** 번역/재작성된 같은 사건은 제목이 달라 못 잡음.
+- **결정:** `title+details` **의미 임베딩**(text-embedding-3-small) 코사인 유사도로 브랜드 내 같은 사건을 union-find 클러스터링, 대표 1건만 남김(`is_duplicate` 플래그 — 삭제 아님, 되돌리기 가능). **같은 활동유형만** 병합해 교차토픽 오병합 방지. (실측 ~31% 병합, 오병합 0)
 
-**커버 국가 (23개)**
-- **Tier1 (매일):** `US` `PL` `JP` `TH` `SG` `CN` `KR` `GB` `CA` `AU` `ID` `MY` `VN`
-- **Tier2 (주간):** `DE` `FR` `IT` `AE` `SA` `BR` `MX` `IN` `PH` `ZA`
+### 3단계 · 티어 자동 조정 (운영 자동화)
+- **문제:** 어떤 브랜드를 매일 vs 주간 수집할지 수동 관리 부담.
+- **결정:** **모멘텀 기반 자동 승급/강등**. 최근 4주 vs 직전 4주 기사량 비율로 Rising/Stable/Cooling 판정 → Tier2에서 뜨면 Tier1 승급, Tier1에서 식으면 강등. **쿨다운 14일**(히스테리시스)로 플립플롭 방지.
 
-권역 그룹: KR · APAC · SEA · NA · EU · ME(중동) · LATAM · AF · IN
+### 4단계 · 대시보드 · 브리핑 · Slack Q&A 봇 (전달)
+- **결정:** 대시보드는 서버사이드 HTML 생성(Chart.js/Canvas 인라인) → 별도 프론트 빌드 없이 단일 FastAPI로 배포.
+- **결정:** 브리핑 2종 — 일간(gpt-4o-mini, 간결·저비용) / 주간(gpt-4o, 심층). 모델을 용도별로 분리해 비용/품질 균형.
+- **결정:** Slack Q&A 봇을 **MCP(Model Context Protocol) 서버**로 구현. 기존 분석 쿼리를 조회 전용 툴로 노출 → 봇(gpt-4o)이 자연어 질문에 맞는 툴을 호출. Render web 프로세스 내 **in-process**로 얹어 추가 비용 0.
 
----
+### 5단계 · HIGH 속보 정제 (알림 피로 해결)
+- **문제:** 하루 2회 수집으로 전환하니 HIGH 속보가 하루 ~26건 폭주.
+- **결정:** `strategic_score ≥ 85` + 스쳐언급(incidental) 제외 게이트 → ~5건/일로.
+- **문제:** 그래도 **같은 사건(올리브영×세포라 미국 진출)이 출처만 달리 7번** 발송. 의미병합은 밤 23시라 속보보다 늦음.
+- **결정:** **발송 시점 중복 게이트**(`high_alert_log`). 최근 72h 내 같은 (브랜드·국가·활동유형)에서 **같은 사건**이면 억제. 같은 사건 판정 = 문자유사도 ≥0.50 **또는 문자 3-gram Jaccard ≥0.20**(한국어 조사·어순 변화에 강건 — 실제 그 7문장으로 임계값 보정). → 7건이 1건으로.
 
-## 대시보드 구성
+### 6단계 · 외부 신호 계층 (이 프로젝트의 도약) ⭐
+- **문제의식:** 지금까지 데이터는 전부 **공급/PR 신호**(경쟁사가 *발표한* 것). 빠진 건 **수요·성과·선행**.
+- **아키텍처 결정:** 이 소스들은 기사가 아니므로 `RawArticle` 패턴이 아니라 **별도 `signals/` 패키지** + 전용 테이블 + 주기 fetch + analytics 상관분석으로 분리.
 
-| 섹션 | 내용 |
-|------|------|
-| Brand Radar | 최근 4주 vs 직전 4주 기사량 모멘텀 순위 |
-| 브랜드 × 국가 히트맵 | 어느 브랜드가 어느 시장에서 활발한지 매트릭스 |
-| 글로벌 신호 지도 | 국가별 HIGH/MED/LOW 세계지도 시각화 |
-| 🥊 **우리 카테고리 vs 경쟁 활동** | Cafe24 자사 카테고리(선케어·크림·앰플/세럼 등)별 **경쟁 압박 강도** + 최고 위협 무브먼트 |
-| HIGH/MED 기사 목록 | 중요도·브랜드·활동유형 필터, 채널·근거·스코어 배지 |
-| 전략 인사이트 카드 | 브랜드별 AI 요약 (캐시 적용) |
-| 시장 종합 인사이트 | 전 경쟁사 종합 → 셀퓨전씨 관점 전략 제언 |
-| 기간 토글 | 30 / 60 / 90일 전환 |
+  **6a. 네이버 검색 트렌드(국내 수요):** 브랜드·성분 주간 검색지수. 뉴스 모멘텀과 대조해 real/pr/latent 판정. *교훈:* 네이버가 검색어트렌드를 NAVER API HUB로 이관 — 공식 문서가 전부 틀린 엔드포인트를 안내해서 게이트웨이 직접 탐침으로 `naverapihub.apigw.ntruss.com/search-trend/v1/search`를 찾아냄.
 
-기사 제목·본문은 전량 한국어 번역 + 원문 링크 제공. **중복 병합된 기사는 대표 1건만 노출.**
+  **6b. 관세청 수출통계(시장 성과):** HS 3304 화장품 국가별·월별 수출액(USD). "발표 vs 실수출" 검증 + 시장 우선순위. → **"왜 이 시장이 크는가" 성장 스토리**로 발전: 국가별 수출 YoY + *그 시장에서 경쟁사가 한 활동(뉴스)* 을 한 화면에 엮어 개요 탭 헤드라인 배너로.
 
----
+  **6c. DART 재무(회사 성과):** 경쟁사 운영사의 매출·영업이익·성장률. *정직한 한계:* 표준 재무 API는 **상장사만**(비상장 외감은 status 013). *교훈:* 동국제약은 매출 계정명이 '매출액'이 아니라 '매출'이라 처음 누락 → 정확일치 매핑 보정. 리쥬란(파마리서치) 영업이익률 36%는 "화장품이 아니라 의료기기(PDRN)라서"라는 카테고리 인사이트로 연결.
 
-## 자동 브리핑 (Slack)
+  **6d. KIPRIS 해외상표(진출 선행신호):** 경쟁사가 미국·일본에 낸 상표 = **뉴스보다 먼저** 잡히는 진출·신제품 조짐. *비상장 공백을 메움* — DART에서 막힌 아누아(The Founders)가 상표로는 잡혀, 미국 신제품 상표 19건(파이프라인 대확장)을 사전 포착. *정밀도:* NICE 3류(화장품) + 출원인=실제 운영사(`is_own`) 2단 필터로 스쿼터·동명(Goodal→Jane Goodall) 오탐 제거.
 
-| 브리핑 | 발송 | 모델 | 내용 |
-|--------|------|------|------|
-| **일간** | 매일 08:00 | gpt-4o-mini | 전날 수집분 핵심 3~5건 + 셀퓨전씨 관련 대응 포인트 (간결) |
-| **주간** | 매주 월 08:00 | gpt-4o | 지난주 심층: Executive Takeaway / 권역별 핵심 움직임 / 주요 무브먼트 상세(Top 5~7) / Watchlist / 셀퓨전씨 실행 액션 |
+  **6e. 구글 트렌드(글로벌 수요):** *문제의식:* 네이버는 국내 한정이라 수출 미션엔 파이가 작음 → 구글로 글로벌·미국·일본 검색 수요 보완 + **검색 급등 감지**(최근7일 vs 직전28일, 급등 시 Slack 알림). *교훈:* pytrends 429는 **브라우저 User-Agent**로 우회.
 
----
-
-## 갱신 주기 (KST)
-
-| 시각 | 작업 |
-|------|------|
-| 매일 08:00 | 일간 브리핑 발송 |
-| 매일 18:00 | Tier1 브랜드 × Tier1 국가 일별 수집 |
-| 매일 23:00 | 의미 임베딩 중복 병합 |
-| 매주 월 08:00 | 심층 주간 브리핑 발송 |
-| 매주 월 17:00 | Cafe24 자사 제품 프로필 동기화 |
-| 매주 월 19:00 | 브랜드 모멘텀 재계산 + 티어 자동 조정 |
-| 매주 월 20:00 | 전체 브랜드 × 전체 국가 풀스캔 (현지어 심층) |
-| 매주 일 19:00 | 제목 유사도 중복 후보 기록 |
-
-> 운영: 로컬 APScheduler(Windows 작업 `CMSLab_RivalScheduler`, 10분마다 self-heal, KST). Render는 유료플랜 상시가동이라 keep-alive 핑 불필요.
+### 7단계 · 브랜드 소스 통일 (일관성 리팩터)
+- **문제:** 뉴스 수집은 `monitored_brands` DB에서 브랜드를 읽는데 신호계층은 정적 config를 봐서 — DB에만 브랜드 추가 시 신호는 미반영(갭).
+- **결정:** 공용 헬퍼 `get_active_brand_names()`(DB 기반, config fallback)로 통일. **브랜드 1회 추가 = 뉴스+검색+구글+수출까지 자동 반영.** (DART·상표는 운영사/상표명 매핑이 본질적으로 수동이라 미매핑 시 graceful 스킵.)
 
 ---
 
-## 기술 스택
+## 아키텍처
+
+```
+                    ┌────────────────────── 로컬 (수집·분석 엔진) ──────────────────────┐
+                    │  APScheduler (Windows 작업, KST, self-heal)                        │
+                    │                                                                    │
+  공개 RSS/API 8종 ─┼─▶ 파이프라인: 수집→URL해시→제목유사도→본문fetch→2단계 AI분류      │
+                    │       ↓ 저장                                                       │
+  네이버/구글/관세청 ┼─▶ signals/ (검색·수출·재무·상표) ── 주기 fetch                    │
+  DART/KIPRIS       │       ↓                                                            │
+                    │   [23:00] 의미 임베딩 중복 병합 · [주간] 모멘텀·티어 자동조정       │
+                    │       ↓                                                            │
+                    └───────┼────────────────────────────────────────────────────────┘
+                            ▼  (공유)
+                    Supabase PostgreSQL  (rival_intel 스키마)
+                            ▲
+                    ┌───────┼──────────── Render (조회 전용, 상시가동) ────────────────┐
+                    │  FastAPI: 대시보드 HTML  +  /mcp (MCP 서버)  +  Slack 봇(in-proc) │
+                    └────────────────────────────────────────────────────────────────┘
+```
+
+> **핵심 운영 원칙:** 수집·분석은 **로컬 스케줄러 단독**, Render는 **DB 조회 전용**. (Render에 스케줄러를 두지 않음 — 상세는 HANDOVER.md)
+
+---
+
+## 계층별 상세
+
+### 수집기 (`collectors/`)
+`google_rss` · `media_rss`(전문지 30피드) · `jangup`(장업신문) · `prtimes`(JP) · `naver_news`(KR) · `reddit` · `youtube` · `body_fetcher`(본문). 공통 `BaseCollector` 인터페이스 — `collect(brand, country) → list[RawArticle]`.
+
+### 분류 (`classifier/`)
+`claude_classifier.py`(2단계, 배치 8건/콜) + `prompts.py` + `schemas.py`. 추출 필드: `activity_type`(9종)·`importance`·`strategic_score`(0~100)·`evidence_level`·`brand_focus`·`channel`·`price_info`·`city`·`product_name`·`title_ko`·`article_body_ko`.
+
+### 신호계층 (`signals/`)
+`naver_trends` · `google_trends` · `export_stats` · `dart_financials` · `trademark`. 각자 전용 테이블 + 주기 fetch, 실패 시 graceful 스킵(키 없으면 자동 skip).
+
+### 분석 (`analytics/queries.py`)
+`compute_brand_momentum` · `get_demand_triangulation`(뉴스vs검색) · `get_market_export_growth` · `get_market_growth_story`(수출×활동) · `get_competitor_financials` · `get_trademark_signals` · `get_google_spikes` 등.
+
+### 노출
+- **대시보드**(`dashboard/generate.py`): 개요(성장 헤드라인·세계지도) / 경쟁사(모멘텀·수요검증·글로벌급등·실적) / 우리관점(성장스토리·상표선행·수출랭킹·카테고리대결) / 기록.
+- **브리핑**(`scheduler/briefing.py`): 일간·주간 Slack.
+- **MCP 봇**(`mcp_server.py`): `get_brand_intel`·`get_demand_signal`·`get_export_growth`·`get_growth_story`·`get_financials`·`get_trademark_signals_view`·`get_search_spikes` 등 조회 툴.
+
+---
+
+## 하드-원 레슨(트러블슈팅 하이라이트)
+
+포폴 관점에서 **실제로 막혔고 어떻게 뚫었는지**:
+
+| 문제 | 원인 | 해결 |
+|---|---|---|
+| 네이버 데이터랩 401 | API HUB 이관 + **공식 문서의 엔드포인트가 전부 오답** | 게이트웨이 직접 탐침으로 `naverapihub.apigw.ntruss.com/search-trend/v1/search` 발견 |
+| 구글 트렌드 429 즉시 차단 | pytrends 기본 UA 차단 | **브라우저 User-Agent** 헤더로 우회 (retries 옵션은 urllib3 최신과 충돌 → 수동 백오프) |
+| DART 동국제약 매출 누락 | 매출 계정명이 '매출액'이 아니라 **'매출'** | 정확일치 매핑에 '매출' 추가('매출채권/매출원가/매출총이익'과 구분) |
+| 상표 오탐(스쿼터·동명) | 브랜드명 검색이 무관 마크까지 매칭 | NICE 3류 + **출원인=실제 운영사(`is_own`)** 2단 필터 |
+| HIGH 속보 7중 발송 | 의미병합(23시)이 속보보다 늦음 | 발송 시점 중복 게이트(3-gram Jaccard, 한국어 강건) |
+| 검색 지수 배치 정규화 | 데이터랩·구글 모두 요청당 상대정규화 | 브랜드 간 절대비교 금지, **동일 브랜드 시계열(모멘텀·급등)만** 사용 |
+
+---
+
+## 기술 스택 · 설치
 
 | 항목 | 내용 |
-|------|------|
-| 서버 | FastAPI + uvicorn (Render 유료플랜) |
-| 스케줄러 | APScheduler (로컬 상시 실행) |
-| DB | Supabase PostgreSQL (`rival_intel` 스키마) |
-| ORM | SQLAlchemy + psycopg2 |
-| AI 분류·번역·일간브리핑 | OpenAI gpt-4o-mini (배치 8건/콜) |
-| 주간 브리핑 | OpenAI gpt-4o |
-| 의미 중복 dedup | OpenAI text-embedding-3-small |
-| 자사 제품 연동 | Cafe24 카탈로그 API (프록시) |
-| 대시보드 | 서버사이드 HTML 생성 (Chart.js + Canvas) |
-
----
-
-## 개발자 설치
+|---|---|
+| 서버 | FastAPI + uvicorn (Render 유료·상시) |
+| 스케줄러 | APScheduler (로컬 상시, Windows 작업) |
+| DB | Supabase PostgreSQL (`rival_intel`) · SQLAlchemy |
+| AI | OpenAI gpt-4o-mini(분류·번역·일간) / gpt-4o(주간·시장인사이트) / text-embedding-3-small(dedup) |
+| 봇 | slack-bolt(Socket Mode) + MCP 서버(streamable-http) |
+| 외부 API | 네이버 API HUB · 구글트렌드(pytrends) · 관세청(data.go.kr) · OpenDART · KIPRIS Plus · Cafe24 |
 
 ```bash
 cd CellFusionC_intel
 pip install -r requirements.txt
-cp .env.example .env   # 아래 값 입력
+cp .env.example .env          # 키 입력 (상세: HANDOVER.md)
+python cli.py init-db          # DB 초기화(최초 1회)
+uvicorn server:app --port 8000 # 대시보드
+python cli.py run              # 스케줄러 단독 실행
 ```
 
-**필수 환경변수**
-```
-OPENAI_API_KEY=...
-DB_HOST=...  DB_USER=...  DB_PASSWORD=...  DB_NAME=postgres
-SLACK_WEBHOOK_URL=...        # 선택 (브리핑·알림)
-NAVER_CLIENT_ID=...          # 선택 (KR 네이버 수집)
-NAVER_CLIENT_SECRET=...
-```
+CLI: `init-db` · `collect -b -c` · `query` · `drill` · `report` · `collect-all -t`.
 
-> `.env`는 **절대 git 커밋 금지** — 실서버 크리덴셜 포함 (gitignore됨).
-
-**DB 초기화 (최초 1회)**
-```bash
-python -c "from storage.models import create_tables, migrate_tables; create_tables(); migrate_tables()"
-```
-
-**로컬 실행**
-```bash
-uvicorn server:app --reload --port 8000   # 대시보드
-python cli.py run                          # 스케줄러 단독 실행
-```
+> 운영·배포·환경변수·트러블슈팅·확장 가이드는 **[HANDOVER.md](HANDOVER.md)** 참고.
