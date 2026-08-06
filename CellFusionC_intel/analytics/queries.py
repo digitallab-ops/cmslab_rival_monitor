@@ -884,6 +884,49 @@ _STORY_ACTS = ("신시장_진출", "유통_채널", "신제품_런칭", "브랜�
                "인플루언서_협업", "투자_BD", "가격_프로모션")
 
 
+def get_competitor_financials(session: Session) -> list[dict]:
+    """
+    경쟁사 실적(DART) — 브랜드별 최신 매출·영업이익·영업이익률 + 매출 YoY.
+
+    competitor_financials 없으면 []. is_brand_level=False면 수치는 '회사 전체'.
+    반환: 최신연도 매출 desc. [{brand, corp_name, stock_code, is_brand_level,
+          year, revenue, op_income, opm, prev_revenue, rev_yoy_pct}]
+    """
+    try:
+        rows = session.execute(text(f"""
+            WITH ranked AS (
+                SELECT brand, corp_name, stock_code, is_brand_level, bsns_year,
+                       revenue, op_income, net_income,
+                       ROW_NUMBER() OVER (PARTITION BY brand ORDER BY bsns_year DESC) rn
+                FROM {DB_SCHEMA}.competitor_financials
+                WHERE revenue IS NOT NULL
+            )
+            SELECT c.brand, c.corp_name, c.stock_code, c.is_brand_level, c.bsns_year,
+                   c.revenue, c.op_income, p.revenue
+            FROM ranked c
+            LEFT JOIN ranked p ON p.brand = c.brand AND p.rn = 2
+            WHERE c.rn = 1
+            ORDER BY c.revenue DESC
+        """)).fetchall()
+    except Exception:
+        return []
+
+    out = []
+    for r in rows:
+        rev = float(r[5] or 0)
+        op = float(r[6] or 0)
+        prev = float(r[7] or 0)
+        out.append({
+            "brand": r[0], "corp_name": r[1], "stock_code": r[2] or "",
+            "is_brand_level": bool(r[3]), "year": r[4],
+            "revenue": rev, "op_income": op,
+            "opm": round(op / rev * 100, 1) if rev else None,
+            "prev_revenue": prev,
+            "rev_yoy_pct": round((rev / prev - 1) * 100, 1) if prev > 0 else None,
+        })
+    return out
+
+
 def get_market_growth_story(session: Session, top_n: int = 6,
                             window_days: int = 150, trailing: int = 3) -> dict:
     """

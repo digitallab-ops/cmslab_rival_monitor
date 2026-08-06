@@ -216,6 +216,17 @@ def job_export_stats() -> None:
         logger.warning("수출통계 수집 스킵(DATA_GO_KR_KEY/네트워크 확인): %s", e)
 
 
+def job_dart_financials() -> None:
+    """DART 경쟁사 재무 수집 (성과 신호). 월1회 — 연간 실적이라 자주 안 바뀜."""
+    logger.info("=== [월간] DART 경쟁사 재무 수집 시작 ===")
+    try:
+        from signals.dart_financials import run as run_dart
+        r = run_dart()
+        logger.info("DART 재무 수집 완료: 매칭 %d / 저장 %d행", r["resolved"], r["saved"])
+    except Exception as e:
+        logger.warning("DART 재무 수집 스킵(OPENDART_KEY/네트워크 확인): %s", e)
+
+
 def job_profile_sync() -> None:
     """Cafe24 → 자사 제품 라인 자동 동기화 (company_profile.md). 실패해도 파이프라인 무영향."""
     logger.info("=== 자사 제품 프로필 동기화 시작 ===")
@@ -314,6 +325,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day=3, hour=6, minute=30),
         id="export_stats",
         name="[월간] 관세청 화장품 수출통계 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매월 4일 06:40 KST — DART 경쟁사 재무(성과 신호). 수출통계(3일) 다음날.
+    scheduler.add_job(
+        job_dart_financials,
+        trigger=CronTrigger(day=4, hour=6, minute=40),
+        id="dart_financials",
+        name="[월간] DART 경쟁사 재무 수집",
         max_instances=1,
         coalesce=True,
     )

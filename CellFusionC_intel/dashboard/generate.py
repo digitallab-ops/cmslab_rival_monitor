@@ -36,6 +36,7 @@ from analytics.queries import (
     get_demand_triangulation,
     get_market_export_growth,
     get_market_growth_story,
+    get_competitor_financials,
 )
 from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
 from storage.models import get_session
@@ -618,6 +619,51 @@ def _render_export_growth(growth: list) -> str:
         '<div class="xg-help">최근 3개월 누적 수출액(USD) · YoY = 전년 동기 대비 · '
         '<b style="color:#4ab884">+15%↑ 성장</b> / <b style="color:#e05353">-10%↓ 둔화</b></div>'
         '<div class="xg-list">' + "".join(rows) + '</div>'
+    )
+
+
+def _won_eok(v) -> str:
+    """원 → '억'/'조' 한국어 표기."""
+    if not v:
+        return "-"
+    eok = v / 1e8
+    return f"{eok/1e4:,.2f}조" if eok >= 1e4 else f"{eok:,.0f}억"
+
+
+def _render_financials(fins: list) -> str:
+    """경쟁사 실적(DART) — 매출·영업이익·영업이익률·매출 YoY 테이블."""
+    if not fins:
+        return ('<p class="no-data">재무 데이터 없음 '
+                '(DART 수집 전 · 매월 4일 갱신)</p>')
+    body = []
+    for f in fins:
+        yoy = f["rev_yoy_pct"]
+        if yoy is None:
+            yoy_html = '<span class="fin-yoy" style="color:var(--lo)">—</span>'
+        else:
+            c = "#4ab884" if yoy >= 10 else ("#e05353" if yoy <= -5 else "var(--mid)")
+            yoy_html = f'<span class="fin-yoy" style="color:{c}">{"+" if yoy >= 0 else ""}{yoy:.0f}%</span>'
+        listed = ('<span class="fin-tag fin-listed">상장</span>' if f["stock_code"]
+                  else '<span class="fin-tag fin-unlisted">비상장</span>')
+        whole = '' if f["is_brand_level"] else '<span class="fin-whole">회사전체</span>'
+        opm = f'{f["opm"]:.0f}%' if f["opm"] is not None else '-'
+        body.append(
+            f'<tr><td class="fin-brand">{_esc(f["brand"])}</td>'
+            f'<td class="fin-corp">{_esc(f["corp_name"])}{listed}{whole}</td>'
+            f'<td class="fin-num">{f["year"]}</td>'
+            f'<td class="fin-num fin-rev">{_won_eok(f["revenue"])}</td>'
+            f'<td class="fin-num">{yoy_html}</td>'
+            f'<td class="fin-num">{_won_eok(f["op_income"])}</td>'
+            f'<td class="fin-num">{opm}</td></tr>'
+        )
+    return (
+        '<div class="table-wrap"><table class="data-table fin-table">'
+        '<thead><tr><th>브랜드</th><th>운영사</th><th>기준연도</th>'
+        '<th>매출</th><th>YoY</th><th>영업이익</th><th>영업이익률</th></tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>'
+        '<div class="fin-note">※ DART 전자공시 기준(연결). ‘회사전체’는 해당 브랜드가 대기업의 '
+        '일부라 수치가 회사 전체임(예: 구달=클리오, 센텔리안24=동국제약, 에스트라=아모레퍼시픽). '
+        '비상장 외감법인(아누아·조선미녀·토리든 등)은 표준 재무 API 미제공으로 제외.</div>'
     )
 
 
@@ -1837,6 +1883,19 @@ a:hover { color: var(--gold); }
 .gs-mv-title a:hover { color: var(--hi); }
 .gs-nomv { font-size: 11.5px; color: var(--lo); font-style: italic; }
 
+/* ── 경쟁사 실적(DART) ── */
+.fin-table td { vertical-align: middle; }
+.fin-brand { font-weight: 700; color: var(--hi); white-space: nowrap; }
+.fin-corp { color: var(--mid); white-space: nowrap; }
+.fin-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fin-rev { font-weight: 700; color: var(--hi); }
+.fin-yoy { font-weight: 700; }
+.fin-tag { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 2px; margin-left: 6px; letter-spacing: 0.04em; }
+.fin-listed { background: rgba(74,184,132,0.14); color: #4ab884; }
+.fin-unlisted { background: rgba(78,88,112,0.28); color: var(--mid); }
+.fin-whole { font-size: 9px; color: var(--lo); margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; }
+.fin-note { font-size: 10.5px; color: var(--lo); line-height: 1.5; margin-top: 8px; }
+
 /* ── 개요 성장 헤드라인 배너 ── */
 .gh-band { display: flex; gap: 20px; flex-wrap: wrap; align-items: stretch;
   background: linear-gradient(120deg, rgba(74,184,132,0.07), rgba(111,176,236,0.05));
@@ -2577,6 +2636,7 @@ def _build_full_html(
     demand_tri: list = None,
     export_growth: list = None,
     growth_story: dict = None,
+    financials: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2603,6 +2663,7 @@ def _build_full_html(
     export_growth_html = _render_export_growth(export_growth or [])
     growth_story_html  = _render_growth_story(growth_story or {})
     growth_headline_html = _render_growth_headline(growth_story or {})
+    financials_html   = _render_financials(financials or [])
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
@@ -2738,6 +2799,14 @@ def _build_full_html(
         📡 수요 검증 <span class="section-sub">보도량(공급) vs 네이버 검색량(수요) 대조 — "진짜 무브인가, PR 노이즈인가"</span>
       </div>
       {demand_html}
+    </div>
+
+    <!-- 경쟁사 실적 (DART 전자공시 성과 신호) -->
+    <div class="section">
+      <div class="section-title">
+        💰 경쟁사 실적 (DART) <span class="section-sub">운영사 실매출·영업이익·성장률 — 보도량(공급)과 대조해 '진짜 규모' 확인</span>
+      </div>
+      {financials_html}
     </div>
 
     <div class="lower-row">
@@ -3315,6 +3384,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             growth_story = get_market_growth_story(session)
         except Exception:
             growth_story = {"overall": None, "markets": []}
+        # 경쟁사 실적(DART) — competitor_financials 없으면 빈 리스트
+        try:
+            financials = get_competitor_financials(session)
+        except Exception:
+            financials = []
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -3452,6 +3526,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         demand_tri=demand_tri,
         export_growth=export_growth,
         growth_story=growth_story,
+        financials=financials,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,

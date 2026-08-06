@@ -25,6 +25,7 @@ from analytics.queries import (
     get_demand_triangulation,
     get_market_export_growth,
     get_market_growth_story,
+    get_competitor_financials,
 )
 from analytics.summarizer import generate_brand_strategy_summary
 
@@ -397,6 +398,35 @@ def get_growth_story(top: int = 6) -> dict:
                 ],
             } for m in story["markets"]],
         }
+    finally:
+        s.close()
+
+
+@rival_mcp.tool()
+def get_financials() -> dict:
+    """
+    경쟁사 실적(DART 전자공시) — 브랜드 운영사의 최신 매출·영업이익·영업이익률 + 매출 YoY.
+
+    "경쟁사 실제 매출 얼마야?", "누가 제일 크고 빨리 커?" 류 질문용. 뉴스 활동량(공급)과
+    대조해 '보도 많음 vs 실제 큼'을 구분. 단, is_brand_level=false면 수치는 회사 전체다
+    (예: 구달=클리오, 센텔리안24=동국제약, 에스트라=아모레퍼시픽).
+    한계: 표준 재무 API는 상장사 위주 — 비상장 외감(아누아/조선미녀/토리든 등)은 미제공.
+    """
+    s = get_session()
+    try:
+        fins = get_competitor_financials(s)
+        if not fins:
+            return {"available": False,
+                    "note": "재무 데이터 없음(수집 전이거나 OPENDART_KEY 미설정)."}
+        return {"available": True, "unit": "매출·영업이익은 원",
+                "companies": [{
+                    "brand": f["brand"], "corp": f["corp_name"],
+                    "listed": bool(f["stock_code"]),
+                    "is_brand_level": f["is_brand_level"],
+                    "year": f["year"], "revenue": f["revenue"],
+                    "op_income": f["op_income"], "opm_pct": f["opm"],
+                    "revenue_yoy_pct": f["rev_yoy_pct"],
+                } for f in fins]}
     finally:
         s.close()
 
