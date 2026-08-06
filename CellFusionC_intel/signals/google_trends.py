@@ -19,8 +19,8 @@ from datetime import datetime
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import ALL_BRANDS
 from storage.models import get_session
+from storage.repository import get_active_brand_names
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def _save(session, term: str, brand: str, geo_label: str, rows: list) -> int:
 
 def run() -> dict:
     """브랜드 글로벌·US·JP 일별 검색 관심도 수집. 반환 {geos, rows, failed}."""
-    term_by_brand = {_term(b): b for b in ALL_BRANDS}
+    term_by_brand = {_term(b): b for b in get_active_brand_names()}
     terms = list(term_by_brand.keys())
     rows_total, failed = 0, 0
     session = get_session()

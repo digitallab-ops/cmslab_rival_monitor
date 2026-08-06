@@ -26,8 +26,8 @@ import requests
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import ALL_BRANDS
 from storage.models import get_session
+from storage.repository import get_active_brand_names
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ def run(years: int = 3) -> dict:
     session = get_session()
     try:
         _ensure_table(session)
-        for brand in ALL_BRANDS:
+        for brand in get_active_brand_names(session):
             spec = BRAND_CORP.get(brand)
             if not spec:
                 unmatched.append(brand)

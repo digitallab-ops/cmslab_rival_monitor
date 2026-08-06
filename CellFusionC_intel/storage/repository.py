@@ -3,8 +3,31 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from storage.models import NewsArticle, CollectionRun, DedupCandidate
+from storage.models import NewsArticle, CollectionRun, DedupCandidate, get_session
 from config.settings import DB_SCHEMA
+
+
+def get_active_brand_names(session: Optional[Session] = None) -> list[str]:
+    """활성 모니터 브랜드명(monitored_brands DB, 티어 무관). 실패·빈 결과 시 config fallback.
+
+    신호계층(검색·수출·재무·상표)과 뉴스 수집이 같은 브랜드 소스를 쓰도록 공용화.
+    → monitored_brands에 브랜드 1회 추가하면 전 파이프라인에 자동 반영.
+    """
+    from config.brands import ALL_BRANDS
+    own = session is None
+    if own:
+        session = get_session()
+    try:
+        rows = session.execute(text(
+            f"SELECT name FROM {DB_SCHEMA}.monitored_brands "
+            f"WHERE is_active = TRUE ORDER BY tier, name"
+        )).fetchall()
+        return [r[0] for r in rows] or list(ALL_BRANDS)
+    except Exception:
+        return list(ALL_BRANDS)
+    finally:
+        if own:
+            session.close()
 
 
 def article_exists(session: Session, url_hash: str) -> bool:

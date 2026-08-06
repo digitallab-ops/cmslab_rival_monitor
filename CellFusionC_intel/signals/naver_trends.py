@@ -19,8 +19,9 @@ import requests
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import ALL_BRANDS, BRAND_KO_NAMES
+from config.brands import BRAND_KO_NAMES
 from storage.models import get_session
+from storage.repository import get_active_brand_names
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,10 @@ def _endpoint_and_headers() -> tuple[str, dict]:
     }
 
 
-def _brand_keyword_groups() -> list[dict]:
+def _brand_keyword_groups(brands: list[str]) -> list[dict]:
     """브랜드별 검색어 그룹 (한국어명 + 영문명)."""
     groups = []
-    for b in ALL_BRANDS:
+    for b in brands:
         kws = list(BRAND_KO_NAMES.get(b, []))
         if b not in kws:
             kws.append(b)                  # 영문 브랜드명도 키워드로
@@ -126,12 +127,11 @@ def _ensure_table(session) -> None:
 
 
 def _save(session, source: str, results: list[dict]) -> int:
-    brand_set = set(ALL_BRANDS)
     n = 0
     for res in results:
         term = res["groupName"]
         kind = res["kind"]
-        brand = term if term in brand_set else None
+        brand = term if kind == "brand" else None   # kind로 판별(브랜드 소스 무관)
         for pt in res["data"]:
             session.execute(text(f"""
                 INSERT INTO {DB_SCHEMA}.search_trends (source, kind, term, brand, period, ratio)
@@ -148,7 +148,7 @@ def run(days: int = 120) -> dict:
     """브랜드 + 성분 검색 트렌드 수집·저장. 반환: {groups, rows}."""
     end = datetime.utcnow().date()
     start = end - timedelta(days=days)
-    groups = _brand_keyword_groups() + _ingredient_keyword_groups()
+    groups = _brand_keyword_groups(get_active_brand_names()) + _ingredient_keyword_groups()
     results = _call_datalab(groups, start.isoformat(), end.isoformat(), "week")
     if not results:
         logger.warning("데이터랩 검색 트렌드: 결과 없음(스코프 미설정 가능)")

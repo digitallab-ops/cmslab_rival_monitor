@@ -19,8 +19,8 @@ import requests
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import ALL_BRANDS
 from storage.models import get_session
+from storage.repository import get_active_brand_names
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +197,8 @@ def run() -> dict:
     session = get_session()
     try:
         _ensure_table(session)
-        for brand in ALL_BRANDS:
+        brands = get_active_brand_names(session)
+        for brand in brands:
             term = SEARCH_TERMS.get(brand, brand)
             n_b, n_own = 0, 0
             for cc in _COUNTRIES:
@@ -224,7 +225,7 @@ def run() -> dict:
         session.close()
     logger.info("해외상표 수집: 저장 %d건(화장품류 %d · 자기출원 %d) · 브랜드 %d",
                 saved, cosmetic, own, len(by_brand))
-    return {"searched": len(ALL_BRANDS), "saved": saved,
+    return {"searched": len(brands), "saved": saved,
             "cosmetic": cosmetic, "own": own, "by_brand": by_brand}
 
 
