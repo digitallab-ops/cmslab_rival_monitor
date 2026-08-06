@@ -1294,3 +1294,108 @@ def get_brand_radar(session: Session) -> list[dict]:
             s["_sort_score"] = (s["recent_4w"] + s["recent_high"] * 2) * math.log1p(s["momentum"])
     scores.sort(key=lambda x: (x["tier"], -x["_sort_score"]))
     return scores
+
+
+# 서브신호 → 한국어 라벨
+_COMPOSITE_DRV = {"momentum": "모멘텀", "financial": "실적", "trademark": "상표", "demand": "수요"}
+_VERDICT_DEMAND = {"real": 1.0, "latent": 0.7, "stable": 0.4, "pr": 0.2}
+
+
+def get_brand_composite_score(session: Session) -> list[dict]:
+    """
+    브랜드 종합 스코어 — 모멘텀·재무·상표선행·수요 4축을 0~100으로 통합.
+
+    기존 쿼리 조합(새 SQL 없음). 각 서브신호 0~1 정규화 후, 결측은 제외하고
+    존재하는 축의 가중치로 재정규화. 전 활성 브랜드 커버. 전체 실패 시 [].
+    반환: [{brand,tier,score,rank,subs{4:0~1|None},present{4:bool},verdict,drivers[상위2]}]
+    """
+    try:
+        mo_list = compute_brand_momentum(session)
+        mo = {m["brand"]: m for m in mo_list}
+        rows = session.execute(text(
+            f"SELECT name, tier FROM {DB_SCHEMA}.monitored_brands WHERE is_active = TRUE ORDER BY tier, name"
+        )).fetchall()
+        active = [(r[0], r[1]) for r in rows] or [(m["brand"], m.get("tier", 2)) for m in mo_list]
+        fins = {f["brand"]: f for f in get_competitor_financials(session)}
+        tm_sum: dict = {}
+        for b in get_trademark_signals(session).get("brands", []):
+            tm_sum[b["brand"]] = tm_sum.get(b["brand"], 0) + (b.get("recent") or 0)
+        demand = {d["brand"]: d for d in get_demand_triangulation(session)}
+        spikes: dict = {}
+        for s in get_google_spikes(session):
+            spikes[s["brand"]] = max(spikes.get(s["brand"], 0), s["spike_ratio"])
+    except Exception:
+        return []
+
+    recent_vals = sorted(m["recent_4w"] for m in mo_list) or [1]
+    p90 = recent_vals[max(0, int(len(recent_vals) * 0.9) - 1)] or 1  # 볼륨 정규화 분모
+    tm_max = max(tm_sum.values()) if tm_sum else 0
+    W = {"momentum": 0.35, "financial": 0.25, "trademark": 0.15, "demand": 0.25}
+
+    out = []
+    for brand, tier in active:
+        m = mo.get(brand)
+        subs: dict = {}
+        present: dict = {}
+
+        # 모멘텀 — 방향 + 볼륨 (항상 존재)
+        mom = (m or {}).get("momentum", 1.0) or 1.0
+        rec = (m or {}).get("recent_4w", 0) or 0
+        direction = (min(max(mom, 0.5), 2.0) - 0.5) / 1.5
+        volume = min(rec / p90, 1.0) if p90 else 0.0
+        subs["momentum"] = round(0.7 * direction + 0.3 * volume, 3)
+        present["momentum"] = True
+
+        # 재무 YoY
+        f = fins.get(brand)
+        if f and f.get("rev_yoy_pct") is not None:
+            x = min(max(f["rev_yoy_pct"], -20.0), 40.0)
+            subs["financial"] = round((x + 20.0) / 60.0, 3)
+            present["financial"] = True
+        else:
+            subs["financial"] = None
+            present["financial"] = False
+
+        # 상표 선행 (테이블 데이터 있을 때만)
+        if tm_max > 0:
+            subs["trademark"] = round(min(tm_sum.get(brand, 0) / tm_max, 1.0), 3)
+            present["trademark"] = True
+        else:
+            subs["trademark"] = None
+            present["trademark"] = False
+
+        # 수요 — verdict + 검색 급등 보너스
+        d = demand.get(brand)
+        sp = spikes.get(brand)
+        verdict = (d or {}).get("verdict")
+        if verdict or sp:
+            base = _VERDICT_DEMAND.get(verdict, 0.4) if verdict else 0.4
+            bonus = min(0.2 * ((sp or 1.0) - 1.0), 0.2) if sp else 0.0
+            subs["demand"] = round(min(base + bonus, 1.0), 3)
+            present["demand"] = True
+        else:
+            subs["demand"] = None
+            present["demand"] = False
+
+        # 가변 가중합
+        num = den = 0.0
+        contrib: dict = {}
+        for k, w in W.items():
+            if present[k] and subs[k] is not None:
+                num += w * subs[k]
+                den += w
+                contrib[k] = w * subs[k]
+        score = round(100 * num / den) if den > 0 else None
+
+        drivers = [k for k, _ in sorted(contrib.items(), key=lambda kv: kv[1], reverse=True)[:2]]
+        out.append({
+            "brand": brand, "tier": tier, "score": score,
+            "subs": subs, "present": present, "verdict": verdict,
+            "drivers": [_COMPOSITE_DRV[k] for k in drivers],
+        })
+
+    out = [o for o in out if o["score"] is not None]
+    out.sort(key=lambda x: x["score"], reverse=True)
+    for i, o in enumerate(out):
+        o["rank"] = i + 1
+    return out

@@ -39,6 +39,7 @@ from analytics.queries import (
     get_competitor_financials,
     get_trademark_signals,
     get_google_spikes,
+    get_brand_composite_score,
 )
 from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
 from storage.models import get_session
@@ -1284,25 +1285,40 @@ _NE_LAND_POLYS = [
 _DASHBOARD_CSS = """
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg:      #f5f7fb;
-  --surface: #ffffff;
-  --elevated:#ffffff;
-  --deep:    #eef1f6;
-  --border:  #e5e8f0;
-  --bhi:     #d3d8e6;
-  --gold:    #a9803f;
-  --accent:  #a9803f;
-  --blue:    #2f6fd0;
-  --hi:      #1a1d29;
-  --mid:     #4c5468;
-  --lo:      #7b839a;
-  --high:    #e0483f;
-  --med:     #c07d1c;
-  --shadow:  0 1px 2px rgba(23,33,64,.05), 0 2px 8px rgba(23,33,64,.05);
+  /* ── Champagne Noir (다크) ── 기존 변수명 유지 → 서브렌더러 자동 다크화 */
+  --bg:      #0a0e11;
+  --surface: #0f1519;
+  --elevated:#141c21;
+  --deep:    #182127;
+  --border:  rgba(206,222,224,.09);
+  --bhi:     rgba(206,222,224,.17);
+  --gold:    #d8b878;
+  --accent:  #d8b878;
+  --champ2:  #efce8f;
+  --champ-d: #8f7c50;
+  --blue:    #5b93ff;
+  --violet:  #9a8cff;
+  --hi:      #eef2ef;
+  --mid:     #9aa4a6;
+  --lo:      #5c6668;
+  --high:    #ff6a56;
+  --med:     #f2a93b;
+  --teal:    #46d6c3;
+  --coral:   #ff6a56;
+  --amber:   #f2a93b;
+  --void:    #0a0e11;
+  --ink:     #0f1519;
+  --ink2:    #141c21;
+  --raise:   #182127;
+  --shadow:  0 1px 2px rgba(0,0,0,.35);
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 body {
   font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif;
-  background: var(--bg);
+  background:
+    radial-gradient(900px 500px at 78% -8%, rgba(216,184,120,.05), transparent 55%),
+    radial-gradient(1100px 700px at 12% 112%, rgba(70,130,150,.05), transparent 55%),
+    var(--bg);
   color: var(--hi);
   font-size: 14px;
   line-height: 1.55;
@@ -1843,7 +1859,7 @@ a:hover { color: var(--gold); }
 .dd-act-focus {
   font-size: 12px; font-weight: 600; padding: 3px 9px;
   border: 1px solid; border-radius: 12px; white-space: nowrap;
-  background: rgba(0,0,0,0.02);
+  background: rgba(255,255,255,0.025);
 }
 .dd-act-focus b { font-weight: 800; }
 /* 구조화 요약 섹션 */
@@ -1919,7 +1935,7 @@ a:hover { color: var(--gold); }
 /* ── 시장 성장 스토리 (수출 x 활동) ── */
 .gs-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 13px; }
 @media (max-width: 760px) { .gs-grid { grid-template-columns: 1fr; } }
-.gs-card { background: rgba(0,0,0,0.02); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; }
+.gs-card { background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; }
 .gs-head { display: flex; align-items: center; gap: 9px; }
 .gs-flag { font-size: 20px; }
 .gs-name { font-size: 15px; font-weight: 700; color: var(--hi); }
@@ -2021,7 +2037,7 @@ a:hover { color: var(--gold); }
 @media (max-width: 900px) { .pb-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) { .pb-grid { grid-template-columns: 1fr; } }
 .pb-card {
-  background: rgba(0,0,0,0.02); border: 1px solid var(--border);
+  background: rgba(255,255,255,0.025); border: 1px solid var(--border);
   border-radius: 10px; padding: 13px 14px; display: flex; flex-direction: column; gap: 9px;
 }
 .pb-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
@@ -2047,7 +2063,7 @@ a:hover { color: var(--gold); }
 
 /* ── 브리핑 아카이브 ── */
 .bfa-list { display: flex; flex-direction: column; gap: 8px; }
-.bfa-item { background: rgba(0,0,0,0.02); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.bfa-item { background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
 .bfa-sum { list-style: none; cursor: pointer; padding: 11px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .bfa-sum::-webkit-details-marker { display: none; }
 .bfa-sum::before { content: '▸'; color: var(--lo); font-size: 12px; transition: transform .15s; }
@@ -2171,6 +2187,107 @@ a:hover { color: var(--gold); }
 .insight-art-meta  { color: var(--lo); white-space: nowrap; font-size: 10px; font-variant-numeric: tabular-nums; }
 .insight-art-link  { color: var(--blue); font-size: 10px; white-space: nowrap; }
 .insight-art-link:hover { color: var(--gold); }
+
+/* ══════════ COMMAND CENTER (개편) ══════════ */
+.mast { display:flex; align-items:center; gap:16px; padding:18px 4px 12px; }
+.mast .mk { display:flex; align-items:baseline; gap:11px; }
+.mast .sq { width:9px; height:9px; background:var(--champ); transform:rotate(45deg); box-shadow:0 0 12px rgba(216,184,120,.6); }
+.mast h1 { font-size:16px; margin:0; font-weight:700; letter-spacing:.32em; color:var(--hi); }
+.mast h1 span { color:var(--champ); }
+.mast .live { font-family:var(--mono); font-size:10.5px; color:var(--teal); letter-spacing:.12em; display:flex; align-items:center; gap:7px; }
+.mast .live .bl { width:6px; height:6px; border-radius:50%; background:var(--teal); box-shadow:0 0 8px var(--teal); animation:cc-bl 1.8s infinite; }
+@keyframes cc-bl { 0%,100%{opacity:1} 50%{opacity:.25} }
+.mast .sp { flex:1; }
+.mast .clk { font-family:var(--mono); font-size:11px; color:var(--lo); letter-spacing:.06em; }
+
+/* segmented tabs (골드 언더라인) */
+.tabbar-tabs { display:flex; gap:2px; }
+.tab-btn { position:relative; font-family:var(--mono); font-size:11.5px; letter-spacing:.13em; background:none;
+  border:none; color:var(--lo); padding:11px 16px; cursor:pointer; text-transform:uppercase; }
+.tab-btn:hover { color:var(--mid); }
+.tab-btn.active { color:var(--hi); }
+.tab-btn.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px;
+  background:var(--champ); box-shadow:0 0 10px rgba(216,184,120,.5); }
+
+/* eyebrow section label */
+.eyebrow { display:flex; align-items:center; gap:12px; margin:24px 0 13px; }
+.eyebrow .lab { font-family:var(--mono); font-size:10.5px; letter-spacing:.22em; color:var(--champ-d); text-transform:uppercase; white-space:nowrap; }
+.eyebrow .rule { flex:1; height:1px; background:var(--bhi); }
+.eyebrow .rt { font-family:var(--mono); font-size:10px; color:var(--lo); letter-spacing:.06em; }
+.eyebrow .rt.jump { color:var(--champ); cursor:pointer; }
+.box { background:var(--ink); border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+.hud { position:relative; }
+.hud::before, .hud::after { content:""; position:absolute; width:13px; height:13px; pointer-events:none; opacity:.55; z-index:3; }
+.hud::before { left:9px; top:34px; border-left:1px solid var(--champ); border-top:1px solid var(--champ); }
+.hud::after { right:9px; bottom:9px; border-right:1px solid var(--champ); border-bottom:1px solid var(--champ); }
+.box .ph { display:flex; align-items:center; gap:8px; padding:11px 14px; border-bottom:1px solid var(--border);
+  font-family:var(--mono); font-size:10px; letter-spacing:.15em; color:var(--mid); text-transform:uppercase; }
+.box .ph .c { margin-left:auto; color:var(--lo); letter-spacing:.05em; }
+
+/* synthesis */
+.synth { display:grid; grid-template-columns:1.5fr 1fr; border:1px solid var(--border); border-radius:6px; overflow:hidden;
+  background:linear-gradient(120deg, rgba(216,184,120,.05), transparent 55%); }
+.synth .lead { padding:22px 26px; border-right:1px solid var(--border); }
+.synth .lead .tl { font-family:var(--mono); font-size:10px; letter-spacing:.2em; color:var(--champ); text-transform:uppercase; margin-bottom:12px; }
+.synth .lead h2 { font-size:22px; line-height:1.4; margin:0; font-weight:650; letter-spacing:-.01em;
+  border-left:2px solid var(--champ); padding-left:16px; color:var(--hi); }
+.synth .lead h2 b { color:var(--champ2); }
+.synth .lead .by { font-family:var(--mono); font-size:10px; color:var(--lo); margin-top:14px; letter-spacing:.05em; }
+.synth .cols { display:flex; flex-direction:column; }
+.synth .scol { padding:12px 20px; border-bottom:1px solid var(--border); }
+.synth .scol:last-child { border-bottom:none; }
+.synth .scol .h { font-family:var(--mono); font-size:10px; letter-spacing:.13em; text-transform:uppercase; margin-bottom:5px; display:flex; gap:7px; align-items:center; }
+.synth .scol .h::before { content:""; width:5px; height:5px; border-radius:50%; }
+.scol.respond .h { color:var(--coral); } .scol.respond .h::before { background:var(--coral); }
+.scol.opportunity .h { color:var(--champ); } .scol.opportunity .h::before { background:var(--champ); }
+.scol.check .h { color:var(--teal); } .scol.check .h::before { background:var(--teal); }
+.synth .scol ul { margin:0; padding-left:15px; }
+.synth .scol li { font-size:12px; color:var(--mid); line-height:1.5; margin-bottom:2px; }
+
+/* metric rail */
+.rail { display:grid; grid-template-columns:repeat(6,1fr); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin-top:14px; }
+.met { padding:13px 16px; border-right:1px solid var(--border); }
+.met:last-child { border-right:none; }
+.met .l { font-family:var(--mono); font-size:9.5px; letter-spacing:.12em; color:var(--lo); text-transform:uppercase; }
+.met .v { font-family:var(--mono); font-size:25px; font-weight:700; margin-top:5px; letter-spacing:-.02em; color:var(--hi); }
+.met .d { font-family:var(--mono); font-size:10.5px; margin-top:2px; }
+.met .d.pos { color:var(--teal); } .met .d.neg { color:var(--coral); } .met .d.neu { color:var(--lo); }
+
+/* command grid */
+.cmd { display:grid; grid-template-columns:250px minmax(0,1fr) 232px; gap:14px; align-items:start; }
+.cmd > .box, .cmd > div { min-width:0; }
+.stream { max-height:520px; overflow:auto; }
+.ev { padding:11px 14px; border-bottom:1px solid var(--border); cursor:pointer; }
+.ev:hover { background:var(--ink2); }
+.ev .m { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:9.5px; color:var(--lo); letter-spacing:.04em; margin-bottom:5px; text-transform:uppercase; }
+.ev .t { font-size:12.5px; line-height:1.4; color:var(--hi); }
+.ev .vb { font-family:var(--mono); font-size:8.5px; font-weight:700; padding:2px 6px; border-radius:2px; letter-spacing:.04em; margin-left:auto; white-space:nowrap; }
+.vb-real { background:rgba(70,214,195,.15); color:var(--teal); }
+.vb-pr { background:rgba(255,106,86,.15); color:var(--coral); }
+.vb-latent { background:rgba(216,184,120,.16); color:var(--champ); }
+.dot-h { color:var(--coral); } .dot-m { color:var(--amber); } .dot-l { color:var(--teal); }
+
+/* composite leaderboard */
+.lb { max-height:520px; overflow:auto; }
+.lb .r { display:flex; align-items:center; gap:9px; padding:9px 12px; border-bottom:1px solid var(--border); cursor:pointer; }
+.lb .r:hover { background:var(--ink2); }
+.lb .rk { font-family:var(--mono); font-size:10px; color:var(--lo); width:14px; }
+.lb .nm { font-size:12px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--hi); }
+.lb .subs { display:flex; gap:2px; height:20px; align-items:flex-end; width:38px; flex-shrink:0; }
+.lb .subs i { flex:1; border-radius:1px; min-height:1px; }
+.sub-mom { background:var(--violet); } .sub-fin { background:var(--teal); } .sub-tm { background:var(--champ); } .sub-dem { background:var(--amber); }
+.lb .sc { font-family:var(--mono); font-size:15px; font-weight:700; width:26px; text-align:right; color:var(--hi); }
+.lb-key { display:flex; gap:11px; flex-wrap:wrap; padding:9px 12px; font-family:var(--mono); font-size:9px; color:var(--lo); letter-spacing:.04em; border-top:1px solid var(--border); }
+.lb-key i { display:inline-block; width:7px; height:7px; margin-right:3px; vertical-align:middle; }
+
+/* market + heatmap duo */
+.duo { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.4fr); gap:14px; align-items:start; }
+.duo .box > div:not(.ph) { padding:6px 8px; }
+.mkl .mk-row { display:flex; align-items:center; gap:11px; padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; }
+.mkl .mk-row:hover { background:var(--ink2); }
+.mkl .flag { font-size:16px; } .mkl .nm { font-weight:600; font-size:12.5px; color:var(--hi); }
+.mkl .why { color:var(--lo); font-size:10.5px; } .mkl .yoy { margin-left:auto; font-family:var(--mono); font-weight:700; color:var(--teal); }
+@media (max-width:1080px){ .cmd,.duo,.synth,.rail{ grid-template-columns:1fr; } .rail{ grid-template-columns:repeat(3,1fr);} }
 """
 
 _WORLDMAP_CSS = """
@@ -2651,10 +2768,10 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:'#4c5468', boxWidth:12 }} }} }},
+      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:'#9aa4a6', boxWidth:12 }} }} }},
       scales: {{
-        y: {{ beginAtZero: true, grid: {{ color:'rgba(0,0,0,0.07)' }}, ticks: {{ color:'#4c5468', precision: 0, font: {{ size: 10 }} }} }},
-        x: {{ grid: {{ color:'rgba(0,0,0,0.07)' }}, ticks: {{ color:'#4c5468', font: {{ size: 10 }}, maxRotation: 45 }} }}
+        y: {{ beginAtZero: true, grid: {{ color:'rgba(255,255,255,0.06)' }}, ticks: {{ color:'#9aa4a6', precision: 0, font: {{ size: 10 }} }} }},
+        x: {{ grid: {{ color:'rgba(255,255,255,0.06)' }}, ticks: {{ color:'#9aa4a6', font: {{ size: 10 }}, maxRotation: 45 }} }}
       }}
     }}
   }});
@@ -2690,6 +2807,135 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 커맨드센터 (개편) 렌더러
+# ---------------------------------------------------------------------------
+
+def _render_metric_rail(stats: dict, growth_story: dict, spikes: list, days: int) -> str:
+    """상단 지표 레일 6종 (kpi-* id 보존 → setPeriod 연동)."""
+    o = (growth_story or {}).get("overall") or {}
+    yoy = o.get("yoy_pct")
+    yoy_txt = (f'{"+" if yoy >= 0 else ""}{yoy:.0f}%') if yoy is not None else "—"
+    nsp = len(spikes or [])
+    return (
+        '<div class="rail">'
+        f'<div class="met"><div class="l">수집 {days}D</div><div class="v tnum"><span id="kpi-total">{stats.get("total",0):,}</span></div><div class="d neu">기사</div></div>'
+        f'<div class="met"><div class="l">HIGH 신호</div><div class="v tnum" style="color:var(--coral)"><span id="kpi-high">{stats.get("high",0)}</span></div><div class="d neu">속보</div></div>'
+        f'<div class="met"><div class="l">활성 브랜드</div><div class="v tnum"><span id="kpi-brands">{stats.get("brands_active",0)}</span></div><div class="d neu">모니터</div></div>'
+        f'<div class="met"><div class="l">커버 국가</div><div class="v tnum"><span id="kpi-countries">{stats.get("countries_active",0)}</span></div><div class="d neu">신호 발생</div></div>'
+        f'<div class="met"><div class="l">주요국 수출 YoY</div><div class="v tnum" style="color:var(--teal)">{yoy_txt}</div><div class="d pos">{o.get("growers",0)}개국↑</div></div>'
+        f'<div class="met"><div class="l">검색 급등</div><div class="v tnum" style="color:var(--amber)">{nsp}</div><div class="d neu">글로벌·해외</div></div>'
+        '</div>'
+    )
+
+
+def _render_move_stream(high_articles: list, demand_tri: list) -> str:
+    """핵심 무브 스트림 — HIGH 중복제거(브랜드·국가·활동) + 수요 verdict 라벨."""
+    verdict_by_brand = {t["brand"]: t.get("verdict") for t in (demand_tri or [])}
+    _VB = {"real": ("실질", "vb-real"), "pr": ("PR우세", "vb-pr"),
+           "latent": ("숨은수요", "vb-latent"), "stable": ("안정", "vb-latent")}
+    seen, rows = set(), []
+    for a in sorted(high_articles or [], key=lambda x: -(x.get("score") or 0)):
+        k = (a.get("brand"), a.get("country"), a.get("activity_type"))
+        if k in seen:
+            continue
+        seen.add(k)
+        cc = a.get("country", "")
+        flag = COUNTRY_FLAGS.get(cc, "🌐")
+        act = ACTIVITY_LABELS.get(a.get("activity_type", ""), a.get("activity_type", ""))
+        title = _esc((a.get("title_ko") or a.get("title") or "")[:76])
+        v = verdict_by_brand.get(a.get("brand"))
+        vb = (f'<span class="vb {_VB[v][1]}">{_VB[v][0]}</span>' if v in _VB else "")
+        dcls = "dot-h" if a.get("importance") == "high" else "dot-m"
+        rows.append(
+            f'<div class="ev" onclick="openHeatmapDrilldown(\'{_esc(a.get("brand",""))}\',\'{cc}\',\'all\')">'
+            f'<div class="m"><span class="{dcls}">●</span>{flag}{_esc(cc)} · {_esc(act)}{vb}</div>'
+            f'<div class="t">{title}</div></div>'
+        )
+        if len(rows) >= 7:
+            break
+    body = "".join(rows) or '<div class="ev"><div class="t" style="color:var(--lo)">이번 기간 핵심 무브 없음</div></div>'
+    return f'<div class="stream">{body}</div>'
+
+
+def _render_composite_lb(composite: list) -> str:
+    """브랜드 종합 스코어 리더보드 (21개 전부, 4색 서브신호 바)."""
+    if not composite:
+        return ('<div class="lb"><div class="ev"><div class="t" style="color:var(--lo);padding:6px">'
+                '종합 스코어 데이터 축적 중</div></div></div>')
+    rows = []
+    for o in composite:
+        subs = o["subs"]
+        bars = ""
+        for key, cls in (("momentum", "sub-mom"), ("financial", "sub-fin"),
+                         ("trademark", "sub-tm"), ("demand", "sub-dem")):
+            v = subs.get(key)
+            h = int(round((v or 0) * 100)) if v is not None else 3
+            op = "" if v is not None else "opacity:.25"
+            bars += f'<i class="{cls}" style="height:{max(h,3)}%;{op}"></i>'
+        sccol = "var(--champ2)" if o["rank"] <= 2 else "var(--hi)"
+        rows.append(
+            f'<div class="r" onclick="openHeatmapDrilldown(\'{_esc(o["brand"])}\',\'all\',\'all\')">'
+            f'<span class="rk">{o["rank"]}</span><span class="nm">{_esc(o["brand"])}</span>'
+            f'<span class="subs">{bars}</span>'
+            f'<span class="sc" style="color:{sccol}">{o["score"]}</span></div>'
+        )
+    key = ('<div class="lb-key"><span><i class="sub-mom"></i>모멘텀</span><span><i class="sub-fin"></i>재무</span>'
+           '<span><i class="sub-tm"></i>상표</span><span><i class="sub-dem"></i>수요</span></div>')
+    return f'<div class="lb">{"".join(rows)}</div>{key}'
+
+
+def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite: list) -> str:
+    """AI 종합 인사이트 — 담백한 데이터 리드 + 대응/기회/점검 3열(시장요약 파싱)."""
+    import re as _re
+    o = (growth_story or {}).get("overall") or {}
+    mkts = (growth_story or {}).get("markets") or []
+    top_mkt = mkts[0] if mkts else None
+    top_brand = composite[0] if composite else None
+    yoy = o.get("yoy_pct")
+
+    bits = []
+    if yoy is not None:
+        bits.append(f'주요국 화장품 수출 <b>{"+" if yoy>=0 else ""}{yoy:.0f}%</b>')
+    if top_mkt:
+        bits.append(f'최고 성장 <b>{_esc(_COUNTRY_KO_LBL.get(top_mkt["country_code"], top_mkt["country_name"]))} +{top_mkt["yoy_pct"]:.0f}%</b>')
+    if top_brand:
+        bits.append(f'종합 스코어 1위 <b>{_esc(top_brand["brand"])}</b>')
+    lead = " · ".join(bits) if bits else "최근 7일 경쟁 신호를 5축(뉴스·검색·수출·재무·상표)으로 교차검증했습니다."
+
+    # 대응/기회/점검 3열 (기존 파싱 재사용)
+    cols = []
+    for part in _re.split(r"###\s+", market_text or ""):
+        part = part.strip()
+        if not part:
+            continue
+        nl = part.find("\n")
+        label = (part if nl < 0 else part[:nl]).strip()
+        body = "" if nl < 0 else part[nl + 1:]
+        bullets = [ln.strip().lstrip("-•").strip().replace("**", "")
+                   for ln in body.split("\n") if ln.strip().startswith(("-", "•"))]
+        if not bullets:
+            continue
+        if "대응" in label:
+            kind = "respond"
+        elif "기회" in label or "확장" in label:
+            kind = "opportunity"
+        else:
+            kind = "check"
+        lis = "".join(f"<li>{_esc(b)}</li>" for b in bullets[:2])
+        cols.append(f'<div class="scol {kind}"><div class="h">{_esc(label)}</div><ul>{lis}</ul></div>')
+    cols_html = "".join(cols) or '<div class="scol check"><div class="h">점검</div><ul><li>시장 인사이트 생성 중</li></ul></div>'
+
+    return (
+        '<div class="synth hud">'
+        '<div class="lead"><div class="tl">Weekly Synthesis · AI 종합</div>'
+        f'<h2>{lead}</h2>'
+        '<div class="by">최근 7일 · 뉴스·검색·수출·재무·상표 5축 교차검증</div></div>'
+        f'<div class="cols">{cols_html}</div>'
+        '</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # HTML 조립
 # ---------------------------------------------------------------------------
 
@@ -2719,6 +2965,7 @@ def _build_full_html(
     financials: list = None,
     trademark_sig: dict = None,
     search_spikes: list = None,
+    composite: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -2748,6 +2995,21 @@ def _build_full_html(
     financials_html   = _render_financials(financials or [])
     trademark_html    = _render_trademark(trademark_sig or {})
     search_spikes_html = _render_search_spikes(search_spikes or [])
+    # ── 커맨드센터(브리핑 탭) 신규 블록 ──
+    metric_rail_html  = _render_metric_rail(stats, growth_story or {}, search_spikes or [], days)
+    move_stream_html  = _render_move_stream(_dg.get("high") or high_articles, demand_tri or [])
+    composite_lb_html = _render_composite_lb(composite or [])
+    synth_html        = _render_synth(_dg.get("stats") or stats,
+                                      _dg.get("market") or market_text, growth_story or {}, composite or [])
+    _mk = (growth_story or {}).get("markets") or []
+    market_list_html = "".join(
+        f'<div class="mk-row" onclick="switchTab(\'strategy\')">'
+        f'<span class="flag">{COUNTRY_FLAGS.get(m["country_code"], "🌐")}</span>'
+        f'<div><div class="nm">{_esc(_COUNTRY_KO_LBL.get(m["country_code"], m["country_name"]))}</div>'
+        f'<div class="why">{_esc((m["moves"][0]["brand"] + " · " + ACTIVITY_LABELS.get(m["moves"][0]["activity_type"], "")) if m.get("moves") else "활동 축적 중")}</div></div>'
+        f'<span class="yoy">{"+" if m["yoy_pct"] >= 0 else ""}{m["yoy_pct"]:.0f}%</span></div>'
+        for m in _mk[:7]
+    ) or '<div class="mk-row"><div class="why" style="padding:10px">수출 데이터 축적 중 (관세청 수집 후)</div></div>'
     insights_script   = _build_insights_script(brand_insights)
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
@@ -2817,20 +3079,19 @@ def _build_full_html(
 <style>{_DASHBOARD_CSS}{worldmap_css}</style>
 </head>
 <body>
-<header class="page-header">
-  <div class="page-header-brand">
-    <div class="page-header-accent"></div>
-    <h1>K-BEAUTY INTEL</h1>
-  </div>
-  <div class="meta">최근 <span id="period-label">{days}</span>일 집계 &nbsp;·&nbsp; <span>{_esc(generated_str)}</span></div>
-</header>
+<div class="mast">
+  <div class="mk"><span class="sq"></span><h1>CELLFUSION <span>INTEL</span></h1></div>
+  <span class="live"><span class="bl"></span>LIVE</span>
+  <span class="sp"></span>
+  <span class="clk">최근 <span id="period-label">{days}</span>D · {_esc(generated_str)}</span>
+</div>
 
 <div class="tabbar">
   <div class="tabbar-tabs">
-    <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">📊 개요</button>
-    <button class="tab-btn" data-tab="brands" onclick="switchTab('brands')">🏢 경쟁사</button>
-    <button class="tab-btn" data-tab="strategy" onclick="switchTab('strategy')">🎯 우리 관점</button>
-    <button class="tab-btn" data-tab="feed" onclick="switchTab('feed')">📰 기록</button>
+    <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">브리핑</button>
+    <button class="tab-btn" data-tab="brands" onclick="switchTab('brands')">경쟁사</button>
+    <button class="tab-btn" data-tab="strategy" onclick="switchTab('strategy')">시장</button>
+    <button class="tab-btn" data-tab="feed" onclick="switchTab('feed')">기록</button>
   </div>
   <div class="period-row">
     <span class="period-row-label">기간</span>
@@ -2852,18 +3113,24 @@ def _build_full_html(
 
 <div class="page-body">
 
-  <!-- ===== 탭: 개요 ===== -->
+  <!-- ===== 탭: 브리핑 (메인 종합) ===== -->
   <div class="tab-panel active" id="tab-overview">
-    <div class="section">
-      <div class="section-title">요약 통계</div>
-      {kpi_html}
+    <div class="eyebrow"><span class="lab">Weekly Synthesis</span><span class="rule"></span><span class="rt">최근 7일 · AI 종합 인사이트</span></div>
+    {synth_html}
+    {metric_rail_html}
+
+    <div class="eyebrow"><span class="lab">Situation</span><span class="rule"></span><span class="rt">실시간 신호 · 클릭 → 상세</span></div>
+    <div class="cmd">
+      <div class="box"><div class="ph">핵심 무브 <span class="c">TOP</span></div>{move_stream_html}</div>
+      {worldmap_section}
+      <div class="box"><div class="ph">종합 스코어 <span class="c">21</span></div>{composite_lb_html}</div>
     </div>
 
-    {growth_headline_html}
-
-    {worldmap_section}
-
-    {overview_digest_html}
+    <div class="eyebrow"><span class="lab">Markets &amp; Pressure</span><span class="rule"></span><span class="rt jump" onclick="switchTab('strategy')">시장 탭 전체 →</span></div>
+    <div class="duo">
+      <div class="box"><div class="ph">뜨는 시장 <span class="c">수출 YoY</span></div><div class="mkl">{market_list_html}</div></div>
+      <div class="box"><div class="ph">브랜드 &times; 국가 압박 <span class="c">셀 클릭 → 상세</span></div><div style="padding:12px 14px;overflow:auto">{heatmap_html}</div></div>
+    </div>
   </div>
 
   <!-- ===== 탭: 경쟁사 ===== -->
@@ -3499,6 +3766,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             search_spikes = get_google_spikes(session)
         except Exception:
             search_spikes = []
+        # 브랜드 종합 스코어(모멘텀·재무·상표·수요 통합) — 실패 시 빈 리스트
+        try:
+            composite = get_brand_composite_score(session)
+        except Exception:
+            composite = []
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -3639,6 +3911,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         financials=financials,
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
+        composite=composite,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,
