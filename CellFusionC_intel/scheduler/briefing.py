@@ -110,6 +110,84 @@ def _cms_profile() -> str:
         return "우리=씨엠에스랩/셀퓨전씨(더마 선케어 스페셜리스트)."
 
 
+def _signal_digest(session, weekly: bool = True) -> str:
+    """5축 신호(종합스코어·삼각검증·상표·검색급등·수출)를 Slack 포맷으로 결정적 생성.
+
+    뉴스 LLM 서술 뒤에 붙는 '하드 데이터' 섹션 — 환각 없이 정확한 수치/랭킹.
+    weekly=False면 실무 액션 위주로 압축(진출 선행·검색 급등·스코어 top3).
+    """
+    from analytics.queries import (
+        get_brand_composite_score, get_demand_triangulation,
+        get_trademark_signals, get_google_spikes, get_market_growth_story,
+    )
+    L: list[str] = []
+
+    # 진출 선행신호 — 최근 해외 상표 출원 (가장 액션어블 → 항상 최상단)
+    try:
+        feed = get_trademark_signals(session, months=(3 if weekly else 2), limit=8).get("feed", [])
+    except Exception:
+        feed = []
+    if feed:
+        L.append("### 🪧 진출 선행신호 — 최근 해외 상표 출원")
+        for f in feed[:(6 if weekly else 4)]:
+            L.append(f"- {f['date']} *{f['brand']}* ({f['country']}) — {f['mark']}")
+
+    # 글로벌 검색 급등
+    try:
+        sp = get_google_spikes(session)
+    except Exception:
+        sp = []
+    if sp:
+        L.append("### 🔺 글로벌 검색 급등 (최근7일 vs 직전28일)")
+        for x in sp[:5]:
+            L.append(f"- *{x['brand']}* ({x['geo']}) 검색 {x['spike_ratio']}배↑")
+
+    # 종합 스코어 (모멘텀·재무·상표·수요 통합)
+    try:
+        comp = get_brand_composite_score(session)
+    except Exception:
+        comp = []
+    if comp:
+        L.append("### 🏆 브랜드 종합 스코어 (0~100)")
+        for o in comp[:(6 if weekly else 3)]:
+            drv = "·".join(o.get("drivers", []))
+            L.append(f"- *{o['brand']}* {o['score']}점" + (f" — {drv}↑" if drv else ""))
+
+    if weekly:
+        # 발표 vs 검색 수요 검증 (삼각)
+        try:
+            tri = get_demand_triangulation(session)
+        except Exception:
+            tri = []
+        if tri:
+            real = [t["brand"] for t in tri if t.get("verdict") == "real"][:5]
+            latent = [t["brand"] for t in tri if t.get("verdict") == "latent"][:5]
+            pr = [t["brand"] for t in tri if t.get("verdict") == "pr"][:5]
+            vs = []
+            if real:   vs.append(f"- 실질(뉴스↑·검색↑): {', '.join(real)}")
+            if latent: vs.append(f"- 숨은수요(검색↑·보도적음): {', '.join(latent)}")
+            if pr:     vs.append(f"- PR우세(보도↑·검색식음): {', '.join(pr)}")
+            if vs:
+                L.append("### 🔍 발표 vs 검색 수요 검증")
+                L += vs
+        # 뜨는 시장 (수출 YoY)
+        try:
+            mkts = get_market_growth_story(session).get("markets", [])
+        except Exception:
+            mkts = []
+        if mkts:
+            L.append("### 🌍 뜨는 시장 — 실수출 성장 (관세청)")
+            for m in mkts[:5]:
+                lead = (m["moves"][0]["brand"] if m.get("moves") else "")
+                L.append(f"- {m['country_name']} 수출 +{m['yoy_pct']:.0f}%"
+                         + (f" · 그 시장 경쟁사: {lead}" if lead else ""))
+
+    if not L:
+        return ""
+    header = "\n\n---\n\n📊 *신호 검증 (뉴스 외 4축: 검색·수출·재무·상표)*\n\n"
+    return header + "\n".join(L)
+
+
 # ── 주간 브리핑 (심층) ────────────────────────────────────────────────────────
 
 def generate_weekly_briefing() -> str:
@@ -118,6 +196,7 @@ def generate_weekly_briefing() -> str:
     try:
         rows = _fetch_rows(session, hours=24 * 7)
         stats = _stats(session, hours=24 * 7)
+        signal_digest = _signal_digest(session, weekly=True)
     finally:
         session.close()
 
@@ -150,6 +229,9 @@ def generate_weekly_briefing() -> str:
         logger.error("주간 브리핑 GPT 오류: %s", e)
         text_out = f"브리핑 생성 오류: {e}"
 
+    if signal_digest and not text_out.startswith("브리핑 생성 오류"):
+        text_out += signal_digest
+
     logger.info("주간 브리핑 생성 완료 (%d자)", len(text_out))
     _save(kind="weekly", content=text_out, stats=stats, hours=24 * 7, model="gpt-4o")
     send_weekly_briefing(text_out, stats)
@@ -164,12 +246,13 @@ def generate_daily_briefing() -> str:
     try:
         rows = _fetch_rows(session, hours=28)   # 전날 저녁 수집분 커버
         stats = _stats(session, hours=28)
+        signal_digest = _signal_digest(session, weekly=False)
     finally:
         session.close()
 
     if not rows:
         logger.info("일간 브리핑: 전날 수집 없음")
-        send_daily_briefing("어제 새로 잡힌 주목할 경쟁 활동이 없습니다.", stats)
+        send_daily_briefing("어제 새로 잡힌 주목할 경쟁 활동이 없습니다." + (signal_digest or ""), stats)
         return ""
 
     data_prompt = _build_prompt_by_region(rows, limit=45, detail_len=160)
@@ -187,6 +270,9 @@ def generate_daily_briefing() -> str:
     except Exception as e:
         logger.error("일간 브리핑 GPT 오류: %s", e)
         text_out = f"브리핑 생성 오류: {e}"
+
+    if signal_digest and not text_out.startswith("브리핑 생성 오류"):
+        text_out += signal_digest
 
     logger.info("일간 브리핑 생성 완료 (%d자)", len(text_out))
     _save(kind="daily", content=text_out, stats=stats, hours=28, model="gpt-4o-mini")

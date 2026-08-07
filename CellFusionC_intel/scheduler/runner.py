@@ -269,13 +269,37 @@ def _notify_search_spikes(spikes: list) -> None:
         logger.warning("검색 급등 Slack 전송 실패: %s", e)
 
 
+def _notify_new_trademarks(filings: list) -> None:
+    """신규 해외 상표 출원 = 진출 임박 조기경보 Slack 알림(webhook 없으면 스킵)."""
+    url = os.getenv("SLACK_WEBHOOK_URL_2") or os.getenv("SLACK_WEBHOOK_URL", "")
+    if not url:
+        return
+    _FL = {"US": "🇺🇸", "JP": "🇯🇵", "EU": "🇪🇺"}
+    lines = [f"• {f['date']} *{f['brand']}* {_FL.get(f['country'], f['country'])} — {f['mark']}"
+             for f in filings]
+    text_msg = ("🪧 *진출 임박 조기경보 — 신규 해외 상표 출원*\n"
+                "_경쟁사가 해당 시장에 상표를 냈습니다. 뉴스보다 앞선 진출·신제품 신호._\n"
+                + "\n".join(lines))
+    try:
+        import json
+        data = json.dumps({"text": text_msg}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        logger.warning("신규 상표 Slack 전송 실패: %s", e)
+
+
 def job_trademark() -> None:
-    """KIPRIS 해외상표 수집 (진출 선행신호). 월1회 — 상표 갱신 매월."""
+    """KIPRIS 해외상표 수집 (진출 선행신호) + 신규 출원 조기경보. 월1회."""
     logger.info("=== [월간] KIPRIS 해외상표 수집 시작 ===")
     try:
         from signals.trademark import run as run_tm
         r = run_tm()
-        logger.info("해외상표 수집 완료: 저장 %d(자기출원 %d)", r["saved"], r.get("own", 0))
+        new = r.get("new_filings", [])
+        logger.info("해외상표 수집 완료: 저장 %d(자기출원 %d · 신규 %d)",
+                    r["saved"], r.get("own", 0), len(new))
+        if new:
+            _notify_new_trademarks(new[:8])
     except Exception as e:
         logger.warning("해외상표 수집 스킵(KIPRIS_KEY/네트워크 확인): %s", e)
 

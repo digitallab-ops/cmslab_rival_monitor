@@ -161,8 +161,9 @@ def _ensure_table(session) -> None:
     session.commit()
 
 
-def _save(session, brand: str, country: str, rec: dict) -> None:
-    session.execute(text(f"""
+def _save(session, brand: str, country: str, rec: dict) -> bool:
+    """저장. 반환: 신규 insert면 True(기존 갱신이면 False) — 조기경보용."""
+    row = session.execute(text(f"""
         INSERT INTO {DB_SCHEMA}.trademark_filings
             (brand, country, mark_name, applicant, right_holder, app_number,
              app_date, reg_date, nice_code, cls_code, is_cosmetic, is_own)
@@ -170,6 +171,7 @@ def _save(session, brand: str, country: str, rec: dict) -> None:
         ON CONFLICT (brand, country, app_number) DO UPDATE SET
             reg_date = EXCLUDED.reg_date, is_cosmetic = EXCLUDED.is_cosmetic,
             is_own = EXCLUDED.is_own, fetched_at = NOW()
+        RETURNING (xmax = 0) AS inserted
     """), {
         "b": brand, "c": country,
         "mk": rec.get("tradeMarkName", "")[:200],
@@ -183,7 +185,8 @@ def _save(session, brand: str, country: str, rec: dict) -> None:
         "cos": _nice_has_cosmetic(rec.get("niceCode", ""),
                                   rec.get("tradeMarkClassificationCode", "")),
         "own": _is_own(brand, rec.get("applicant", "")),
-    })
+    }).fetchone()
+    return bool(row[0]) if row else False
 
 
 def run() -> dict:
@@ -192,8 +195,11 @@ def run() -> dict:
         logger.warning("KIPRIS_KEY 미설정 — 해외상표 수집 스킵")
         return {"searched": 0, "saved": 0, "cosmetic": 0, "by_brand": {}}
 
+    from datetime import date, timedelta
+    recent_cut = date.today() - timedelta(days=120)   # 조기경보: 최근 출원분만(백필 폭주 방지)
     saved, cosmetic, own = 0, 0, 0
     by_brand: dict = {}
+    new_filings: list = []
     session = get_session()
     try:
         _ensure_table(session)
@@ -208,25 +214,33 @@ def run() -> dict:
                     logger.warning("해외상표 검색 실패 %s/%s: %s", brand, cc, e)
                     continue
                 for rec in recs:
-                    _save(session, brand, cc, rec)
+                    inserted = _save(session, brand, cc, rec)
                     saved += 1
                     n_b += 1
-                    if _nice_has_cosmetic(rec.get("niceCode", ""),
-                                          rec.get("tradeMarkClassificationCode", "")):
+                    is_cos = _nice_has_cosmetic(rec.get("niceCode", ""),
+                                                rec.get("tradeMarkClassificationCode", ""))
+                    is_own_ = _is_own(brand, rec.get("applicant", ""))
+                    if is_cos:
                         cosmetic += 1
-                    if _is_own(brand, rec.get("applicant", "")):
+                    if is_own_:
                         own += 1
                         n_own += 1
+                    # 신규 insert + 자기출원 + 화장품 + 최근 출원 → 진출 선행 조기경보 대상
+                    ad = _parse_date(rec.get("applicationDate", ""))
+                    if inserted and is_own_ and is_cos and ad and ad >= recent_cut:
+                        new_filings.append({"brand": brand, "country": cc,
+                                            "mark": (rec.get("tradeMarkName", "") or "")[:90],
+                                            "date": ad.isoformat()})
             session.commit()
             if n_b:
                 by_brand[brand] = n_b
                 logger.info("  %-18s US+JP 상표 %d건(자기출원 %d)", brand, n_b, n_own)
     finally:
         session.close()
-    logger.info("해외상표 수집: 저장 %d건(화장품류 %d · 자기출원 %d) · 브랜드 %d",
-                saved, cosmetic, own, len(by_brand))
-    return {"searched": len(brands), "saved": saved,
-            "cosmetic": cosmetic, "own": own, "by_brand": by_brand}
+    logger.info("해외상표 수집: 저장 %d건(화장품류 %d · 자기출원 %d · 신규 %d) · 브랜드 %d",
+                saved, cosmetic, own, len(new_filings), len(by_brand))
+    return {"searched": len(brands), "saved": saved, "cosmetic": cosmetic,
+            "own": own, "by_brand": by_brand, "new_filings": new_filings}
 
 
 if __name__ == "__main__":
