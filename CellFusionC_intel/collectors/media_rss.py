@@ -210,6 +210,37 @@ MEDIA_FEEDS = [
         "url": "https://editorial.femaledaily.com/feed",
         "language": "id",
     },
+    # ── 러시아·CIS 매체 (RSS 실응답 검증 완료 · 브랜드명 필터로 K뷰티만 추출) ──────
+    {  # 러시아 리테일·화장품/향수 유통
+        "key": "retail_ru",
+        "name": "Retail.ru",
+        "url": "https://www.retail.ru/rss/news/",
+        "language": "ru",
+    },
+    {  # 러시아 리테일·이커머스(K-뷰티 수입·유통)
+        "key": "new_retail_ru",
+        "name": "New Retail",
+        "url": "https://new-retail.ru/rss/",
+        "language": "ru",
+    },
+    {  # 카자흐스탄 비즈니스·유통(Golden Apple 등)
+        "key": "kursiv_kz",
+        "name": "Kursiv Kazakhstan",
+        "url": "https://kursiv.media/feed/",
+        "language": "ru",
+    },
+    {  # 우즈베키스탄 신사업·이커머스(Uzum 등)
+        "key": "spot_uz",
+        "name": "Spot.uz",
+        "url": "https://www.spot.uz/rss/",
+        "language": "ru",
+    },
+    {  # 벨라루스 뷰티 리테일·이커머스
+        "key": "belretail_by",
+        "name": "BelRetail",
+        "url": "https://belretail.by/rss",
+        "language": "ru",
+    },
 ]
 
 

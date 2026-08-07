@@ -39,7 +39,8 @@ ALL_BRANDS = TIER1_BRANDS + TIER2_BRANDS
 TIER1_COUNTRIES = ["US", "PL", "JP", "TH", "SG", "CN", "KR", "GB", "CA", "AU", "ID", "MY", "VN"]
 
 # Tier 2 국가: 주 1회 수집 (확장 시장 + 가이드 신규 권역 — 비용 위해 주간 티어)
-TIER2_COUNTRIES = ["DE", "FR", "IT", "AE", "SA", "BR", "MX", "IN", "PH", "ZA"]
+TIER2_COUNTRIES = ["DE", "FR", "IT", "AE", "SA", "BR", "MX", "IN", "PH", "ZA",
+                   "RU", "KZ", "UZ", "BY"]  # 러시아·CIS(러시아어권)
 
 # 국가별 언어 코드 + Google News 파라미터 (신규 로케일은 실제 수집 검증 완료)
 COUNTRIES = {
@@ -67,6 +68,11 @@ COUNTRIES = {
     "IN": {"hl": "en",     "gl": "IN", "ceid": "IN:en",     "name": "인도"},
     "PH": {"hl": "en",     "gl": "PH", "ceid": "PH:en",     "name": "필리핀"},
     "ZA": {"hl": "en",     "gl": "ZA", "ceid": "ZA:en",     "name": "남아공"},
+    # ── 러시아·CIS (러시아어권) ──────────────────────────────
+    "RU": {"hl": "ru",     "gl": "RU", "ceid": "RU:ru",     "name": "러시아"},
+    "KZ": {"hl": "ru",     "gl": "KZ", "ceid": "KZ:ru",     "name": "카자흐스탄"},
+    "UZ": {"hl": "ru",     "gl": "UZ", "ceid": "UZ:ru",     "name": "우즈베키스탄"},
+    "BY": {"hl": "ru",     "gl": "BY", "ceid": "BY:ru",     "name": "벨라루스"},
 }
 
 # 국가 → 권역 (대시보드 필터·보고서 그룹핑)
@@ -79,6 +85,7 @@ REGION_MAP = {
     "IN": "IN",
     "US": "NA", "CA": "NA",
     "JP": "APAC", "CN": "APAC", "AU": "APAC", "KR": "KR",
+    "RU": "CIS", "KZ": "CIS", "UZ": "CIS", "BY": "CIS",
 }
 
 # 현지어 활동 키워드 (google_rss 주간 심층수집에서 브랜드명과 결합 → 현지 기사 recall↑)
@@ -92,6 +99,11 @@ LOCALE_KEYWORDS = {
     "TH": ["เครื่องสำอางเกาหลี", "สกินแคร์เกาหลี", "เปิดตัว", "เข้าไทย"],
     "VN": ["mỹ phẩm Hàn Quốc", "thương hiệu Hàn Quốc", "ra mắt", "chính thức có mặt"],
     "IT": ["cosmetici coreani", "skincare coreana", "lancio", "arriva in Italia"],
+    # 러시아·CIS — 러시아어 공통(카자흐·우즈벡·벨라루스도 러시아어 매체 다수)
+    "RU": ["корейская косметика", "корейский бренд", "запуск", "выходит на рынок", "уходовая косметика"],
+    "KZ": ["корейская косметика", "корейский бренд", "Казахстан", "Golden Apple", "запуск"],
+    "UZ": ["корейская косметика", "корейский бренд", "Узбекистан", "Uzum", "запуск"],
+    "BY": ["корейская косметика", "корейский бренд", "Беларусь", "запуск", "открытие магазина"],
 }
 
 # 자사(셀퓨전씨) 카테고리 × 경쟁 활동 "대결 뷰" — 우리 카테고리 → 경쟁기사 매칭 키워드
