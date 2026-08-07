@@ -122,6 +122,35 @@ def _signal_digest(session, weekly: bool = True) -> str:
     )
     L: list[str] = []
 
+    # 핵심 무브 (원문 링크) — 브리핑에서 바로 원문으로 클릭 연결
+    try:
+        since = (datetime.utcnow() - timedelta(hours=(24 * 7 if weekly else 28))).isoformat()
+        mv = session.execute(text(f"""
+            SELECT brand, country, activity_type, title_ko, title, source_url,
+                   COALESCE(strategic_score,0) sc
+            FROM {DB_SCHEMA}.news_articles
+            WHERE collected_at >= :since AND importance='high'
+              AND (brand_focus != 'incidental' OR brand_focus IS NULL) {_DUP_FILTER}
+            ORDER BY COALESCE(strategic_score,0) DESC
+        """), {"since": since}).fetchall()
+    except Exception:
+        mv = []
+    seen, mv_lines = set(), []
+    for r in mv:
+        k = (r[0], r[1], r[2])
+        if k in seen:
+            continue
+        seen.add(k)
+        title = (r[3] or r[4] or "")[:60]
+        url = r[5] or ""
+        link = f" <{url}|원문 ↗>" if url.startswith("http") else ""
+        mv_lines.append(f"- *{r[0]}* ({r[1]}) {r[2]} · {title}{link}")
+        if len(mv_lines) >= (6 if weekly else 4):
+            break
+    if mv_lines:
+        L.append("### 🔴 핵심 무브 (원문 링크)")
+        L += mv_lines
+
     # 진출 선행신호 — 최근 해외 상표 출원 (가장 액션어블 → 항상 최상단)
     try:
         feed = get_trademark_signals(session, months=(3 if weekly else 2), limit=8).get("feed", [])

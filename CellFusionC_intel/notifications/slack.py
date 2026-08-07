@@ -230,6 +230,13 @@ def _kst_date_label() -> str:
     return f"{now.month}/{now.day}({wd})"
 
 
+def _dashboard_footer() -> dict:
+    """Slack 브리핑 하단 — 대시보드 전체 보기 링크(원문은 항목별 링크로)."""
+    url = os.getenv("RENDER_EXTERNAL_URL") or "https://cmslab-rival-monitor.onrender.com"
+    return {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": f"🔗 <{url}|대시보드에서 전체 보기 →>  ·  각 무브의 ‘원문 ↗’로 기사 직접 확인"}]}
+
+
 def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
     """주간 브리핑 Slack 전송 (긴 본문 자동 분할)."""
     d = _kst_date_label()
@@ -244,6 +251,8 @@ def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
                           f"🌐 국가 *{stats.get('countries',0)}*")}]},
             {"type": "divider"},
             *_briefing_blocks(briefing_text),
+            {"type": "divider"},
+            _dashboard_footer(),
         ],
     }
     return _post(payload, secondary=True)
@@ -262,6 +271,8 @@ def send_daily_briefing(briefing_text: str, stats: dict) -> bool:
                                            f"🏷 브랜드 *{stats.get('brands',0)}*  ·  🌐 국가 *{stats.get('countries',0)}*"}]},
             {"type": "divider"},
             *_briefing_blocks(briefing_text),
+            {"type": "divider"},
+            _dashboard_footer(),
         ],
     }
     return _post(payload, secondary=True)
