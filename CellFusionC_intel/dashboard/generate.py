@@ -1190,17 +1190,7 @@ window._renderInsights = function(data) {{
       return '<span class="insight-market-item mkt-click" data-brand="' + escH(brand) + '" data-country="' + escH(cc_cnt[0]) + '" title="' + escH(brand) + ' × ' + escH(cc_cnt[0]) + ' 요약 보기">' + (FLAGS[cc_cnt[0]] || cc_cnt[0]) +
              ' <span class="insight-market-cnt">' + cc_cnt[1] + '건</span></span>';
     }}).join('');
-    var arts = (ins.key_articles || []).map(function(a) {{
-      var dot = IMP_C[a.imp] || '#9ca3af';
-      var lnk = (a.url && a.url.indexOf('http') === 0)
-        ? '<a class="insight-art-link" href="' + a.url + '" target="_blank" rel="noopener">↗</a>'
-        : '';
-      return '<div class="insight-art-row">' +
-        '<span class="insight-art-imp" style="background:' + dot + '"></span>' +
-        '<span class="insight-art-title">' + (a.title_ko || '') + '</span>' +
-        '<span class="insight-art-meta">' + (a.date || '').slice(5) + '</span>' +
-        lnk + '</div>';
-    }}).join('');
+    var nart = (ins.key_articles || []).length;
     var safeId = 'insight-' + brand.replace(/\\s/g, '_');
     html += '<div class="insight-card" id="' + safeId + '">' +
       '<div class="insight-hdr">' +
@@ -1208,10 +1198,10 @@ window._renderInsights = function(data) {{
         '<span class="insight-badge insight-badge-act" style="background:' + actColor + '">' + ins.top_act + ' ' + ins.top_pct + '%</span>' +
         '<span class="insight-badge ' + highCls + '">HIGH ' + ins.high_pct + '%</span>' +
       '</div>' +
-      '<div class="insight-strategy">' + _fmtInsightStrategy(ins.strategy || '') + '</div>' +
+      '<div class="insight-strategy clamp" id="strat-' + safeId + '">' + _fmtInsightStrategy(ins.strategy || '') + '</div>' +
+      '<button class="insight-more" onclick="toggleStrat(\\'' + safeId + '\\')">더보기 ▾</button>' +
       '<div class="insight-markets">' + mkts + '</div>' +
-      '<div class="insight-articles-hdr">핵심 근거 기사</div>' +
-      arts +
+      (nart ? '<div class="insight-src" onclick="switchTab(\\'feed\\')">핵심 근거 기사 ' + nart + '건 · 기록 탭에서 보기 →</div>' : '') +
     '</div>';
   }});
   grid.innerHTML = html;
@@ -1319,7 +1309,31 @@ _DASHBOARD_CSS = """
   --raise:   #182127;
   --shadow:  0 1px 2px rgba(0,0,0,.35);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* ── v2: 간격·radius·타이포 토큰 (일관성) ── */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+  --radius: 8px; --radius-sm: 5px; --pad-card: 16px; --badge-r: 4px;
+  --fs-hero: 22px; --fs-num: 26px; --fs-title: 15px; --fs-body: 13px;
+  --fs-small: 11.5px; --fs-label: 10px;
+  --fw-bold: 800; --fw-semi: 650; --fw-med: 600;
+  --card: var(--ink); --card-bd: 1px solid var(--border);
 }
+/* ── v2 공통 카드/배지 시스템 ── */
+.card-sys { background: var(--card); border: var(--card-bd); border-radius: var(--radius); padding: var(--pad-card); }
+.badge { font-family: var(--mono); font-size: 9px; font-weight: 700; padding: 2px 7px;
+  border-radius: var(--badge-r); letter-spacing: .04em; white-space: nowrap; display: inline-block; }
+.badge.b-high{ background: rgba(255,106,86,.15); color: var(--coral); }
+.badge.b-med { background: rgba(242,169,59,.16); color: var(--amber); }
+.badge.b-real{ background: rgba(70,214,195,.15); color: var(--teal); }
+.badge.b-gold{ background: rgba(216,184,120,.16); color: var(--champ); }
+.badge.b-mute{ background: rgba(154,164,166,.16); color: var(--mid); }
+/* 정보 (?) 툴팁 */
+.info { position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border: 1px solid var(--bhi); border-radius: 50%; color: var(--lo);
+  font-size: 9px; font-family: var(--mono); cursor: help; margin-left: 6px; }
+.info:hover::after { content: attr(data-tip); position: absolute; bottom: 150%; left: 50%; transform: translateX(-50%);
+  width: 240px; background: #05090c; border: 1px solid var(--bhi); border-radius: 6px; padding: 8px 10px;
+  font-family: var(--sans, system-ui); font-size: 11px; font-weight: 400; line-height: 1.5; color: var(--mid);
+  letter-spacing: 0; text-transform: none; z-index: 50; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
 body {
   font-family: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif;
   background:
@@ -2173,6 +2187,17 @@ a:hover { color: var(--gold); }
 }
 .insight-strat-h.watch { color: var(--gold); }
 .insight-strat-body { font-size: 12.5px; color: var(--hi); line-height: 1.6; }
+/* v2: 요약 클램프 + 더보기 */
+.insight-strategy.clamp { max-height: 92px; overflow: hidden; position: relative; }
+.insight-strategy.clamp::after { content:""; position:absolute; left:0; right:0; bottom:0; height:36px;
+  background:linear-gradient(transparent, var(--ink)); pointer-events:none; }
+.insight-strategy.expanded { max-height: none; }
+.insight-strategy.expanded::after { display:none; }
+.insight-more { background:none; border:none; color:var(--champ); font-size:11px; font-family:var(--mono);
+  cursor:pointer; padding:2px 0 8px; letter-spacing:.04em; }
+.insight-more:hover { color:var(--champ2); }
+.insight-src { font-size:11px; color:var(--lo); cursor:pointer; padding-top:8px; border-top:1px solid var(--border); margin-top:8px; }
+.insight-src:hover { color:var(--champ); }
 .insight-markets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .insight-market-item { font-size: 11px; color: var(--mid); display: flex; align-items: center; gap: 3px; }
 .insight-market-item.mkt-click {
@@ -2303,7 +2328,37 @@ a:hover { color: var(--gold); }
 .mkl .mk-row:hover { background:var(--ink2); }
 .mkl .flag { font-size:16px; } .mkl .nm { font-weight:600; font-size:12.5px; color:var(--hi); }
 .mkl .why { color:var(--lo); font-size:10.5px; } .mkl .yoy { margin-left:auto; font-family:var(--mono); font-weight:700; color:var(--teal); }
-@media (max-width:1080px){ .cmd,.duo,.synth,.rail{ grid-template-columns:1fr; } .rail{ grid-template-columns:repeat(3,1fr);} }
+.cmd-2 { grid-template-columns: 1fr 300px; }   /* 지도 제거 → 무브 | 스코어 2열 */
+@media (max-width:1080px){ .cmd,.cmd-2,.duo,.synth,.rail{ grid-template-columns:1fr; } .rail{ grid-template-columns:repeat(3,1fr);} }
+
+/* ── v2: 액션 배너 (최우선 정보, 크게) ── */
+.action-banner { display:flex; gap:16px; align-items:flex-start;
+  background:linear-gradient(100deg, rgba(255,106,86,.10), rgba(255,106,86,.02) 60%);
+  border:1px solid rgba(255,106,86,.30); border-left:4px solid var(--coral);
+  border-radius:var(--radius); padding:16px 20px; margin-bottom:14px; }
+.action-banner .ab-label { font-family:var(--mono); font-size:12px; font-weight:800; letter-spacing:.06em;
+  color:var(--coral); white-space:nowrap; padding-top:2px; min-width:150px; text-transform:uppercase; }
+.action-banner .ab-list { margin:0; padding:0; list-style:none; flex:1; display:flex; flex-direction:column; gap:8px; }
+.action-banner .ab-list li { font-size:15px; font-weight:600; line-height:1.45; color:var(--hi); position:relative; padding-left:16px; }
+.action-banner .ab-list li::before { content:"›"; position:absolute; left:0; color:var(--coral); font-weight:800; }
+@media (max-width:760px){ .action-banner{ flex-direction:column; gap:8px; } }
+
+/* ── v2: 통합 범례 ── */
+.legend { border:1px solid var(--border); border-radius:var(--radius); background:var(--ink); margin-bottom:16px; }
+.legend > summary { cursor:pointer; list-style:none; padding:9px 14px; font-family:var(--mono); font-size:11px;
+  letter-spacing:.08em; color:var(--mid); text-transform:uppercase; }
+.legend > summary::-webkit-details-marker { display:none; }
+.legend .lg-hint { color:var(--lo); }
+.legend .lg-body { display:flex; flex-wrap:wrap; gap:8px 22px; padding:4px 16px 14px; }
+.lg-grp { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.lg-t { font-family:var(--mono); font-size:10px; letter-spacing:.08em; color:var(--champ-d); text-transform:uppercase; }
+.lg-item { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:var(--mid); }
+.lg-dot { width:9px; height:9px; border-radius:2px; display:inline-block; }
+
+/* ── v2: 시각 위계 강화 (섹션타이틀·이벤트 헤드라인) ── */
+.section-title { font-size: var(--fs-title); }
+.ev .t { font-size: 13px; font-weight: 500; }
+.synth .lead h2 { font-size: var(--fs-hero); }
 """
 
 _WORLDMAP_CSS = """
@@ -2902,15 +2957,51 @@ def _render_composite_lb(composite: list) -> str:
     return f'<div class="lb">{"".join(rows)}</div>{key}'
 
 
-def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite: list) -> str:
-    """AI 종합 인사이트 — 담백한 데이터 리드 + 대응/기회/점검 3열(시장요약 파싱)."""
+def _parse_market_sections(market_text: str) -> dict:
+    """시장요약 텍스트(### 대응/기회/점검) → {respond,opportunity,check: [bullets]}."""
     import re as _re
+    out = {"respond": [], "opportunity": [], "check": []}
+    for part in _re.split(r"###\s+", market_text or ""):
+        part = part.strip()
+        if not part:
+            continue
+        nl = part.find("\n")
+        label = (part if nl < 0 else part[:nl]).strip()
+        seg = "" if nl < 0 else part[nl + 1:]
+        bullets = [ln.strip().lstrip("-•").strip().replace("**", "")
+                   for ln in seg.split("\n") if ln.strip().startswith(("-", "•"))]
+        if not bullets:
+            continue
+        if "대응" in label:
+            out["respond"] += bullets
+        elif "기회" in label or "확장" in label:
+            out["opportunity"] += bullets
+        else:
+            out["check"] += bullets
+    return out
+
+
+def _render_action_banner(market_text: str) -> str:
+    """'지금 대응' 액션 배너 — 최상단·큰 타이포·코럴. 실무자 최우선 정보로 분리."""
+    resp = _parse_market_sections(market_text)["respond"][:3]
+    if not resp:
+        return ""
+    lis = "".join(f"<li>{_esc(b)}</li>" for b in resp)
+    return (
+        '<div class="action-banner">'
+        '<div class="ab-label">⚑ 지금 대응해야 할 것</div>'
+        f'<ul class="ab-list">{lis}</ul>'
+        '</div>'
+    )
+
+
+def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite: list) -> str:
+    """AI 종합 인사이트 — 데이터 리드 + 합성문단 + 기회/점검(대응은 상단 배너로 분리)."""
     o = (growth_story or {}).get("overall") or {}
     mkts = (growth_story or {}).get("markets") or []
     top_mkt = mkts[0] if mkts else None
     top_brand = composite[0] if composite else None
     yoy = o.get("yoy_pct")
-
     high7 = (stats7 or {}).get("high", 0)
     growers = o.get("growers")
     top3 = ", ".join(_esc(b["brand"]) for b in composite[:3]) if composite else ""
@@ -2925,15 +3016,14 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
         bits.append(f'종합 스코어 1위 <b>{_esc(top_brand["brand"])}</b>')
     lead = " · ".join(bits) if bits else "최근 7일 경쟁 신호를 5축(뉴스·검색·수출·재무·상표)으로 교차검증했습니다."
 
-    # 데이터 기반 합성 문단 (드라마틱 문구 배제)
     sents = []
     if high7:
         sents.append(f'최근 7일 HIGH 신호 <b>{high7}건</b>이 포착됐습니다.')
     if top_mkt and growers is not None:
-        sents.append(f'주요국 화장품 수출은 <b>{growers}개국</b>에서 늘었고, 그중 <b>{top_mkt_name}</b>가 전년 대비 <b>+{top_mkt["yoy_pct"]:.0f}%</b>로 가장 가팔랐습니다 — 발표(뉴스)가 실제 성과(수출)로 이어지는지 함께 검증됩니다.')
+        sents.append(f'주요국 화장품 수출은 <b>{growers}개국</b>에서 늘었고, 그중 <b>{top_mkt_name}</b>가 전년 대비 <b>+{top_mkt["yoy_pct"]:.0f}%</b>로 가장 가팔랐습니다.')
     if top3:
-        sents.append(f'브랜드 종합 스코어(모멘텀·실적·상표선행·수요 통합)는 <b>{top3}</b> 순으로 높습니다.')
-    body = " ".join(sents) or "관세청·DART·KIPRIS·검색 신호를 뉴스와 교차검증해 정리했습니다."
+        sents.append(f'브랜드 종합 스코어는 <b>{top3}</b> 순으로 높습니다.')
+    para = " ".join(sents) or "관세청·DART·KIPRIS·검색 신호를 뉴스와 교차검증해 정리했습니다."
 
     facts = []
     if high7:
@@ -2944,38 +3034,47 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
         facts.append(f'<span class="sf"><i>종합 스코어</i>{len(composite)}브랜드</span>')
     facts_html = f'<div class="synth-facts">{"".join(facts)}</div>' if facts else ""
 
-    # 대응/기회/점검 3열 (기존 파싱 재사용)
+    sec = _parse_market_sections(market_text)
     cols = []
-    for part in _re.split(r"###\s+", market_text or ""):
-        part = part.strip()
-        if not part:
+    for kind, klabel in (("opportunity", "선점할 기회"), ("check", "확인·점검")):
+        b = sec[kind][:3]
+        if not b:
             continue
-        nl = part.find("\n")
-        label = (part if nl < 0 else part[:nl]).strip()
-        body = "" if nl < 0 else part[nl + 1:]
-        bullets = [ln.strip().lstrip("-•").strip().replace("**", "")
-                   for ln in body.split("\n") if ln.strip().startswith(("-", "•"))]
-        if not bullets:
-            continue
-        if "대응" in label:
-            kind = "respond"
-        elif "기회" in label or "확장" in label:
-            kind = "opportunity"
-        else:
-            kind = "check"
-        lis = "".join(f"<li>{_esc(b)}</li>" for b in bullets[:2])
-        cols.append(f'<div class="scol {kind}"><div class="h">{_esc(label)}</div><ul>{lis}</ul></div>')
+        lis = "".join(f"<li>{_esc(x)}</li>" for x in b)
+        cols.append(f'<div class="scol {kind}"><div class="h">{klabel}</div><ul>{lis}</ul></div>')
     cols_html = "".join(cols) or '<div class="scol check"><div class="h">점검</div><ul><li>시장 인사이트 생성 중</li></ul></div>'
 
     return (
         '<div class="synth hud">'
         '<div class="lead"><div class="tl">Weekly Synthesis · AI 종합</div>'
         f'<h2>{lead}</h2>'
-        f'<p class="synth-body">{body}</p>'
+        f'<p class="synth-body">{para}</p>'
         f'{facts_html}'
         '<div class="by">최근 7일 · 뉴스·검색·수출·재무·상표 5축 교차검증</div></div>'
         f'<div class="cols">{cols_html}</div>'
         '</div>'
+    )
+
+
+def _render_legend() -> str:
+    """통합 범례 — 페이지의 모든 배지/색 의미를 한 곳에서(접이식). 처음 보는 사람도 해석 가능."""
+    def grp(title, items):
+        chips = "".join(
+            f'<span class="lg-item"><span class="lg-dot" style="background:{c}"></span>{_esc(lab)}</span>'
+            for lab, c in items)
+        return f'<div class="lg-grp"><span class="lg-t">{title}</span>{chips}</div>'
+    groups = [
+        grp("검증(뉴스vs수요)", [("실질", "var(--teal)"), ("PR우세", "var(--coral)"),
+                                ("숨은수요", "var(--champ)"), ("안정", "var(--mid)")]),
+        grp("중요도", [("HIGH", "var(--coral)"), ("MED", "var(--amber)")]),
+        grp("모멘텀", [("▲ 급상승", "var(--teal)"), ("▶ 안정", "var(--mid)"), ("▼ 둔화", "var(--coral)")]),
+        grp("종합 스코어 축", [("모멘텀", "var(--violet)"), ("재무", "var(--teal)"),
+                              ("상표", "var(--champ)"), ("수요", "var(--amber)")]),
+        grp("수출 YoY", [("성장 +15%↑", "var(--teal)"), ("둔화 -10%↓", "var(--coral)")]),
+    ]
+    return (
+        '<details class="legend"><summary>범례 · 배지/색상 의미 <span class="lg-hint">(클릭)</span></summary>'
+        '<div class="lg-body">' + "".join(groups) + '</div></details>'
     )
 
 
@@ -3043,8 +3142,11 @@ def _build_full_html(
     metric_rail_html  = _render_metric_rail(stats, growth_story or {}, search_spikes or [], days)
     move_stream_html  = _render_move_stream(_dg.get("high") or high_articles, demand_tri or [])
     composite_lb_html = _render_composite_lb(composite or [])
+    _market7 = _dg.get("market") or market_text
+    action_banner_html = _render_action_banner(_market7)
+    legend_html       = _render_legend()
     synth_html        = _render_synth(_dg.get("stats") or stats,
-                                      _dg.get("market") or market_text, growth_story or {}, composite or [])
+                                      _market7, growth_story or {}, composite or [])
     _mk = (growth_story or {}).get("markets") or []
     market_list_html = "".join(
         f'<div class="mk-row" onclick="switchTab(\'strategy\')">'
@@ -3159,15 +3261,16 @@ def _build_full_html(
 
   <!-- ===== 탭: 브리핑 (메인 종합) ===== -->
   <div class="tab-panel active" id="tab-overview">
+    {action_banner_html}
+    {legend_html}
     <div class="eyebrow"><span class="lab">Weekly Synthesis</span><span class="rule"></span><span class="rt">최근 7일 · AI 종합 인사이트</span></div>
     {synth_html}
     {metric_rail_html}
 
     <div class="eyebrow"><span class="lab">Situation</span><span class="rule"></span><span class="rt">실시간 신호 · 클릭 → 상세</span></div>
-    <div class="cmd">
+    <div class="cmd cmd-2">
       <div class="box"><div class="ph">핵심 무브 <span class="c">TOP</span></div>{move_stream_html}</div>
-      {worldmap_section}
-      <div class="box"><div class="ph">종합 스코어 <span class="c">21</span></div>{composite_lb_html}</div>
+      <div class="box"><div class="ph">종합 스코어 <span class="c">21</span><span class="info" data-tip="모멘텀35·재무25·수요25·상표선행15 가중합(0~100). 해당 축 데이터 없으면 그 축 빼고 재정규화. 최근 4주 기준.">?</span></div>{composite_lb_html}</div>
     </div>
 
     <div class="eyebrow"><span class="lab">Markets &amp; Pressure</span><span class="rule"></span><span class="rt jump" onclick="switchTab('strategy')">시장 탭 전체 →</span></div>
@@ -3247,6 +3350,9 @@ def _build_full_html(
 
   <!-- ===== 탭: 우리 관점 ===== -->
   <div class="tab-panel" id="tab-strategy">
+    <!-- 글로벌 신호 지도 (브리핑에서 이동 — 공간 여유 있는 시장 탭 상단) -->
+    {worldmap_section}
+
     {category_battle_html}
 
     <!-- 시장 성장 스토리 — 수출 성장(성과) x 그 시장 경쟁사 활동(뉴스) -->
@@ -3527,6 +3633,14 @@ function toggleArticlesSection() {{
   _applyCollapseAndFilter();
 }}
 
+function toggleStrat(id) {{
+  var el = document.getElementById('strat-' + id);
+  if (!el) return;
+  var exp = el.classList.toggle('expanded');
+  el.classList.toggle('clamp', !exp);
+  var btn = el.nextElementSibling;
+  if (btn && btn.classList.contains('insight-more')) btn.textContent = exp ? '접기 ▴' : '더보기 ▾';
+}}
 function switchTab(name) {{
   document.querySelectorAll('.tab-btn').forEach(function(b) {{
     b.classList.toggle('active', b.dataset.tab === name);
