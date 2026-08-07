@@ -212,21 +212,38 @@ async def on_home(event, client):
         await client.views_publish(user_id=event["user"], view={
             "type": "home",
             "blocks": [
-                {"type": "header", "text": {"type": "plain_text", "text": "🛰️ CELLFUSION INTEL"}},
+                {"type": "header", "text": {"type": "plain_text", "text": "🛰️  CELLFUSION INTEL"}},
                 {"type": "section", "text": {"type": "mrkdwn", "text":
-                    "셀퓨전씨(씨엠에스랩)의 K-뷰티 경쟁 *21개 브랜드 × 27개국* 동향을 "
-                    "*뉴스·검색·수출·재무·상표* 5축으로 자동 수집·AI 분석하는 경쟁 인텔리전스입니다."}},
+                    "K-뷰티 경쟁 브랜드 *21곳 · 27개국*을 매일 대신 지켜봅니다.\n"
+                    "'발표'와 '실제 성과'를 가려서 — *지금 알아야 할 것만* 추려드려요."}},
                 {"type": "actions", "elements": [
-                    {"type": "button", "text": {"type": "plain_text", "text": "📊 대시보드 열기"},
+                    {"type": "button", "text": {"type": "plain_text", "text": "📊  대시보드 열기"},
                      "url": url, "style": "primary"}]},
                 {"type": "divider"},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "*🔎  이런 걸 볼 수 있어요*"}},
+                {"type": "section", "fields": [
+                    {"type": "mrkdwn", "text": "*📌 이번 주 핵심*\n지금 대응할 것 · 선점 기회 · 점검할 것"},
+                    {"type": "mrkdwn", "text": "*🏆 브랜드 스코어*\n21개 브랜드, 누가 뜨고 지나 순위로"},
+                    {"type": "mrkdwn", "text": "*🌍 신호 지도*\n어느 나라에서 어떤 경쟁사가 움직이나"},
+                    {"type": "mrkdwn", "text": "*🔥 뜨는 시장*\n실제 수출이 크는 나라 + 그 이유"},
+                    {"type": "mrkdwn", "text": "*🪧 진출 임박*\n경쟁사 해외 상표 = 다음 진출지 예고"},
+                    {"type": "mrkdwn", "text": "*🔍 진짜 vs 홍보*\n발표가 검색·수출로 이어지는지 검증"},
+                ]},
+                {"type": "divider"},
                 {"type": "section", "text": {"type": "mrkdwn", "text":
-                    "*💬 물어보기* — 이 앱을 멘션하거나 DM으로:\n"
-                    "• `아누아 요즘 어때?`\n• `미국에서 뜨는 브랜드는?`\n"
-                    "• `브랜드 종합 스코어 top5`\n• `진출 임박(신규 상표) 있어?`\n"
-                    "• `폴란드 수출 왜 늘어?`"}},
+                    "*💬  이렇게 물어보세요* — 멘션하거나 DM으로"}},
+                {"type": "section", "fields": [
+                    {"type": "mrkdwn", "text": "`아누아 요즘 어때?`"},
+                    {"type": "mrkdwn", "text": "`미국에서 뜨는 브랜드는?`"},
+                    {"type": "mrkdwn", "text": "`브랜드 종합 스코어 top5`"},
+                    {"type": "mrkdwn", "text": "`진출 임박 있어?`"},
+                    {"type": "mrkdwn", "text": "`폴란드 수출 왜 늘어?`"},
+                    {"type": "mrkdwn", "text": "`조선미녀 최근 무브`"},
+                ]},
+                {"type": "divider"},
                 {"type": "context", "elements": [{"type": "mrkdwn", "text":
-                    "🗓 데일리 브리핑 매일 08:00 · 위클리 심층 매주 월 08:00 (KST) 자동 발송"}]},
+                    "🗓  데일리 브리핑 매일 08:00  ·  위클리 심층 매주 월 08:00 (KST)"
+                    "      ·      씨엠에스랩 디지털랩"}]},
             ],
         })
     except Exception as e:
