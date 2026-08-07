@@ -204,6 +204,35 @@ async def _safe_update(client, channel, ts, text):
         logger.debug("chat_update 실패: %s", e)
 
 
+@app.event("app_home_opened")
+async def on_home(event, client):
+    """App Home 탭 — 앱 설명 + 대시보드 바로가기 버튼 + 사용법."""
+    url = os.getenv("RENDER_EXTERNAL_URL") or "https://cmslab-rival-monitor.onrender.com"
+    try:
+        await client.views_publish(user_id=event["user"], view={
+            "type": "home",
+            "blocks": [
+                {"type": "header", "text": {"type": "plain_text", "text": "🛰️ CELLFUSION INTEL"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text":
+                    "셀퓨전씨(씨엠에스랩)의 K-뷰티 경쟁 *21개 브랜드 × 27개국* 동향을 "
+                    "*뉴스·검색·수출·재무·상표* 5축으로 자동 수집·AI 분석하는 경쟁 인텔리전스입니다."}},
+                {"type": "actions", "elements": [
+                    {"type": "button", "text": {"type": "plain_text", "text": "📊 대시보드 열기"},
+                     "url": url, "style": "primary"}]},
+                {"type": "divider"},
+                {"type": "section", "text": {"type": "mrkdwn", "text":
+                    "*💬 물어보기* — 이 앱을 멘션하거나 DM으로:\n"
+                    "• `아누아 요즘 어때?`\n• `미국에서 뜨는 브랜드는?`\n"
+                    "• `브랜드 종합 스코어 top5`\n• `진출 임박(신규 상표) 있어?`\n"
+                    "• `폴란드 수출 왜 늘어?`"}},
+                {"type": "context", "elements": [{"type": "mrkdwn", "text":
+                    "🗓 데일리 브리핑 매일 08:00 · 위클리 심층 매주 월 08:00 (KST) 자동 발송"}]},
+            ],
+        })
+    except Exception as e:
+        logger.debug("app_home 발행 실패(App Home 탭 활성화 필요할 수 있음): %s", e)
+
+
 @app.event("app_mention")
 async def on_mention(event, client):
     if event.get("bot_id"):
