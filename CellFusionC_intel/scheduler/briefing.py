@@ -205,6 +205,9 @@ def generate_weekly_briefing() -> str:
         return ""
 
     data_prompt = _build_prompt_by_region(rows, limit=100, detail_len=240)
+    if signal_digest:
+        data_prompt += ("\n\n=== [정량 신호: 검색수요·수출성과·상표선행·종합스코어] ===\n"
+                        "(뉴스와 교차해 반드시 해석에 반영)\n" + signal_digest)
     system = (
         "당신은 씨엠에스랩의 글로벌 경쟁 인텔리전스 수석 분석가입니다. "
         "아래 1주치 경쟁사 활동 데이터(권역별 정리)로 의사결정용 심층 주간 보고를 작성하세요.\n\n"
@@ -221,6 +224,9 @@ def generate_weekly_briefing() -> str:
         "### Watchlist\n- 공식확인 약함(pr·rehash) 또는 후속 확인 필요한 3건 + 무엇을 확인해야 하나.\n\n"
         "### Implication (셀퓨전씨)\n- 우리 유통·상품·마케팅 관점 실행 액션 2~3개. 우리 실제 제품(레이저UV썬스크린·"
         "콜라겐PDRN앰플 등)/주력시장(올영·베트남·중국·일본·미국)에 구체 매칭.\n\n"
+        "중요: 뉴스뿐 아니라 위 '정량 신호'(검색수요·수출성과·상표선행·종합스코어)를 Executive Takeaway와 "
+        "Implication에서 반드시 함께 해석할 것 — 예: 발표는 있으나 검색·수출 미동반이면 'PR 노이즈'로 평가, "
+        "신규 해외 상표는 '진출 임박'으로, 수출 급증 시장은 '실질 성장'으로 근거를 붙일 것.\n"
         "한국어. 데이터에 있는 사실만."
     )
     try:
@@ -256,6 +262,8 @@ def generate_daily_briefing() -> str:
         return ""
 
     data_prompt = _build_prompt_by_region(rows, limit=45, detail_len=160)
+    if signal_digest:
+        data_prompt += "\n\n=== [정량 신호 요약] ===\n" + signal_digest
     system = (
         "당신은 씨엠에스랩의 경쟁 인텔리전스 분석가입니다. 어제 수집된 경쟁사 활동을 아침 브리핑으로 "
         "간결히 정리하세요.\n\n"
@@ -263,10 +271,11 @@ def generate_daily_briefing() -> str:
         "마크다운 볼드(**) 쓰지 말 것. 아래 형식(머리말 '### '):\n\n"
         "### 어제의 핵심 (3~5건)\n- 각 줄: 브랜드/국가 - 무엇을(채널·제품 포함) → 한줄 시사점. score 높은 순.\n\n"
         "### 셀퓨전씨 관련\n- 우리 선케어·더마·주력시장과 겹치는 건이 있으면 1~2건 콕 집어 대응 포인트. 없으면 '특이사항 없음'.\n\n"
-        "한국어, 총 400자 내외. 데이터에 있는 사실만."
+        "위 '정량 신호'(신규 상표=진출 임박, 검색 급등, 종합 스코어)에서 눈에 띄는 게 있으면 '어제의 핵심'에 한 줄 반영.\n"
+        "한국어, 총 500자 내외. 데이터에 있는 사실만."
     )
     try:
-        text_out = _openai("gpt-4o-mini", system, data_prompt, max_tokens=700)
+        text_out = _openai("gpt-4o-mini", system, data_prompt, max_tokens=900)
     except Exception as e:
         logger.error("일간 브리핑 GPT 오류: %s", e)
         text_out = f"브리핑 생성 오류: {e}"
