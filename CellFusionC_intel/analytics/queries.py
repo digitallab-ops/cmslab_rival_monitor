@@ -161,7 +161,7 @@ def get_briefings_list(session: Session, limit: int = 24) -> list[dict]:
 
 
 def get_collection_stats(session: Session, days: int = 30) -> dict:
-    """KPI 요약 통계 반환."""
+    """KPI 요약 통계 반환. 직전 동일기간(prev_*) 대비 증감 + 일자별 스파크라인 포함."""
     cutoff = _cutoff_iso(days)
     row = session.execute(
         text(f"""
@@ -178,6 +178,35 @@ def get_collection_stats(session: Session, days: int = 30) -> dict:
         {"cutoff": cutoff},
     ).fetchone()
 
+    # 직전 동일기간(이번 기간 시작 이전의 같은 길이) — 증감 화살표용 실제 baseline
+    prev_start = _cutoff_iso(days * 2)
+    prow = session.execute(
+        text(f"""
+            SELECT
+                COUNT(*)                                        AS total,
+                COUNT(*) FILTER (WHERE importance = 'high')     AS high,
+                COUNT(DISTINCT brand)                           AS brands_active,
+                COUNT(DISTINCT country)                         AS countries_active
+            FROM {DB_SCHEMA}.news_articles
+            WHERE (is_duplicate IS NOT TRUE)
+              AND published_date >= :prev_start AND published_date < :cutoff
+        """),
+        {"prev_start": prev_start, "cutoff": cutoff},
+    ).fetchone()
+
+    # 일자별 수집량 스파크라인 (기간 내, 날짜 오름차순)
+    srows = session.execute(
+        text(f"""
+            SELECT published_date::date::text AS d, COUNT(*) AS n
+            FROM {DB_SCHEMA}.news_articles
+            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            GROUP BY published_date::date
+            ORDER BY published_date::date
+        """),
+        {"cutoff": cutoff},
+    ).fetchall()
+    spark = [int(r[1] or 0) for r in srows]
+
     return {
         "total":            row[0] or 0,
         "high":             row[1] or 0,
@@ -185,6 +214,11 @@ def get_collection_stats(session: Session, days: int = 30) -> dict:
         "low":              row[3] or 0,
         "brands_active":    row[4] or 0,
         "countries_active": row[5] or 0,
+        "prev_total":            (prow[0] or 0) if prow else 0,
+        "prev_high":             (prow[1] or 0) if prow else 0,
+        "prev_brands_active":    (prow[2] or 0) if prow else 0,
+        "prev_countries_active": (prow[3] or 0) if prow else 0,
+        "spark":            spark,
         "days":             days,
         "generated_at":     datetime.utcnow().isoformat(),
     }

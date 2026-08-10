@@ -959,7 +959,7 @@ def _render_overview_digest(stats, momentum, category_battle, expansion_playbook
                 kind, icon = "opportunity", "🎯"
             else:
                 kind, icon = "check", "👀"
-            lis = "".join(f"<li>{_esc(b)}</li>" for b in bullets[:3])
+            lis = "".join(_urgency_li(b) for b in bullets[:3])
             cols.append(f'<div class="dg-col dg-col-{kind}">'
                         f'<div class="dg-col-h">{icon} {_esc(label)}</div>'
                         f'<ul>{lis}</ul></div>')
@@ -1228,6 +1228,19 @@ window._renderInsights = function(data) {{
 def _build_market_script() -> str:
     """window._renderMarket(text) — 시장 종합 인사이트 렌더."""
     return """
+window._mdUrgency = function(t) {
+  var m = /\\[?\\s*시급\\s*[:\\-]?\\s*(높음|중간|낮음|high|medium|low)\\s*\\]?/i.exec(t || '');
+  if (!m) return { text: t, badge: '' };
+  var lv = m[1].toLowerCase();
+  var map = {
+    '높음': ['insight-badge-high-hot','시급 높음'], 'high': ['insight-badge-high-hot','시급 높음'],
+    '중간': ['insight-badge-high-warm','시급 중간'], 'medium': ['insight-badge-high-warm','시급 중간'],
+    '낮음': ['insight-badge-high-low','시급 낮음'], 'low': ['insight-badge-high-low','시급 낮음']
+  };
+  var d = map[lv] || ['insight-badge-high-warm','시급'];
+  var clean = (t || '').replace(/\\s*\\[?\\s*시급\\s*[:\\-]?\\s*(높음|중간|낮음|high|medium|low)\\s*\\]?\\s*/ig, '').replace(/[\\s·\\-—]+$/, '');
+  return { text: clean, badge: '<span class="insight-badge ' + d[0] + '">' + d[1] + '</span>' };
+};
 window._renderMarket = function(raw) {
   var el = document.getElementById('market-body');
   if (!el) return;
@@ -1245,7 +1258,10 @@ window._renderMarket = function(raw) {
     var lines = body.split(/\\n/).map(function(l) { return l.trim(); }).filter(Boolean);
     var items = lines.map(function(l) { return l.replace(/^\\s*[-•\\d.]+\\s*/, '').trim(); }).filter(Boolean);
     var inner = items.length
-      ? '<ul class="market-list">' + items.map(function(i) { return '<li>' + _mdBold(i) + '</li>'; }).join('') + '</ul>'
+      ? '<ul class="market-list">' + items.map(function(i) {
+          var u = _mdUrgency(i);
+          return '<li>' + _mdBold(u.text) + u.badge + '</li>';
+        }).join('') + '</ul>'
       : '<div class="market-sec-b">' + _mdBold(body).replace(/\\n/g, '<br>') + '</div>';
     return '<div class="market-sec ' + kind + '">'
       + '<div class="market-sec-h ' + kind + '">' + _mdBold(label) + '</div>' + inner + '</div>';
@@ -1297,7 +1313,7 @@ _DASHBOARD_CSS = """
   --violet:  #9a8cff;
   --hi:      #eef2ef;
   --mid:     #9aa4a6;
-  --lo:      #5c6668;
+  --lo:      #8a969a;
   --high:    #ff6a56;
   --med:     #f2a93b;
   --teal:    #46d6c3;
@@ -1394,8 +1410,14 @@ a:hover { color: var(--gold); }
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 20px 22px;
-  margin-bottom: 16px;
+  margin-bottom: 26px;
   box-shadow: var(--shadow);
+  transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+.section:hover {
+  box-shadow: 0 6px 20px rgba(0,0,0,.45);
+  transform: translateY(-2px);
+  border-color: rgba(216,184,120,.22);
 }
 .section-title {
   font-size: 13px;
@@ -1631,7 +1653,7 @@ a:hover { color: var(--gold); }
 }
 
 /* ── Tables ── */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; overflow-y: auto; max-height: 620px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .data-table th {
   background: var(--deep);
@@ -1645,8 +1667,9 @@ a:hover { color: var(--gold); }
   white-space: nowrap;
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 3;
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 var(--border);
 }
 .data-table td {
   padding: 7px 10px;
@@ -1709,8 +1732,12 @@ a:hover { color: var(--gold); }
 .title-cell { max-width: 480px; word-break: break-word; }
 
 /* ── Heatmap ── */
-.heatmap-wrap { overflow-x: auto; }
-.heatmap-table th { position: sticky; top: 0; z-index: 2; }
+.heatmap-wrap { overflow-x: auto; overflow-y: auto; max-height: 560px; }
+.heatmap-table th {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--deep);
+  box-shadow: 0 1px 0 var(--border);
+}
 .heatmap-table .sticky-col {
   position: sticky; left: 0;
   background: var(--deep) !important;
@@ -2287,12 +2314,18 @@ a:hover { color: var(--gold); }
 
 /* metric rail */
 .rail { display:grid; grid-template-columns:repeat(6,1fr); border:1px solid var(--border); border-radius:6px; overflow:hidden; margin-top:14px; }
-.met { padding:13px 16px; border-right:1px solid var(--border); }
+.met { padding:13px 16px; border-right:1px solid var(--border); position:relative; transition:background 0.18s ease; }
 .met:last-child { border-right:none; }
+.met:hover { background:rgba(216,184,120,.07); }
 .met .l { font-family:var(--mono); font-size:9.5px; letter-spacing:.12em; color:var(--lo); text-transform:uppercase; }
 .met .v { font-family:var(--mono); font-size:25px; font-weight:700; margin-top:5px; letter-spacing:-.02em; color:var(--hi); }
-.met .d { font-family:var(--mono); font-size:10.5px; margin-top:2px; }
+.met .d { font-family:var(--mono); font-size:10.5px; margin-top:2px; display:flex; align-items:center; gap:5px; }
 .met .d.pos { color:var(--teal); } .met .d.neg { color:var(--coral); } .met .d.neu { color:var(--lo); }
+.met .d .cap { color:var(--lo); }
+.met .spark { display:block; width:100%; height:20px; margin-top:6px; overflow:visible; }
+.met .spark path { fill:none; stroke:var(--champ); stroke-width:1.4; vector-effect:non-scaling-stroke; }
+.met .spark .fill { fill:rgba(216,184,120,.10); stroke:none; }
+.met .spark .end { fill:var(--champ); }
 
 /* command grid */
 .cmd { display:grid; grid-template-columns:250px minmax(0,1fr) 232px; gap:14px; align-items:start; }
@@ -2318,8 +2351,9 @@ a:hover { color: var(--gold); }
 .lb .subs i { flex:1; border-radius:1px; min-height:1px; }
 .sub-mom { background:var(--violet); } .sub-fin { background:var(--teal); } .sub-tm { background:var(--champ); } .sub-dem { background:var(--amber); }
 .lb .sc { font-family:var(--mono); font-size:15px; font-weight:700; width:26px; text-align:right; color:var(--hi); }
-.lb-key { display:flex; gap:11px; flex-wrap:wrap; padding:9px 12px; font-family:var(--mono); font-size:9px; color:var(--lo); letter-spacing:.04em; border-top:1px solid var(--border); }
-.lb-key i { display:inline-block; width:7px; height:7px; margin-right:3px; vertical-align:middle; }
+.lb-key { display:flex; gap:13px; flex-wrap:wrap; padding:10px 12px; font-family:var(--mono); font-size:11.5px; color:var(--lo); letter-spacing:.03em; border-top:1px solid var(--border); }
+.lb-key span { display:inline-flex; align-items:center; cursor:default; }
+.lb-key i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle; }
 
 /* market + heatmap duo */
 .duo { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.4fr); gap:14px; align-items:start; }
@@ -2333,14 +2367,15 @@ a:hover { color: var(--gold); }
 
 /* ── v2: 액션 배너 (최우선 정보, 크게) ── */
 .action-banner { display:flex; gap:16px; align-items:flex-start;
-  background:linear-gradient(100deg, rgba(255,106,86,.10), rgba(255,106,86,.02) 60%);
-  border:1px solid rgba(255,106,86,.30); border-left:4px solid var(--coral);
+  background:linear-gradient(100deg, rgba(255,106,86,.055), rgba(255,106,86,.01) 60%);
+  border:1px solid rgba(255,106,86,.15); border-left:4px solid var(--coral);
   border-radius:var(--radius); padding:16px 20px; margin-bottom:14px; }
 .action-banner .ab-label { font-family:var(--mono); font-size:12px; font-weight:800; letter-spacing:.06em;
   color:var(--coral); white-space:nowrap; padding-top:2px; min-width:150px; text-transform:uppercase; }
-.action-banner .ab-list { margin:0; padding:0; list-style:none; flex:1; display:flex; flex-direction:column; gap:8px; }
-.action-banner .ab-list li { font-size:15px; font-weight:600; line-height:1.45; color:var(--hi); position:relative; padding-left:16px; }
+.action-banner .ab-list { margin:0; padding:0; list-style:none; flex:1; display:flex; flex-direction:column; gap:10px; }
+.action-banner .ab-list li { font-size:14.5px; font-weight:600; line-height:1.5; color:var(--hi); position:relative; padding-left:16px; }
 .action-banner .ab-list li::before { content:"›"; position:absolute; left:0; color:var(--coral); font-weight:800; }
+.action-banner .ab-list li .insight-badge { margin-left:7px; vertical-align:middle; }
 @media (max-width:760px){ .action-banner{ flex-direction:column; gap:8px; } }
 
 /* ── v2: 통합 범례 ── */
@@ -2420,6 +2455,10 @@ _WORLDMAP_CSS = """
 .wm-lo-high { color: #f87171; }
 .wm-lo-med  { color: #fbbf24; }
 .wm-lo-low  { color: #22d3ee; }
+.wm-lo-hint {
+  margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 9px; font-family: monospace; color: #b8c0e0; letter-spacing: 0.2px;
+}
 /* ── HIGH 기사 하단 알림 스트립 ── */
 .wm-alert-strip { margin-top: 14px; }
 .wm-alert-head {
@@ -2513,6 +2552,7 @@ def _render_worldmap_section(high_articles: list | None = None) -> str:
         '</div>'
         '<div class="wm-lo-size">● 점 크기 = HIGH 기사 수</div>'
         '<div class="wm-lo-size">○ glow 크기 = 전체 기사 수</div>'
+        '<div class="wm-lo-hint">🖱 휠 확대 · 드래그 이동 · 더블클릭 초기화</div>'
         '</div>'
         '</div>'
         '<div class="wm-alert-strip">'
@@ -2563,6 +2603,31 @@ def _build_worldmap_script(country_stats: dict) -> str:
   var ctx  = canvas.getContext('2d');
   var off  = document.createElement('canvas').getContext('2d');
   var activeCC = [];
+
+  // ── 뷰 변환(줌·팬) — 밀집 지역(유럽) 겹침을 마우스휠 확대로 해소 ──
+  var VIEW = {{ s: 1, x: 0, y: 0 }};
+  var MINS = 1, MAXS = 5.5;
+  var EU = {{ GB:1, DE:1, FR:1, PL:1, IT:1 }};   // 겹치는 유럽권 → 축소 시 클러스터
+  var CLUSTER_ZOOM = 1.6;                          // 이 배율 미만이면 유럽 마커를 하나로 묶음
+  var clusterBox = null;                           // {{x,y,r,n}} 화면좌표 — 히트테스트용
+  function clampView() {{
+    if (VIEW.s < MINS) VIEW.s = MINS;
+    if (VIEW.s > MAXS) VIEW.s = MAXS;
+    // 팬 한계: 지도가 화면 밖으로 완전히 빠지지 않도록
+    var minX = W - W * VIEW.s, minY = H - H * VIEW.s;
+    if (VIEW.x > 0) VIEW.x = 0; if (VIEW.x < minX) VIEW.x = minX;
+    if (VIEW.y > 0) VIEW.y = 0; if (VIEW.y < minY) VIEW.y = minY;
+  }}
+  function euCentroid() {{
+    var xs = 0, ys = 0, n = 0, tot = 0, hi = 0;
+    Object.keys(EU).forEach(function(cc) {{
+      var st = STATS[cc]; if (!st || !st.total) return;
+      var co = COORDS[cc]; xs += pX(co[1]); ys += pY(co[0]); n++;
+      tot += st.total; hi += (st.high || 0);
+    }});
+    if (!n) return null;
+    return {{ x: xs / n, y: ys / n, n: n, total: tot, high: hi }};
+  }}
 
   // 크롭 + 상단 페이드로 북극권 가로 이음새를 어둠에 녹임. 국가는 전부 위도 56 이하.
   var LAT_TOP = 74, LAT_BOT = -56;
@@ -2668,7 +2733,10 @@ def _build_worldmap_script(country_stats: dict) -> str:
   /* ── Dynamic: markers ── */
   function drawMarkers() {{
     var labels = [];
+    var clustered = VIEW.s < CLUSTER_ZOOM;
+    clusterBox = null;
     Object.keys(COORDS).forEach(function(cc) {{
+      if (clustered && EU[cc]) return;   // 축소 상태 → 유럽 개별마커 생략(클러스터로 대체)
       var co = COORDS[cc], st = STATS[cc] || {{total:0,high:0,medium:0}};
       var x = pX(co[1]), y = pY(co[0]);
       if (!st.total) {{
@@ -2704,6 +2772,36 @@ def _build_worldmap_script(country_stats: dict) -> str:
       labels.push({{cc: cc, x: x, y: y, base: base, isH: isH, isM: isM,
                     pri: isH ? st.high * 10 : (isM ? st.medium : 0)}});
     }});
+
+    // ── 유럽 클러스터 마커 (축소 상태) — 숫자 배지 + 클릭 시 확대 ──
+    if (clustered) {{
+      var eu = euCentroid();
+      if (eu) {{
+        var isH2 = eu.high > 0;
+        var col2 = isH2 ? '#f87171' : '#fbbf24';
+        var glC2 = isH2 ? 'rgba(248,113,113,' : 'rgba(251,191,36,';
+        var cr   = 12;
+        // halo
+        var gg = ctx.createRadialGradient(eu.x, eu.y, 0, eu.x, eu.y, cr*2.6);
+        gg.addColorStop(0, glC2+'0.45)'); gg.addColorStop(1, glC2+'0)');
+        ctx.beginPath(); ctx.arc(eu.x, eu.y, cr*2.6, 0, Math.PI*2); ctx.fillStyle = gg; ctx.fill();
+        // ring
+        ctx.beginPath(); ctx.arc(eu.x, eu.y, cr, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(10,16,22,0.92)'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = col2; ctx.stroke();
+        // count badge (국가 수)
+        var fs2 = 12;
+        ctx.font = 'bold ' + fs2 + 'px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = col2; ctx.fillText(String(eu.n), eu.x, eu.y + 0.5);
+        ctx.textBaseline = 'alphabetic';
+        // label
+        ctx.font = 'bold 10px monospace';
+        ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillText('유럽', eu.x + 0.5, eu.y + cr + 12.5);
+        ctx.fillStyle = isH2 ? '#fca5a5' : '#fde68a'; ctx.fillText('유럽', eu.x, eu.y + cr + 12);
+        clusterBox = {{ x: eu.x, y: eu.y, r: cr + 4 }};
+      }}
+    }}
 
     // ── 라벨: 겹침 회피 (HIGH 우선, 겹치면 아래/위로 비켜서 배치) ──
     if (W > 440) {{
@@ -2749,10 +2847,14 @@ def _build_worldmap_script(country_stats: dict) -> str:
   function loop() {{
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    // Blit static layer
-    ctx.save(); ctx.setTransform(1,0,0,1,0,0);
-    ctx.drawImage(off.canvas, 0, 0); ctx.restore();
-    drawMarkers(); drawHUD();
+    // 뷰 변환(줌·팬) 적용 → 정적 레이어 + 마커 함께 스케일
+    ctx.save();
+    ctx.translate(VIEW.x, VIEW.y);
+    ctx.scale(VIEW.s, VIEW.s);
+    ctx.drawImage(off.canvas, 0, 0, W, H);
+    drawMarkers();
+    ctx.restore();
+    drawHUD();
     tick++;
     animId = requestAnimationFrame(loop);
   }}
@@ -2763,6 +2865,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
     canvas.width  = W * DPR; canvas.height = H * DPR;
     canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     container.style.height = H + 'px';
+    clampView();
     drawStaticLayer();
   }}
 
@@ -2775,20 +2878,62 @@ def _build_worldmap_script(country_stats: dict) -> str:
     resize(); loop();
   }});
 
-  // Tooltip + click
+  // Tooltip + click + 줌/팬
   var tooltip = document.getElementById('worldmap-tooltip');
+  function toWorld(mx, my) {{ return [(mx - VIEW.x) / VIEW.s, (my - VIEW.y) / VIEW.s]; }}
+  function overCluster(mx, my) {{
+    if (!clusterBox) return false;
+    var wx = (mx - VIEW.x) / VIEW.s, wy = (my - VIEW.y) / VIEW.s;
+    var d = Math.sqrt((wx-clusterBox.x)*(wx-clusterBox.x)+(wy-clusterBox.y)*(wy-clusterBox.y));
+    return d < (clusterBox.r + 8);
+  }}
   function hitTest(mx, my) {{
+    var wpt = toWorld(mx, my), wx = wpt[0], wy = wpt[1];
+    var clustered = VIEW.s < CLUSTER_ZOOM;
     var hit = null, minD = 24;
     Object.keys(COORDS).forEach(function(cc) {{
+      if (clustered && EU[cc]) return;   // 클러스터에 묶인 개별국은 히트 제외
       var co = COORDS[cc], x = pX(co[1]), y = pY(co[0]);
-      var d = Math.sqrt((mx-x)*(mx-x)+(my-y)*(my-y));
+      var d = Math.sqrt((wx-x)*(wx-x)+(wy-y)*(wy-y));
       if (d < minD) {{ minD = d; hit = cc; }}
     }});
     return hit;
   }}
+  function zoomToEurope() {{
+    var eu = euCentroid(); if (!eu) return;
+    VIEW.s = 3.0;
+    VIEW.x = W/2 - eu.x * VIEW.s;
+    VIEW.y = H/2 - eu.y * VIEW.s;
+    clampView();
+  }}
+
+  var dragging = false, dragMoved = false, lastX = 0, lastY = 0;
+  canvas.addEventListener('mousedown', function(e) {{
+    dragging = true; dragMoved = false;
+    lastX = e.clientX; lastY = e.clientY;
+  }});
+  window.addEventListener('mouseup', function() {{ dragging = false; }});
   canvas.addEventListener('mousemove', function(e) {{
     var r = canvas.getBoundingClientRect();
     var mx = e.clientX - r.left, my = e.clientY - r.top;
+    if (dragging) {{
+      var dx = e.clientX - lastX, dy = e.clientY - lastY;
+      if (Math.abs(dx) + Math.abs(dy) > 2) dragMoved = true;
+      VIEW.x += dx; VIEW.y += dy; lastX = e.clientX; lastY = e.clientY;
+      clampView();
+      tooltip.style.display = 'none';
+      canvas.style.cursor = 'grabbing';
+      return;
+    }}
+    if (overCluster(mx, my)) {{
+      var eu = euCentroid();
+      tooltip.style.display = 'block';
+      tooltip.style.left = (mx+16)+'px'; tooltip.style.top = (my-16)+'px';
+      tooltip.innerHTML = '<strong style="color:#e2e8f0">유럽 ' + (eu?eu.n:0) + '개국</strong><br>'
+        + '<span style="color:#94a3b8">클릭 → 확대</span>';
+      canvas.style.cursor = 'pointer';
+      return;
+    }}
     var hit = hitTest(mx, my);
     if (hit) {{
       var st = STATS[hit] || {{total:0,high:0,medium:0}};
@@ -2801,15 +2946,38 @@ def _build_worldmap_script(country_stats: dict) -> str:
       tooltip.innerHTML = '<strong style="color:#e2e8f0">' + (CNAMES[hit]||hit) + '</strong><br>' + sig;
       canvas.style.cursor = 'pointer';
     }} else {{
-      tooltip.style.display = 'none'; canvas.style.cursor = 'default';
+      tooltip.style.display = 'none';
+      canvas.style.cursor = VIEW.s > 1 ? 'grab' : 'default';
     }}
   }});
-  canvas.addEventListener('mouseleave', function() {{ if (tooltip) tooltip.style.display='none'; }});
+  canvas.addEventListener('mouseleave', function() {{ if (tooltip) tooltip.style.display='none'; dragging = false; }});
   canvas.addEventListener('click', function(e) {{
+    if (dragMoved) return;   // 드래그(팬)였으면 클릭 무시
     var r = canvas.getBoundingClientRect();
-    var hit = hitTest(e.clientX-r.left, e.clientY-r.top);
+    var mx = e.clientX - r.left, my = e.clientY - r.top;
+    if (overCluster(mx, my)) {{ zoomToEurope(); return; }}
+    var hit = hitTest(mx, my);
     if (hit) openHeatmapDrilldown('all', hit);
   }});
+  canvas.addEventListener('dblclick', function(e) {{
+    e.preventDefault();
+    VIEW.s = 1; VIEW.x = 0; VIEW.y = 0;   // 더블클릭 → 초기화
+  }});
+  canvas.addEventListener('wheel', function(e) {{
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect();
+    var mx = e.clientX - r.left, my = e.clientY - r.top;
+    var wx = (mx - VIEW.x) / VIEW.s, wy = (my - VIEW.y) / VIEW.s;
+    var factor = e.deltaY < 0 ? 1.18 : 1/1.18;
+    VIEW.s *= factor;
+    if (VIEW.s < MINS) VIEW.s = MINS;
+    if (VIEW.s > MAXS) VIEW.s = MAXS;
+    // 커서 지점을 고정점으로 유지
+    VIEW.x = mx - wx * VIEW.s;
+    VIEW.y = my - wy * VIEW.s;
+    clampView();
+    tooltip.style.display = 'none';
+  }}, {{ passive: false }});
 }})();"""
 
 
@@ -2883,20 +3051,61 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
 # 커맨드센터 (개편) 렌더러
 # ---------------------------------------------------------------------------
 
+def _delta_html(cur: int, prev: int, cap: str = "직전 동기") -> str:
+    """직전 동일기간 대비 증감 → ▲/▼/– + % (.d.pos/.neg/.neu). prev 없으면 캡션만."""
+    if not prev:
+        return f'<div class="d neu"><span class="cap">{cap} 데이터 없음</span></div>'
+    pct = (cur - prev) / prev * 100
+    if pct >= 0.5:
+        cls, arw = "pos", "▲"
+    elif pct <= -0.5:
+        cls, arw = "neg", "▼"
+    else:
+        cls, arw = "neu", "–"
+    return (f'<div class="d {cls}">{arw} {abs(pct):.0f}%'
+            f'<span class="cap">vs {cap}</span></div>')
+
+
+def _sparkline_svg(series: list, w: int = 96, h: int = 20) -> str:
+    """일자별 수치 → 면적형 스파크라인 SVG. 데이터 < 2개면 빈 문자열."""
+    vals = [float(v) for v in (series or [])]
+    if len(vals) < 2:
+        return ""
+    lo, hi = min(vals), max(vals)
+    rng = (hi - lo) or 1.0
+    n = len(vals)
+    def _pt(i, v):
+        x = i / (n - 1) * w
+        y = h - ((v - lo) / rng) * (h - 2) - 1
+        return f"{x:.1f},{y:.1f}"
+    pts = " ".join(_pt(i, v) for i, v in enumerate(vals))
+    line = "M" + " L".join(pts.split(" "))
+    area = f"M0,{h} L" + " L".join(pts.split(" ")) + f" L{w},{h} Z"
+    ex, ey = _pt(n - 1, vals[-1]).split(",")
+    return (f'<svg class="spark" viewBox="0 0 {w} {h}" preserveAspectRatio="none" aria-hidden="true">'
+            f'<path class="fill" d="{area}"/><path d="{line}"/>'
+            f'<circle class="end" cx="{ex}" cy="{ey}" r="1.7"/></svg>')
+
+
 def _render_metric_rail(stats: dict, growth_story: dict, spikes: list, days: int) -> str:
-    """상단 지표 레일 6종 (kpi-* id 보존 → setPeriod 연동)."""
+    """상단 지표 레일 6종 (kpi-* id 보존 → setPeriod 연동). 직전 동기 증감 + 수집 스파크라인."""
     o = (growth_story or {}).get("overall") or {}
     yoy = o.get("yoy_pct")
     yoy_txt = (f'{"+" if yoy >= 0 else ""}{yoy:.0f}%') if yoy is not None else "—"
     nsp = len(spikes or [])
+    spark = _sparkline_svg(stats.get("spark") or [])
+    d_total = _delta_html(stats.get("total", 0), stats.get("prev_total", 0))
+    d_high  = _delta_html(stats.get("high", 0), stats.get("prev_high", 0))
+    d_brand = _delta_html(stats.get("brands_active", 0), stats.get("prev_brands_active", 0))
+    d_ctry  = _delta_html(stats.get("countries_active", 0), stats.get("prev_countries_active", 0))
     return (
         '<div class="rail">'
-        f'<div class="met"><div class="l">수집 {days}D</div><div class="v tnum"><span id="kpi-total">{stats.get("total",0):,}</span></div><div class="d neu">기사</div></div>'
-        f'<div class="met"><div class="l">HIGH 신호</div><div class="v tnum" style="color:var(--coral)"><span id="kpi-high">{stats.get("high",0)}</span></div><div class="d neu">속보</div></div>'
-        f'<div class="met"><div class="l">활성 브랜드</div><div class="v tnum"><span id="kpi-brands">{stats.get("brands_active",0)}</span></div><div class="d neu">모니터</div></div>'
-        f'<div class="met"><div class="l">커버 국가</div><div class="v tnum"><span id="kpi-countries">{stats.get("countries_active",0)}</span></div><div class="d neu">신호 발생</div></div>'
-        f'<div class="met"><div class="l">주요국 수출 YoY</div><div class="v tnum" style="color:var(--teal)">{yoy_txt}</div><div class="d pos">{o.get("growers",0)}개국↑</div></div>'
-        f'<div class="met"><div class="l">검색 급등</div><div class="v tnum" style="color:var(--amber)">{nsp}</div><div class="d neu">글로벌·해외</div></div>'
+        f'<div class="met"><div class="l">수집 {days}D</div><div class="v tnum"><span id="kpi-total">{stats.get("total",0):,}</span></div><div id="kpi-d-total">{d_total}</div><div id="kpi-spark">{spark}</div></div>'
+        f'<div class="met"><div class="l">HIGH 신호</div><div class="v tnum" style="color:var(--coral)"><span id="kpi-high">{stats.get("high",0)}</span></div><div id="kpi-d-high">{d_high}</div></div>'
+        f'<div class="met"><div class="l">활성 브랜드</div><div class="v tnum"><span id="kpi-brands">{stats.get("brands_active",0)}</span></div><div id="kpi-d-brands">{d_brand}</div></div>'
+        f'<div class="met"><div class="l">커버 국가</div><div class="v tnum"><span id="kpi-countries">{stats.get("countries_active",0)}</span></div><div id="kpi-d-countries">{d_ctry}</div></div>'
+        f'<div class="met"><div class="l">주요국 수출 YoY</div><div class="v tnum" style="color:var(--teal)">{yoy_txt}</div><div class="d pos">{o.get("growers",0)}개국↑<span class="cap">전년동기</span></div></div>'
+        f'<div class="met"><div class="l">검색 급등</div><div class="v tnum" style="color:var(--amber)">{nsp}</div><div class="d neu"><span class="cap">글로벌·해외</span></div></div>'
         '</div>'
     )
 
@@ -2952,8 +3161,11 @@ def _render_composite_lb(composite: list) -> str:
             f'<span class="subs">{bars}</span>'
             f'<span class="sc" style="color:{sccol}">{o["score"]}</span></div>'
         )
-    key = ('<div class="lb-key"><span><i class="sub-mom"></i>모멘텀</span><span><i class="sub-fin"></i>재무</span>'
-           '<span><i class="sub-tm"></i>상표</span><span><i class="sub-dem"></i>수요</span></div>')
+    key = ('<div class="lb-key">'
+           '<span title="최근 4주 뉴스 활동량·중요도 (가중 35%)"><i class="sub-mom"></i>모멘텀</span>'
+           '<span title="매출·영업이익 등 재무 실적 (가중 25%)"><i class="sub-fin"></i>재무</span>'
+           '<span title="US·JP 화장품 상표 출원 = 진출 선행신호 (가중 15%)"><i class="sub-tm"></i>상표</span>'
+           '<span title="네이버·구글 검색 수요 (가중 25%)"><i class="sub-dem"></i>수요</span></div>')
     return f'<div class="lb">{"".join(rows)}</div>{key}'
 
 
@@ -2981,12 +3193,38 @@ def _parse_market_sections(market_text: str) -> dict:
     return out
 
 
+def _urgency_badge(text: str) -> tuple:
+    """'[시급:높음/중간/낮음]' 패턴 추출 → (본문에서 제거된 텍스트, 기존 insight-badge span)."""
+    import re as _re
+    m = _re.search(r"\[?\s*시급\s*[:\-]?\s*(높음|중간|낮음|high|medium|low)\s*\]?", text, _re.I)
+    if not m:
+        return text, ""
+    lvl = m.group(1).lower()
+    cls, lab = {
+        "높음": ("insight-badge-high-hot", "시급 높음"), "high": ("insight-badge-high-hot", "시급 높음"),
+        "중간": ("insight-badge-high-warm", "시급 중간"), "medium": ("insight-badge-high-warm", "시급 중간"),
+        "낮음": ("insight-badge-high-low", "시급 낮음"), "low": ("insight-badge-high-low", "시급 낮음"),
+    }.get(lvl, ("insight-badge-high-warm", "시급"))
+    clean = _re.sub(r"\s*\[?\s*시급\s*[:\-]?\s*(높음|중간|낮음|high|medium|low)\s*\]?\s*", "", text, flags=_re.I).strip(" ·-—")
+    return clean, f'<span class="insight-badge {cls}">{lab}</span>'
+
+
+def _urgency_li(bullet: str) -> str:
+    """시장 인사이트 bullet → <li>본문 + 시급 배지</li>. [시급:X] 없으면 배지 생략."""
+    clean, badge = _urgency_badge(bullet)
+    return f"<li>{_esc(clean)}{badge}</li>"
+
+
 def _render_action_banner(market_text: str) -> str:
-    """'지금 대응' 액션 배너 — 최상단·큰 타이포·코럴. 실무자 최우선 정보로 분리."""
+    """'지금 대응' 액션 배너 — 최상단·코럴 강조. [시급:X]은 기존 insight-badge로 통일."""
     resp = _parse_market_sections(market_text)["respond"][:3]
     if not resp:
         return ""
-    lis = "".join(f"<li>{_esc(b)}</li>" for b in resp)
+    items = []
+    for b in resp:
+        clean, badge = _urgency_badge(b)
+        items.append(f"<li>{_esc(clean)}{badge}</li>")
+    lis = "".join(items)
     return (
         '<div class="action-banner">'
         '<div class="ab-label">⚑ 지금 대응해야 할 것</div>'
@@ -3040,7 +3278,7 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
         b = sec[kind][:3]
         if not b:
             continue
-        lis = "".join(f"<li>{_esc(x)}</li>" for x in b)
+        lis = "".join(_urgency_li(x) for x in b)
         cols.append(f'<div class="scol {kind}"><div class="h">{klabel}</div><ul>{lis}</ul></div>')
     cols_html = "".join(cols) or '<div class="scol check"><div class="h">점검</div><ul><li>시장 인사이트 생성 중</li></ul></div>'
 
@@ -3186,6 +3424,11 @@ def _build_full_html(
                 "high":      v["kpi"]["high"],
                 "brands":    v["kpi"]["brands"],
                 "countries": v["kpi"]["countries"],
+                "prev_total":     v["kpi"].get("prev_total", 0),
+                "prev_high":      v["kpi"].get("prev_high", 0),
+                "prev_brands":    v["kpi"].get("prev_brands", 0),
+                "prev_countries": v["kpi"].get("prev_countries", 0),
+                "spark":          v["kpi"].get("spark", []),
             },
             "articles":      v["articles"],
             "country_stats": v["country_stats"],
@@ -3478,6 +3721,37 @@ function renderArticlesTable(arts) {{
   applyFilter();
 }}
 
+function _setDelta(elId, cur, prev) {{
+  var el = document.getElementById(elId);
+  if (!el) return;
+  cur = cur || 0; prev = prev || 0;
+  if (!prev) {{ el.innerHTML = '<div class="d neu"><span class="cap">직전 동기 데이터 없음</span></div>'; return; }}
+  var pct = (cur - prev) / prev * 100;
+  var cls = 'neu', arw = '–';
+  if (pct >= 0.5) {{ cls = 'pos'; arw = '▲'; }}
+  else if (pct <= -0.5) {{ cls = 'neg'; arw = '▼'; }}
+  el.innerHTML = '<div class="d ' + cls + '">' + arw + ' ' + Math.abs(pct).toFixed(0) +
+                 '%<span class="cap">vs 직전 동기</span></div>';
+}}
+function _sparkSvg(series) {{
+  series = series || [];
+  if (series.length < 2) return '';
+  var w = 96, h = 20, n = series.length;
+  var lo = Math.min.apply(null, series), hi = Math.max.apply(null, series);
+  var rng = (hi - lo) || 1;
+  function pt(i, v) {{
+    var x = i / (n - 1) * w;
+    var y = h - ((v - lo) / rng) * (h - 2) - 1;
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }}
+  var pts = []; for (var i = 0; i < n; i++) pts.push(pt(i, series[i]));
+  var line = 'M' + pts.join(' L');
+  var area = 'M0,' + h + ' L' + pts.join(' L') + ' L' + w + ',' + h + ' Z';
+  var last = pt(n - 1, series[n - 1]).split(',');
+  return '<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+         '<path class="fill" d="' + area + '"/><path d="' + line + '"/>' +
+         '<circle class="end" cx="' + last[0] + '" cy="' + last[1] + '" r="1.7"/></svg>';
+}}
 function setPeriod(days) {{
   var key = String(days);
   var d = PERIOD_DATA[key];
@@ -3510,6 +3784,11 @@ function setPeriod(days) {{
   var hiEl  = document.getElementById('kpi-high');    if (hiEl)  hiEl.textContent  = (k.high||0).toLocaleString();
   var brEl  = document.getElementById('kpi-brands');  if (brEl)  brEl.textContent  = (k.brands||0).toLocaleString();
   var coEl  = document.getElementById('kpi-countries'); if (coEl) coEl.textContent = (k.countries||0).toLocaleString();
+  _setDelta('kpi-d-total', k.total, k.prev_total);
+  _setDelta('kpi-d-high', k.high, k.prev_high);
+  _setDelta('kpi-d-brands', k.brands, k.prev_brands);
+  _setDelta('kpi-d-countries', k.countries, k.prev_countries);
+  var spEl = document.getElementById('kpi-spark'); if (spEl) spEl.innerHTML = _sparkSvg(k.spark);
 
   // Articles table + drilldown data
   HIGH_DATA = d.articles;
@@ -3593,6 +3872,17 @@ function applyDateRange() {{
   el = document.getElementById('kpi-high');      if (el) el.textContent = kpi.high.toLocaleString();
   el = document.getElementById('kpi-brands');    if (el) el.textContent = kpi.brands.toLocaleString();
   el = document.getElementById('kpi-countries'); if (el) el.textContent = kpi.countries.toLocaleString();
+
+  // 임의 구간엔 직전 동기 baseline이 없음 → 증감 숨김, 스파크라인은 구간 내 일자별로 재계산
+  ['kpi-d-total','kpi-d-high','kpi-d-brands','kpi-d-countries'].forEach(function(id) {{
+    var de = document.getElementById(id);
+    if (de) de.innerHTML = '<div class="d neu"><span class="cap">사용자 지정 구간</span></div>';
+  }});
+  var byDay = {{}};
+  filtered.forEach(function(a) {{ if (a.date) byDay[a.date] = (byDay[a.date]||0) + 1; }});
+  var days = Object.keys(byDay).sort();
+  var spSeries = days.map(function(d2) {{ return byDay[d2]; }});
+  var spEl2 = document.getElementById('kpi-spark'); if (spEl2) spEl2.innerHTML = _sparkSvg(spSeries);
 
   // Recompute country stats for world map
   var cStats = {{}};
@@ -3984,6 +4274,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                     "high":      p_stats["high"],
                     "brands":    p_stats["brands_active"],
                     "countries": p_stats["countries_active"],
+                    "prev_total":      p_stats.get("prev_total", 0),
+                    "prev_high":       p_stats.get("prev_high", 0),
+                    "prev_brands":     p_stats.get("prev_brands_active", 0),
+                    "prev_countries":  p_stats.get("prev_countries_active", 0),
+                    "spark":           p_stats.get("spark", []),
                 },
                 "articles":      [_fmt_art_for_js(a) for a in p_arts],
                 "country_stats": p_cstats,
