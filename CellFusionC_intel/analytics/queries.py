@@ -229,12 +229,17 @@ def get_high_articles(
     days: int = 30,
     brand: "str | None" = None,
     country: "str | None" = None,
+    limit: int = 2500,
 ) -> list:
-    """HIGH importance 기사 전체 목록 반환 (드릴다운용)."""
+    """HIGH/MEDIUM 기사 목록 반환 (드릴다운용).
+
+    limit: 상한. 기본 2500 — 지도 마커(전체 카운트)와 드릴다운 목록이
+    어긋나지 않도록 전 국가 커버가 목표(작은 시장이 상위국에 밀려 잘리는 것 방지).
+    """
     cutoff = _cutoff_iso(days)
 
     where_extras = ""
-    params: dict = {"cutoff": cutoff}
+    params: dict = {"cutoff": cutoff, "lim": int(limit)}
     if brand:
         where_extras += " AND LOWER(brand) = :brand"
         params["brand"] = brand.lower()
@@ -263,7 +268,7 @@ def get_high_articles(
                 CASE importance WHEN 'high' THEN 0 ELSE 1 END,
                 COALESCE(strategic_score, 0) DESC,
                 published_date DESC
-            LIMIT 400
+            LIMIT :lim
         """),
         params,
     ).fetchall()
@@ -854,21 +859,35 @@ def get_brand_country_articles(
 
 
 def get_country_signal_stats(session: Session, days: int = 30) -> dict:
-    """국가별 신호 통계 반환 (세계지도용). {CC: {total, high, medium}}"""
+    """국가별 신호 통계 반환 (세계지도용). {CC: {total, high, medium}}
+
+    드릴다운(get_high_articles)과 동일 기준으로 집계 → '마커는 있는데 눌러도 없음'
+    불일치 제거. HIGH/MEDIUM만, incidental medium 제외, 정상 2자리 국가코드만.
+    total = high + medium(클릭 가능한 건수).
+    """
     cutoff = _cutoff_iso(days)
     rows = session.execute(
         text(f"""
             SELECT country,
-                   COUNT(*) AS total,
                    COUNT(*) FILTER (WHERE importance = 'high') AS high,
-                   COUNT(*) FILTER (WHERE importance = 'medium') AS medium
+                   COUNT(*) FILTER (WHERE importance = 'medium'
+                       AND (brand_focus IS NULL OR brand_focus != 'incidental')) AS medium
             FROM {DB_SCHEMA}.news_articles
             WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+              AND importance IN ('high', 'medium')
+              AND country ~ '^[A-Z]{{2}}$'          -- null·global·LATAM 등 오분류 코드 제외
+              AND (brand_focus IS NULL OR brand_focus != 'incidental' OR importance = 'high')
             GROUP BY country
         """),
         {"cutoff": cutoff},
     ).fetchall()
-    return {r[0]: {"total": r[1] or 0, "high": r[2] or 0, "medium": r[3] or 0} for r in rows}
+    out = {}
+    for r in rows:
+        hi, med = r[1] or 0, r[2] or 0
+        if hi + med == 0:
+            continue
+        out[r[0]] = {"total": hi + med, "high": hi, "medium": med}
+    return out
 
 
 def get_market_export_growth(session: Session, hs_like: str = "330499",
