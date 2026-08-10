@@ -36,10 +36,13 @@ TIER2_BRANDS = [
 ALL_BRANDS = TIER1_BRANDS + TIER2_BRANDS
 
 # Tier 1 국가: 매일 수집 (K-뷰티 핵심 시장)
-TIER1_COUNTRIES = ["US", "PL", "JP", "TH", "SG", "CN", "KR", "GB", "CA", "AU", "ID", "MY", "VN"]
+# IN·PH 승격(2026-08): 영어권 대형 K-뷰티 시장인데 주간(1회)이라 수집량 과소 → 매일로.
+TIER1_COUNTRIES = ["US", "PL", "JP", "TH", "SG", "CN", "KR", "GB", "CA", "AU",
+                   "ID", "MY", "VN", "IN", "PH"]
 
 # Tier 2 국가: 주 1회 수집 (확장 시장 + 가이드 신규 권역 — 비용 위해 주간 티어)
-TIER2_COUNTRIES = ["DE", "FR", "IT", "AE", "SA", "BR", "MX", "IN", "PH", "ZA",
+# 참고: 주간 풀스캔은 COUNTRIES 전체를 돌므로 이 목록은 문서/분류용(코드 게이팅은 TIER1만 사용).
+TIER2_COUNTRIES = ["DE", "FR", "IT", "AE", "SA", "BR", "MX", "ZA",
                    "RU", "KZ", "UZ", "BY"]  # 러시아·CIS(러시아어권)
 
 # 국가별 언어 코드 + Google News 파라미터 (신규 로케일은 실제 수집 검증 완료)
@@ -99,6 +102,15 @@ LOCALE_KEYWORDS = {
     "TH": ["เครื่องสำอางเกาหลี", "สกินแคร์เกาหลี", "เปิดตัว", "เข้าไทย"],
     "VN": ["mỹ phẩm Hàn Quốc", "thương hiệu Hàn Quốc", "ra mắt", "chính thức có mặt"],
     "IT": ["cosmetici coreani", "skincare coreana", "lancio", "arriva in Italia"],
+    # ── 공백 보강(2026-08): 매일 Tier1인데 현지어 쿼리가 없던 비영어권 + 승격시장 ──
+    "CN": ["韩国化妆品", "韩国护肤", "韩妆品牌", "上市", "进入中国市场"],
+    "MY": ["kosmetik Korea", "jenama Korea", "penjagaan kulit Korea", "dilancarkan", "masuk Malaysia"],
+    "DE": ["koreanische Kosmetik", "K-Beauty", "koreanische Marke", "Markteinführung", "kommt nach Deutschland"],
+    "FR": ["cosmétiques coréens", "marque coréenne", "K-beauté", "lancement", "arrive en France"],
+    "JP": ["韓国コスメ", "韓国スキンケア", "韓国ブランド", "新発売", "日本上陸"],
+    # 영어권이지만 'K-beauty'·현지어 부스터로 recall↑ (인도=힌디 일부, 필리핀=따갈로그 일부)
+    "IN": ["Korean beauty", "K-beauty", "Korean skincare", "कोरियाई ब्यूटी", "launches in India"],
+    "PH": ["Korean beauty", "K-beauty", "Korean skincare", "kosmetiko Korea", "now in the Philippines"],
     # 러시아·CIS — 러시아어 공통(카자흐·우즈벡·벨라루스도 러시아어 매체 다수)
     "RU": ["корейская косметика", "корейский бренд", "запуск", "выходит на рынок", "уходовая косметика"],
     "KZ": ["корейская косметика", "корейский бренд", "Казахстан", "Golden Apple", "запуск"],
