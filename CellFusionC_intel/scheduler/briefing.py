@@ -119,9 +119,29 @@ def _signal_digest(session, weekly: bool = True) -> str:
     from analytics.queries import (
         get_brand_composite_score, get_demand_triangulation,
         get_trademark_signals, get_google_spikes, get_market_growth_story,
-        get_ingredient_trends, get_negative_signals,
+        get_ingredient_trends, get_negative_signals, get_opportunity_stories,
     )
     L: list[str] = []
+
+    # 핵심 서사 '기회 스토리' — 나라·브랜드·무브·제품·성과 (결정적, 브리핑 최상단)
+    try:
+        stories = get_opportunity_stories(session, days=(30 if weekly else 14), limit=5)
+    except Exception:
+        stories = []
+    if stories:
+        L.append("### 🎯 기회 스토리 — 어느 나라·브랜드·무브·성과")
+        for s in stories[:5]:
+            mv = s.get("move", {})
+            perf = s.get("perf", {})
+            pf = []
+            if perf.get("search_spike"): pf.append(f"검색{perf['search_spike']}배")
+            if perf.get("export_yoy") is not None: pf.append(f"수출{perf['export_yoy']:+.0f}%")
+            if perf.get("momentum"): pf.append(f"모멘텀{perf['momentum']}")
+            prod = (s.get("products") or [""])[0]
+            ings = ", ".join(s.get("ingredients", [])[:3])
+            tail = " · ".join([x for x in [prod, ings, " ".join(pf)] if x])
+            L.append(f"- *{s.get('country_name','')}* {s.get('brand','')} — {mv.get('activity_type','')}"
+                     + (f" · {tail}" if tail else ""))
 
     # 핵심 무브 (원문 링크) — 브리핑에서 바로 원문으로 클릭 연결
     try:

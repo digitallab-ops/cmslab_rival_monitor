@@ -40,8 +40,12 @@ from analytics.queries import (
     get_trademark_signals,
     get_google_spikes,
     get_brand_composite_score,
+    get_opportunity_stories,
 )
-from analytics.summarizer import generate_brand_strategy_summary, generate_market_overview
+from analytics.summarizer import (
+    generate_brand_strategy_summary, generate_market_overview,
+    generate_opportunity_actions,
+)
 from storage.models import get_session
 
 logger = logging.getLogger(__name__)
@@ -2365,6 +2369,38 @@ a:hover { color: var(--gold); }
 .cmd-2 { grid-template-columns: 1fr 300px; }   /* 지도 제거 → 무브 | 스코어 2열 */
 @media (max-width:1080px){ .cmd,.cmd-2,.duo,.synth,.rail{ grid-template-columns:1fr; } .rail{ grid-template-columns:repeat(3,1fr);} }
 
+/* ── 기회 스토리 카드 (핵심 서사: 나라·브랜드·무브·제품·성과 → 우리가 할 것) ── */
+.ostory-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px,1fr)); gap:12px; margin-bottom:16px; }
+.ostory { background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--champ);
+  border-radius:var(--radius); padding:13px 15px; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+.ostory:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(0,0,0,.4); border-left-color:var(--champ2); }
+.os-head { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+.os-loc { font-size:12.5px; color:var(--mid); }
+.os-brand { font-size:15px; font-weight:700; color:var(--hi); }
+.os-neg { font-family:var(--mono); font-size:10px; font-weight:700; color:var(--coral);
+  background:rgba(255,106,86,.12); border-radius:3px; padding:1px 6px; }
+.os-score { margin-left:auto; font-family:var(--mono); font-size:16px; font-weight:800; color:var(--champ); }
+.os-row { display:flex; gap:8px; margin-bottom:6px; font-size:12.5px; line-height:1.45; }
+.os-k { flex-shrink:0; width:34px; font-family:var(--mono); font-size:10px; color:var(--lo);
+  text-transform:uppercase; letter-spacing:.05em; padding-top:2px; }
+.os-v { flex:1; color:var(--mid); }
+.os-act { color:var(--hi); font-weight:600; }
+.os-src { color:var(--champ); font-size:11px; white-space:nowrap; text-decoration:none; }
+.os-src:hover { text-decoration:underline; }
+.os-ing { display:inline-block; font-family:var(--mono); font-size:10px; color:var(--champ2);
+  background:rgba(216,184,120,.10); border:1px solid rgba(216,184,120,.22); border-radius:3px;
+  padding:0 5px; margin-left:5px; }
+.os-perf { display:flex; flex-wrap:wrap; gap:5px; }
+.os-chip { font-family:var(--mono); font-size:10.5px; border-radius:3px; padding:1px 6px; }
+.os-c-dem { color:var(--amber); background:rgba(242,169,59,.10); }
+.os-c-exp { color:var(--teal); background:rgba(70,214,195,.10); }
+.os-c-mom { color:var(--violet); background:rgba(139,120,220,.12); }
+.os-dim { color:var(--lo); font-style:italic; }
+.os-action { display:flex; gap:8px; align-items:baseline; margin-top:9px; padding-top:9px;
+  border-top:1px dashed var(--border); }
+.os-ac-k { flex-shrink:0; font-size:11px; font-weight:700; color:var(--champ); }
+.os-ac-v { flex:1; font-size:13px; font-weight:600; color:var(--hi); }
+
 /* ── v2: 액션 배너 (최우선 정보, 크게) ── */
 .action-banner { display:flex; gap:16px; align-items:flex-start;
   background:linear-gradient(100deg, rgba(255,106,86,.055), rgba(255,106,86,.01) 60%);
@@ -3215,6 +3251,55 @@ def _urgency_li(bullet: str) -> str:
     return f"<li>{_esc(clean)}{badge}</li>"
 
 
+def _render_opportunity_stories(stories: list) -> str:
+    """핵심 서사 카드 — 나라·브랜드·무브·제품/성분·성과 → 우리가 할 것. 브리핑 최상단."""
+    if not stories:
+        return ""
+    _ACT = {"신시장_진출": "신시장 진출", "유통_채널": "유통 채널", "신제품_런칭": "신제품 런칭",
+            "인플루언서_협업": "인플루언서 협업", "투자_BD": "투자·BD", "브랜드_마케팅": "브랜드 마케팅",
+            "실적_공시": "실적·공시", "가격_프로모션": "가격·프로모션", "기타": "기타"}
+    cards = []
+    for s in stories[:6]:
+        mv = s.get("move", {})
+        cc = s.get("country", "")
+        flag = COUNTRY_FLAGS.get(cc, "🌐")
+        act = _ACT.get(mv.get("activity_type", ""), mv.get("activity_type", ""))
+        title = _esc((mv.get("title") or "")[:80])
+        url = mv.get("url") or ""
+        src_link = (f'<a class="os-src" href="{_esc(url)}" target="_blank" rel="noopener">원문 ↗</a>'
+                    if url.startswith("http") else "")
+        neg = '<span class="os-neg">⚠️ 악재</span>' if s.get("has_negative") else ""
+        prods = " · ".join(_esc(p) for p in (s.get("products") or [])[:2])
+        ing_badges = "".join(f'<span class="os-ing">{_esc(i)}</span>' for i in (s.get("ingredients") or [])[:5])
+        prod_row = ""
+        if prods or ing_badges:
+            prod_row = (f'<div class="os-row"><span class="os-k">제품</span>'
+                        f'<span class="os-v">{prods}{ing_badges}</span></div>')
+        perf = s.get("perf", {})
+        chips = []
+        if perf.get("search_spike"): chips.append(f'<span class="os-chip os-c-dem">🔍 검색 {perf["search_spike"]}배</span>')
+        if perf.get("export_yoy") is not None: chips.append(f'<span class="os-chip os-c-exp">📦 수출 {perf["export_yoy"]:+.0f}%</span>')
+        if perf.get("momentum"): chips.append(f'<span class="os-chip os-c-mom">📈 모멘텀 {perf["momentum"]}</span>')
+        perf_row = (f'<div class="os-row"><span class="os-k">성과</span>'
+                    f'<span class="os-v os-perf">{"".join(chips)}</span></div>') if chips else \
+                   ('<div class="os-row"><span class="os-k">성과</span>'
+                    '<span class="os-v os-perf os-dim">성과 신호 축적 중</span></div>')
+        action = _esc(s.get("action") or "")
+        action_row = (f'<div class="os-action"><span class="os-ac-k">👉 우리</span>'
+                      f'<span class="os-ac-v">{action}</span></div>') if action else ""
+        cards.append(
+            f'<div class="ostory" onclick="openHeatmapDrilldown(\'{_esc(s.get("brand",""))}\',\'{_esc(cc)}\',\'all\')">'
+            f'<div class="os-head"><span class="os-loc">{flag} {_esc(s.get("country_name",""))}</span>'
+            f'<span class="os-brand">{_esc(s.get("brand",""))}</span>{neg}'
+            f'<span class="os-score" title="기회 스코어">{int(s.get("opp_score",0))}</span></div>'
+            f'<div class="os-row"><span class="os-k">무브</span>'
+            f'<span class="os-v"><span class="os-act">{_esc(act)}</span> {title} {src_link}</span></div>'
+            f'{prod_row}{perf_row}{action_row}'
+            f'</div>'
+        )
+    return f'<div class="ostory-grid">{"".join(cards)}</div>'
+
+
 def _render_action_banner(market_text: str) -> str:
     """'지금 대응' 액션 배너 — 최상단·코럴 강조. [시급:X]은 기존 insight-badge로 통일."""
     resp = _parse_market_sections(market_text)["respond"][:3]
@@ -3347,6 +3432,7 @@ def _build_full_html(
     trademark_sig: dict = None,
     search_spikes: list = None,
     composite: list = None,
+    stories: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -3382,6 +3468,7 @@ def _build_full_html(
     composite_lb_html = _render_composite_lb(composite or [])
     _market7 = _dg.get("market") or market_text
     action_banner_html = _render_action_banner(_market7)
+    stories_html      = _render_opportunity_stories(stories or [])
     legend_html       = _render_legend()
     synth_html        = _render_synth(_dg.get("stats") or stats,
                                       _market7, growth_story or {}, composite or [])
@@ -3504,6 +3591,8 @@ def _build_full_html(
 
   <!-- ===== 탭: 브리핑 (메인 종합) ===== -->
   <div class="tab-panel active" id="tab-overview">
+    <div class="eyebrow"><span class="lab">Opportunity Stories</span><span class="rule"></span><span class="rt">어느 나라·브랜드·무브·제품 → 우리가 할 것</span></div>
+    {stories_html}
     {action_banner_html}
     {legend_html}
     <div class="eyebrow"><span class="lab">Weekly Synthesis</span><span class="rule"></span><span class="rt">최근 7일 · AI 종합 인사이트</span></div>
@@ -4219,6 +4308,16 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             composite = get_brand_composite_score(session)
         except Exception:
             composite = []
+        # 핵심 서사 '기회 스토리' 합성 + AI 액션('우리가 할 것') — 실패해도 대시보드 무해
+        try:
+            stories = get_opportunity_stories(session, days=days, limit=6)
+            if stories:
+                _acts = generate_opportunity_actions(stories)
+                for _s in stories:
+                    _s["action"] = _acts.get(f"{_s.get('brand','')}|{_s.get('country','')}", "")
+        except Exception as _e:
+            logger.warning("기회 스토리 생성 실패: %s", _e)
+            stories = []
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -4365,6 +4464,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
         composite=composite,
+        stories=stories,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,

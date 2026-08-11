@@ -279,6 +279,74 @@ def generate_market_overview(brand_insights_raw: dict, momentum: list | None = N
         return ""
 
 
+def generate_opportunity_actions(stories: list) -> dict:
+    """기회 스토리들에 '우리가(셀퓨전씨) 할 것' 한 줄씩 배치 생성 (1 LLM 콜).
+
+    stories: get_opportunity_stories() 결과. 반환: {f"{brand}|{country}": action_str}.
+    실패/빈 입력 시 {} — 대시보드는 액션 없이 스토리만 렌더(무해).
+    """
+    if not stories:
+        return {}
+    lines = []
+    for i, s in enumerate(stories):
+        mv = s.get("move", {})
+        perf = s.get("perf", {})
+        pf = []
+        if perf.get("search_spike"): pf.append(f"검색{perf['search_spike']}배")
+        if perf.get("export_yoy") is not None: pf.append(f"수출{perf['export_yoy']:+.0f}%")
+        if perf.get("momentum"): pf.append(f"모멘텀{perf['momentum']}")
+        prods = ", ".join(s.get("products", [])[:2])
+        ings = ", ".join(s.get("ingredients", [])[:4])
+        lines.append(
+            f"[{i}] {s.get('country_name','')} · {s.get('brand','')} · "
+            f"{_ACT_LABEL.get(mv.get('activity_type',''), mv.get('activity_type',''))} — "
+            f"{(mv.get('title') or '')[:70]}"
+            + (f" | 제품: {prods}" if prods else "")
+            + (f" | 성분: {ings}" if ings else "")
+            + (f" | 성과: {' '.join(pf)}" if pf else "")
+            + (" | ⚠️악재" if s.get("has_negative") else "")
+        )
+    stories_block = "\n".join(lines)
+    prompt = f"""당신은 씨엠에스랩(더마 선케어 브랜드 '셀퓨전씨' 운영)의 경쟁사 인텔리전스 분석가입니다.
+아래는 경쟁사들의 '기회 스토리'(어느 나라·어느 브랜드·어떤 무브·어떤 제품/성분·성과)입니다.
+
+{stories_block}
+
+{CMS_PROFILE}
+
+각 스토리마다 **"그래서 우리(셀퓨전씨)가 할 것"**을 딱 한 문장(한국어, 45자 이내)으로 제시하세요.
+- 구체적 액션: 우리 어떤 제품/강점(임상 더마·선케어·자외선차단·PDRN·시카·배리어)으로 + 어느 시장·채널에서 무엇을.
+- ⚠️ 이들은 **경쟁사**다. "○○와 협업"·"○○의 유통망 활용" 같이 경쟁사와 손잡는 액션은 절대 금지.
+  우리가 **독자적으로** 맞대응·선점·대체하는 액션만. (그 브랜드가 연 시장·채널·성분 트렌드를 우리가 뒤따라 공략)
+- 경쟁사 악재면 반사 기회(대체·점유율 방어)로 뒤집어라.
+- 막연한 '모니터링'·'검토' 금지. 실행 동사로.
+반드시 JSON만: {{"actions": [{{"i": 0, "action": "..."}}, ...]}} — 모든 인덱스 포함."""
+    try:
+        import json as _json
+        from openai import OpenAI
+        from config.settings import INSIGHT_MODEL_MARKET
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model=INSIGHT_MODEL_MARKET,
+            max_tokens=900,
+            temperature=0.4,
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        data = _json.loads(response.choices[0].message.content or "{}")
+        out = {}
+        for item in data.get("actions", []):
+            i = item.get("i")
+            act = (item.get("action") or "").strip()
+            if isinstance(i, int) and 0 <= i < len(stories) and act:
+                s = stories[i]
+                out[f"{s.get('brand','')}|{s.get('country','')}"] = act
+        return out
+    except Exception as e:
+        logger.warning("기회 스토리 액션 생성 실패: %s", e)
+        return {}
+
+
 def _fallback_from_data(brand: str, articles: list) -> str:
     """AI 실패 시 실제 기사 내용 기반 fallback."""
     # HIGH 우선, 없으면 MEDIUM
