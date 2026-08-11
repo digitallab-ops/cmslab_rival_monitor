@@ -32,5 +32,7 @@ class NewsClassification(BaseModel):
     )
     title_ko: Optional[str] = Field(default=None, description="기사 제목의 한국어 번역 (원문이 이미 한국어면 null)")
     article_body_ko: Optional[str] = Field(default=None, description="기사 본문의 한국어 번역 요약 (최대 500자, 본문 없으면 null)")
+    key_ingredients: Optional[str] = Field(default=None, description="기사에 언급된 핵심 성분/포뮬러를 쉼표로 구분 (예: 'PDRN,센텔라,나이아신아마이드'). 성분 언급 없으면 null")
+    sentiment: Literal["positive", "neutral", "negative"] = Field(default="neutral", description="해당 브랜드 관점의 기사 톤: positive=호재, neutral=중립, negative=악재(리콜·품질이슈·논란·규제·소송 등)")
     confidence: float = Field(ge=0.0, le=1.0, description="분류 신뢰도 0.0~1.0")
     note: Optional[str] = Field(default=None, description="추가 메모 또는 불확실 사항")

@@ -153,6 +153,10 @@ def _make_batch_schema() -> dict:
                               "description": "기사 제목의 한국어 번역. 원문이 한국어(ko)인 경우에만 null. 영어·일본어·기타 언어는 반드시 한국어로 번역"},
             "article_body_ko": {"anyOf": [{"type": "string"}, {"type": "null"}],
                               "description": "기사 본문의 한국어 번역 요약 최대 500자 (본문 없으면 null)"},
+            "key_ingredients": {"anyOf": [{"type": "string"}, {"type": "null"}],
+                              "description": "기사에 언급된 핵심 성분/포뮬러를 쉼표로 구분 (예: 'PDRN,센텔라'; 성분 언급 없으면 null)"},
+            "sentiment":     {"type": "string", "enum": ["positive", "neutral", "negative"],
+                              "description": "브랜드 관점 톤: positive=호재, neutral=중립, negative=악재(리콜·품질이슈·논란·규제·소송)"},
             "brand_focus":   {
                 "type": "string",
                 "enum": ["primary", "secondary", "incidental"],
@@ -165,7 +169,8 @@ def _make_batch_schema() -> dict:
         "required": ["index", "brand", "country", "activity_type",
                      "importance", "strategic_score", "details", "product_name",
                      "channel", "price_info", "city", "evidence_level",
-                     "title_ko", "article_body_ko", "brand_focus", "confidence", "note"],
+                     "title_ko", "article_body_ko", "key_ingredients", "sentiment",
+                     "brand_focus", "confidence", "note"],
     }
     return {
         "type": "object",

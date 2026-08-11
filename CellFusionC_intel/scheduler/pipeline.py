@@ -127,6 +127,8 @@ def _run_single(
                 source_name=raw.source_name,
                 language=raw.language,
                 brand_focus=getattr(clf, "brand_focus", None),
+                key_ingredients=getattr(clf, "key_ingredients", None),
+                sentiment=getattr(clf, "sentiment", None),
                 classification_confidence=clf.confidence,
                 classifier_model=CLASSIFIER_MODEL_DETAIL,
                 collector_type=collector.collector_type,

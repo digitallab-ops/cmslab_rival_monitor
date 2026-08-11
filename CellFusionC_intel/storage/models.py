@@ -56,6 +56,8 @@ class NewsArticle(Base):
     brand_focus = Column(String(20))        # primary / secondary / incidental (NULL=구기사)
     classification_confidence = Column(Float)
     classifier_model = Column(String(50))
+    key_ingredients = Column(Text)          # 기사에 언급된 핵심 성분/포뮬러 (쉼표구분, 예: "PDRN,센텔라")
+    sentiment = Column(String(10))          # positive / neutral / negative (브랜드 관점 톤)
 
     # 수집 메타데이터
     source_country = Column(String(10))    # 파이프라인 수집 국가 (country와 다를 수 있음)
@@ -263,6 +265,9 @@ def migrate_tables():
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS is_duplicate BOOLEAN DEFAULT FALSE",
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS dup_of BIGINT",
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS embedding TEXT",
+        # 성분·포뮬러 트렌드(①) + 감성·논란 탐지(②)
+        f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS key_ingredients TEXT",
+        f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS sentiment VARCHAR(10)",
     ]
     with engine.connect() as conn:
         for sql in migrations:
