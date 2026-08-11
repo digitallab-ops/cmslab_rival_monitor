@@ -890,6 +890,61 @@ def get_country_signal_stats(session: Session, days: int = 30) -> dict:
     return out
 
 
+def get_ingredient_trends(session: Session, days: int = 30, limit: int = 15) -> list[dict]:
+    """경쟁사 성분·포뮬러 지형 — 최근 N일 언급 성분 집계.
+
+    반환: [{ingredient, mentions, brand_cnt, brands:[...]}], 언급수 desc.
+    key_ingredients(쉼표구분)를 unnest → 성분별 언급수·주도 브랜드. incidental 제외.
+    """
+    cutoff = _cutoff_iso(days)
+    try:
+        rows = session.execute(text(f"""
+            WITH ing AS (
+                SELECT brand,
+                       btrim(unnest(string_to_array(key_ingredients, ','))) AS ingredient
+                FROM {DB_SCHEMA}.news_articles
+                WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+                  AND key_ingredients IS NOT NULL AND key_ingredients <> ''
+                  AND (brand_focus IS NULL OR brand_focus != 'incidental')
+            )
+            SELECT ingredient, COUNT(*) AS mentions,
+                   COUNT(DISTINCT brand) AS brand_cnt,
+                   array_agg(DISTINCT brand) AS brands
+            FROM ing
+            WHERE char_length(ingredient) >= 2
+            GROUP BY ingredient
+            ORDER BY mentions DESC, brand_cnt DESC
+            LIMIT :lim
+        """), {"cutoff": cutoff, "lim": limit}).fetchall()
+    except Exception:
+        return []
+    return [{"ingredient": r[0], "mentions": r[1] or 0,
+             "brand_cnt": r[2] or 0, "brands": list(r[3] or [])} for r in rows]
+
+
+def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> list[dict]:
+    """경쟁사 악재(negative sentiment) 목록 — '기회 신호'. incidental 제외, HIGH·MED만."""
+    cutoff = _cutoff_iso(days)
+    try:
+        rows = session.execute(text(f"""
+            SELECT brand, country, activity_type,
+                   COALESCE(NULLIF(title_ko,''), title) AS title,
+                   details, source_url, published_date::date::text, importance
+            FROM {DB_SCHEMA}.news_articles
+            WHERE (is_duplicate IS NOT TRUE) AND sentiment = 'negative'
+              AND published_date >= :cutoff
+              AND (brand_focus IS NULL OR brand_focus != 'incidental')
+              AND importance IN ('high', 'medium')
+            ORDER BY CASE importance WHEN 'high' THEN 0 ELSE 1 END, published_date DESC
+            LIMIT :lim
+        """), {"cutoff": cutoff, "lim": limit}).fetchall()
+    except Exception:
+        return []
+    return [{"brand": r[0], "country": r[1], "activity_type": r[2], "title": r[3] or "",
+             "details": r[4] or "", "source_url": r[5] or "", "date": r[6] or "",
+             "importance": r[7] or ""} for r in rows]
+
+
 def get_market_export_growth(session: Session, hs_like: str = "330499",
                              trailing: int = 3) -> list[dict]:
     """

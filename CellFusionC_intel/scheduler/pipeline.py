@@ -29,7 +29,7 @@ from storage.repository import (
     high_alert_is_duplicate, record_high_alert,
 )
 from config.settings import CLASSIFIER_MODEL_DETAIL, HIGH_ALERT_MIN_SCORE
-from notifications.slack import notify_high_importance
+from notifications.slack import notify_high_importance, notify_negative_signal
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +136,13 @@ def _run_single(
             save_article(session, article)
             stats.saved += 1
 
+            _focus = getattr(clf, "brand_focus", None)
+            _sent = getattr(clf, "sentiment", None)
+
             # high importance → 즉시 Slack 알림 (단, '완전 하이'만: score 문턱 이상 + 스쳐언급 제외)
             if clf.importance == "high":
                 stats.high += 1
                 _score = getattr(clf, "strategic_score", 0) or 0
-                _focus = getattr(clf, "brand_focus", None)
                 if _score >= HIGH_ALERT_MIN_SCORE and _focus != "incidental":
                     try:
                         # 같은 사건 중복 속보 억제(발송 로그 대조) — 첫 건만 발송
@@ -153,6 +155,15 @@ def _run_single(
                             record_high_alert(session, article)
                     except Exception:
                         pass
+
+            # 경쟁사 악재(negative) → '기회 신호' 알림. HIGH로 이미 발송된 건은 중복 억제로 스킵.
+            if _sent == "negative" and _focus != "incidental" and clf.importance in ("high", "medium"):
+                try:
+                    if not high_alert_is_duplicate(session, article):
+                        notify_negative_signal(article)
+                        record_high_alert(session, article)
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error("저장 실패 (%s): %s", raw.title[:60], e)

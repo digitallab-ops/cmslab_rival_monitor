@@ -93,6 +93,38 @@ def notify_high_importance(article) -> bool:
     return _post(payload, secondary=True)
 
 
+def notify_negative_signal(article) -> bool:
+    """경쟁사 악재(negative sentiment) 즉시 알림 — '경쟁사 리스크 = 우리 기회' 프레이밍."""
+    flag = COUNTRY_FLAGS.get(article.country, "🌐")
+    act_emoji = ACTIVITY_EMOJI.get(article.activity_type, "📌")
+    title = (getattr(article, "title_ko", None) or article.title or "")[:120]
+    source_line = f"\n<{article.source_url}|원문 보기>" if article.source_url else ""
+    imp_txt = "HIGH" if article.importance == "high" else "MED"
+
+    payload = {
+        "text": f"⚠️ *[경쟁사 악재]* {article.brand} · {flag} {article.country}",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"⚠️ *[경쟁사 악재 · {imp_txt}]* {article.brand} · {flag} {article.country}\n"
+                        f"{act_emoji} *{article.activity_type}*\n\n"
+                        f"*{title}*\n"
+                        f"{article.details}"
+                        f"{source_line}"
+                    ),
+                },
+            },
+            {"type": "context", "elements": [
+                {"type": "mrkdwn", "text": "🎯 경쟁사 리스크 신호 — 반사 기회·대응 검토"}]},
+            {"type": "divider"},
+        ],
+    }
+    return _post(payload, secondary=True)
+
+
 def notify_collection_summary(label: str, agg: dict) -> bool:
     """수집 잡 완료 후 요약 리포트 전송.
 

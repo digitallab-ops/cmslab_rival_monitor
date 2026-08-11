@@ -119,6 +119,7 @@ def _signal_digest(session, weekly: bool = True) -> str:
     from analytics.queries import (
         get_brand_composite_score, get_demand_triangulation,
         get_trademark_signals, get_google_spikes, get_market_growth_story,
+        get_ingredient_trends, get_negative_signals,
     )
     L: list[str] = []
 
@@ -210,6 +211,30 @@ def _signal_digest(session, weekly: bool = True) -> str:
                 lead = (m["moves"][0]["brand"] if m.get("moves") else "")
                 L.append(f"- {m['country_name']} 수출 +{m['yoy_pct']:.0f}%"
                          + (f" · 그 시장 경쟁사: {lead}" if lead else ""))
+
+    # 경쟁사 악재 = 기회 신호 (일·주간 공통)
+    try:
+        negs = get_negative_signals(session, days=(7 if weekly else 2), limit=6)
+    except Exception:
+        negs = []
+    if negs:
+        L.append("### ⚠️ 경쟁사 악재 — 반사 기회")
+        for n in negs[:5]:
+            link = f" <{n['source_url']}|원문 ↗>" if str(n.get("source_url","")).startswith("http") else ""
+            L.append(f"- *{n['brand']}* ({n['country']}) {n['activity_type']} · {n['title'][:56]}{link}")
+
+    # 성분·포뮬러 지형 (주간만 — 축적 필요)
+    if weekly:
+        try:
+            ings = get_ingredient_trends(session, days=30, limit=8)
+        except Exception:
+            ings = []
+        if ings:
+            L.append("### 🧪 경쟁사 성분 지형 (최근 30일)")
+            for it in ings[:6]:
+                who = ", ".join(it["brands"][:3]) + ("…" if it["brand_cnt"] > 3 else "")
+                L.append(f"- *{it['ingredient']}* — {it['mentions']}건 / {it['brand_cnt']}개 브랜드"
+                         + (f" ({who})" if who else ""))
 
     if not L:
         return ""
