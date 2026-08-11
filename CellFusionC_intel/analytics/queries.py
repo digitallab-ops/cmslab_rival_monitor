@@ -12,6 +12,12 @@ from sqlalchemy.orm import Session
 
 from config.settings import DB_SCHEMA
 
+try:
+    from config.brands import COUNTRIES as _COUNTRIES
+    _CC_NAME = {cc: (cfg.get("name") or cc) for cc, cfg in _COUNTRIES.items()}
+except Exception:
+    _CC_NAME = {}
+
 
 def _cutoff_iso(days: int) -> str:
     return (datetime.utcnow() - timedelta(days=days)).isoformat()
@@ -943,6 +949,133 @@ def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> l
     return [{"brand": r[0], "country": r[1], "activity_type": r[2], "title": r[3] or "",
              "details": r[4] or "", "source_url": r[5] or "", "date": r[6] or "",
              "importance": r[7] or ""} for r in rows]
+
+
+def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) -> list[dict]:
+    """핵심 서사 체인 합성 — (브랜드×국가)별 '무브→제품/성분→성과프록시'를 한 카드로.
+
+    체인: 어느 나라 · 어느 브랜드 · 어떻게(무브) · 무슨 제품/성분 · 잘 나가나(성과프록시).
+    '우리가 할 것'(action)은 상위 레이어(S2, AI)에서 채움. 여기선 결정적 데이터만.
+    반환: [{brand, country, country_name, move:{...}, products:[...], ingredients:[...],
+            has_negative, perf:{search_spike, export_yoy, momentum}, opp_score}]
+    """
+    cutoff = _cutoff_iso(days)
+    try:
+        rows = session.execute(text(f"""
+            WITH arts AS (
+                SELECT brand, country, activity_type, importance,
+                       COALESCE(strategic_score, 0) AS sc,
+                       COALESCE(NULLIF(title_ko,''), title) AS title,
+                       details, source_url,
+                       published_date::date::text AS pub_date,
+                       product_name, key_ingredients,
+                       ROW_NUMBER() OVER (PARTITION BY brand, country
+                           ORDER BY (importance='high') DESC,
+                                    COALESCE(strategic_score,0) DESC,
+                                    published_date DESC) AS rn,
+                       SUM(COALESCE(strategic_score,0)) OVER (PARTITION BY brand, country) AS cell_score,
+                       COUNT(*) OVER (PARTITION BY brand, country) AS n_arts,
+                       BOOL_OR(sentiment='negative') OVER (PARTITION BY brand, country) AS has_neg
+                FROM {DB_SCHEMA}.news_articles
+                WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+                  AND importance IN ('high','medium')
+                  AND (brand_focus IS NULL OR brand_focus != 'incidental')
+                  AND country ~ '^[A-Z]{{2}}$'
+            )
+            SELECT brand, country, activity_type, importance, sc, title, details,
+                   source_url, pub_date, product_name, key_ingredients,
+                   cell_score, n_arts, has_neg
+            FROM arts WHERE rn = 1
+            ORDER BY cell_score DESC
+            LIMIT :lim
+        """), {"cutoff": cutoff, "lim": limit}).fetchall()
+    except Exception:
+        return []
+    if not rows:
+        return []
+
+    cells = [(r[0], r[1]) for r in rows]
+    # 셀별 제품·성분 집계(대표 기사 외 포함)
+    prod_map: dict = {}
+    ing_map: dict = {}
+    try:
+        for b, c in cells:
+            agg = session.execute(text(f"""
+                SELECT
+                  array_agg(DISTINCT product_name) FILTER (WHERE product_name IS NOT NULL
+                      AND product_name<>'' AND lower(product_name) NOT IN ('null','none','n/a')),
+                  string_agg(DISTINCT key_ingredients, ',') FILTER (WHERE key_ingredients IS NOT NULL AND key_ingredients<>'')
+                FROM {DB_SCHEMA}.news_articles
+                WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+                  AND brand=:b AND country=:c AND importance IN ('high','medium')
+                  AND (brand_focus IS NULL OR brand_focus!='incidental')
+            """), {"cutoff": cutoff, "b": b, "c": c}).fetchone()
+            prod_map[(b, c)] = list(agg[0] or [])[:4] if agg else []
+            ings = []
+            if agg and agg[1]:
+                seen = set()
+                for tok in str(agg[1]).split(","):
+                    t = tok.strip()
+                    if t and t.lower() not in seen:
+                        seen.add(t.lower()); ings.append(t)
+            ing_map[(b, c)] = ings[:6]
+    except Exception:
+        pass
+
+    # 성과 프록시 인덱싱 (있으면 붙이고 없으면 생략)
+    export_by_cc: dict = {}
+    try:
+        for g in get_market_export_growth(session, hs_like="3304%", trailing=3):
+            export_by_cc[g["country_code"]] = g.get("yoy_pct")
+    except Exception:
+        pass
+    spike_by_brand: dict = {}
+    try:
+        for sp in get_google_spikes(session):
+            # 브랜드별 최대 급등비 보관(지역 무관 대표값)
+            b = sp.get("brand"); r = sp.get("spike_ratio")
+            if b and (b not in spike_by_brand or (r or 0) > spike_by_brand[b]):
+                spike_by_brand[b] = r
+    except Exception:
+        pass
+    mom_by_brand: dict = {}
+    try:
+        for m in compute_brand_momentum(session):
+            mom_by_brand[m["brand"]] = m.get("momentum")
+    except Exception:
+        pass
+
+    stories = []
+    for r in rows:
+        (brand, country, act, imp, sc, title, details, url, date,
+         product_name, key_ing, cell_score, n_arts, has_neg) = r
+        cc = country
+        spike = spike_by_brand.get(brand)
+        exp = export_by_cc.get(cc)
+        mom = mom_by_brand.get(brand)
+        # 기회 스코어: 무브 강도(대표 스코어) + 활동 폭(캡) + 수요(검색) + 성과(수출) + 모멘텀
+        # cell_score 합계는 KR 대량기사에 쏠려서 대표스코어+활동폭으로 재균형
+        opp = (sc or 0) * 1.0 + min(n_arts or 0, 6) * 6
+        if spike and spike >= 1.5:  opp += min((spike - 1) * 20, 40)
+        if exp and exp >= 15:       opp += min(exp * 0.4, 30)
+        if mom and mom >= 1.3:      opp += min((mom - 1) * 25, 25)
+        stories.append({
+            "brand": brand, "country": cc,
+            "country_name": _CC_NAME.get(cc, cc),
+            "move": {"activity_type": act, "importance": imp, "title": title or "",
+                     "details": details or "", "url": url or "", "date": date or "",
+                     "score": sc or 0},
+            "products": prod_map.get((brand, cc), []),
+            "ingredients": ing_map.get((brand, cc), []),
+            "has_negative": bool(has_neg),
+            "n_moves": n_arts or 0,
+            "perf": {"search_spike": round(spike, 1) if spike else None,
+                     "export_yoy": round(exp, 0) if exp is not None else None,
+                     "momentum": round(mom, 2) if mom else None},
+            "opp_score": round(opp, 1),
+        })
+    stories.sort(key=lambda s: s["opp_score"], reverse=True)
+    return stories
 
 
 def get_market_export_growth(session: Session, hs_like: str = "330499",
