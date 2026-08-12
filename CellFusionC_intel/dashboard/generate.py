@@ -2355,6 +2355,7 @@ a:hover { color: var(--gold); }
 .lb .subs i { flex:1; border-radius:1px; min-height:1px; }
 .sub-mom { background:var(--violet); } .sub-fin { background:var(--teal); } .sub-tm { background:var(--champ); } .sub-dem { background:var(--amber); }
 .lb .sc { font-family:var(--mono); font-size:15px; font-weight:700; width:26px; text-align:right; color:var(--hi); }
+.lb .lb-tr { font-family:var(--mono); font-size:10px; font-weight:700; margin-left:5px; width:26px; text-align:left; }
 .lb-key { display:flex; gap:13px; flex-wrap:wrap; padding:10px 12px; font-family:var(--mono); font-size:11.5px; color:var(--lo); letter-spacing:.03em; border-top:1px solid var(--border); }
 .lb-key span { display:inline-flex; align-items:center; cursor:default; }
 .lb-key i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle; }
@@ -3177,11 +3178,12 @@ def _render_move_stream(high_articles: list, demand_tri: list) -> str:
     return f'<div class="stream">{body}</div>'
 
 
-def _render_composite_lb(composite: list) -> str:
-    """브랜드 종합 스코어 리더보드 (21개 전부, 4색 서브신호 바)."""
+def _render_composite_lb(composite: list, trend: dict = None) -> str:
+    """브랜드 종합 스코어 리더보드 (21개 전부, 4색 서브신호 바). 추세 있으면 ▲▼."""
     if not composite:
         return ('<div class="lb"><div class="ev"><div class="t" style="color:var(--lo);padding:6px">'
                 '종합 스코어 데이터 축적 중</div></div></div>')
+    trend = trend or {}
     rows = []
     for o in composite:
         subs = o["subs"]
@@ -3193,11 +3195,19 @@ def _render_composite_lb(composite: list) -> str:
             op = "" if v is not None else "opacity:.25"
             bars += f'<i class="{cls}" style="height:{max(h,3)}%;{op}"></i>'
         sccol = "var(--champ2)" if o["rank"] <= 2 else "var(--hi)"
+        # 시계열 추세(주간 스냅샷 ≥2점일 때만): 첫 대비 증감
+        tr = trend.get(o["brand"]) or {}
+        dl = tr.get("delta")
+        trend_html = ""
+        if tr.get("points", 0) >= 2 and dl is not None and abs(dl) >= 0.5:
+            tc = "var(--teal)" if dl > 0 else "var(--coral)"
+            arw = "▲" if dl > 0 else "▼"
+            trend_html = f'<span class="lb-tr" style="color:{tc}" title="지난 스냅샷 대비">{arw}{abs(dl):.0f}</span>'
         rows.append(
             f'<div class="r" onclick="openHeatmapDrilldown(\'{_esc(o["brand"])}\',\'all\',\'all\')">'
             f'<span class="rk">{o["rank"]}</span><span class="nm">{_esc(o["brand"])}</span>'
             f'<span class="subs">{bars}</span>'
-            f'<span class="sc" style="color:{sccol}">{o["score"]}</span></div>'
+            f'<span class="sc" style="color:{sccol}">{o["score"]}</span>{trend_html}</div>'
         )
     key = ('<div class="lb-key">'
            '<span title="최근 4주 뉴스 활동량·중요도 (가중 35%)"><i class="sub-mom"></i>모멘텀</span>'
@@ -3450,6 +3460,7 @@ def _build_full_html(
     search_spikes: list = None,
     composite: list = None,
     stories: list = None,
+    score_trend: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -3482,7 +3493,7 @@ def _build_full_html(
     # ── 커맨드센터(브리핑 탭) 신규 블록 ──
     metric_rail_html  = _render_metric_rail(stats, growth_story or {}, search_spikes or [], days)
     move_stream_html  = _render_move_stream(_dg.get("high") or high_articles, demand_tri or [])
-    composite_lb_html = _render_composite_lb(composite or [])
+    composite_lb_html = _render_composite_lb(composite or [], score_trend or {})
     _market7 = _dg.get("market") or market_text
     action_banner_html = _render_action_banner(_market7)
     stories_html      = _render_opportunity_stories(stories or [])
@@ -4335,6 +4346,12 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception as _e:
             logger.warning("기회 스토리 생성 실패: %s", _e)
             stories = []
+        # 시계열 추세(주간 스냅샷 누적분) — 없으면 빈 dict(무해)
+        try:
+            from analytics.history import get_score_trend
+            score_trend = get_score_trend(session)
+        except Exception:
+            score_trend = {}
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -4482,6 +4499,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         search_spikes=search_spikes,
         composite=composite,
         stories=stories,
+        score_trend=score_trend,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,

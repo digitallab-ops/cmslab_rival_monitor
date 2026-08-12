@@ -304,6 +304,22 @@ def job_trademark() -> None:
         logger.warning("해외상표 수집 스킵(KIPRIS_KEY/네트워크 확인): %s", e)
 
 
+def job_score_snapshot() -> None:
+    """브랜드 종합스코어·모멘텀·리테일 순위 주간 스냅샷 (시계열 추세용). 주1회."""
+    logger.info("=== [주간] 브랜드 스코어 스냅샷 시작 ===")
+    try:
+        from storage.models import get_session
+        from analytics.history import snapshot_now
+        s = get_session()
+        try:
+            n = snapshot_now(s)
+            logger.info("스코어 스냅샷 완료: %d개 브랜드", n)
+        finally:
+            s.close()
+    except Exception as e:
+        logger.warning("스코어 스냅샷 스킵: %s", e)
+
+
 def job_retail_ranking() -> None:
     """아마존 베스트셀러 리테일 랭킹 수집 (실판매 성과 = '잘 나간다' 신호). 주2회."""
     logger.info("=== [주2회] 아마존 리테일 랭킹 수집 시작 ===")
@@ -454,6 +470,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day_of_week="mon,thu", hour=6, minute=20),
         id="retail_ranking",
         name="[주2회] 아마존 리테일 랭킹 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매주 월요일 07:40 KST — 브랜드 스코어 시계열 스냅샷(리테일 수집 후, 브리핑 전).
+    scheduler.add_job(
+        job_score_snapshot,
+        trigger=CronTrigger(day_of_week="mon", hour=7, minute=40),
+        id="score_snapshot",
+        name="[주간] 브랜드 스코어 스냅샷",
         max_instances=1,
         coalesce=True,
     )
