@@ -2395,6 +2395,7 @@ a:hover { color: var(--gold); }
 .os-c-dem { color:var(--amber); background:rgba(242,169,59,.10); }
 .os-c-exp { color:var(--teal); background:rgba(70,214,195,.10); }
 .os-c-mom { color:var(--violet); background:rgba(139,120,220,.12); }
+.os-c-retail { color:var(--coral); background:rgba(255,106,86,.12); font-weight:700; }
 .os-dim { color:var(--lo); font-style:italic; }
 .os-action { display:flex; gap:8px; align-items:baseline; margin-top:9px; padding-top:9px;
   border-top:1px dashed var(--border); }
@@ -3277,6 +3278,13 @@ def _render_opportunity_stories(stories: list) -> str:
                         f'<span class="os-v">{prods}{ing_badges}</span></div>')
         perf = s.get("perf", {})
         chips = []
+        rt = perf.get("retail")
+        if rt and rt.get("rank"):
+            rev = rt.get("reviews")
+            rev_txt = (f"·{rev//1000}K리뷰" if rev and rev >= 1000 else (f"·{rev}리뷰" if rev else ""))
+            rate_txt = f"⭐{rt['rating']}" if rt.get("rating") else ""
+            chips.append(f'<span class="os-chip os-c-retail" title="{_esc(rt.get("product",""))}">'
+                         f'🛒 아마존 {_esc(rt.get("category",""))} #{rt["rank"]} {rate_txt}{rev_txt}</span>')
         if perf.get("search_spike"): chips.append(f'<span class="os-chip os-c-dem">🔍 검색 {perf["search_spike"]}배</span>')
         if perf.get("export_yoy") is not None: chips.append(f'<span class="os-chip os-c-exp">📦 수출 {perf["export_yoy"]:+.0f}%</span>')
         if perf.get("momentum"): chips.append(f'<span class="os-chip os-c-mom">📈 모멘텀 {perf["momentum"]}</span>')

@@ -304,6 +304,18 @@ def job_trademark() -> None:
         logger.warning("해외상표 수집 스킵(KIPRIS_KEY/네트워크 확인): %s", e)
 
 
+def job_retail_ranking() -> None:
+    """아마존 베스트셀러 리테일 랭킹 수집 (실판매 성과 = '잘 나간다' 신호). 주2회."""
+    logger.info("=== [주2회] 아마존 리테일 랭킹 수집 시작 ===")
+    try:
+        from signals.retail_ranking import run as run_retail
+        r = run_retail()
+        logger.info("리테일 랭킹 수집 완료: 저장 %d(모니터링 %d) · 브랜드 %d",
+                    r.get("captured", 0), r.get("monitored", 0), len(r.get("by_brand", {})))
+    except Exception as e:
+        logger.warning("리테일 랭킹 수집 스킵(네트워크/차단 확인): %s", e)
+
+
 def job_profile_sync() -> None:
     """Cafe24 → 자사 제품 라인 자동 동기화 (company_profile.md). 실패해도 파이프라인 무영향."""
     logger.info("=== 자사 제품 프로필 동기화 시작 ===")
@@ -432,6 +444,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day=4, hour=6, minute=50),
         id="trademark",
         name="[월간] KIPRIS 해외상표 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 주2회(월·목) 06:20 KST — 아마존 리테일 랭킹(실판매 성과). 검색트렌드 전.
+    scheduler.add_job(
+        job_retail_ranking,
+        trigger=CronTrigger(day_of_week="mon,thu", hour=6, minute=20),
+        id="retail_ranking",
+        name="[주2회] 아마존 리테일 랭킹 수집",
         max_instances=1,
         coalesce=True,
     )

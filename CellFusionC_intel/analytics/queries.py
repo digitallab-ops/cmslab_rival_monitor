@@ -951,6 +951,57 @@ def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> l
              "importance": r[7] or ""} for r in rows]
 
 
+def get_retail_performance(session: Session, days: int = 21) -> dict:
+    """브랜드별 아마존 최고 순위 성과 — 서사의 '잘 나간다' 실측.
+
+    반환: {brand: {country, category, rank, product, rating, review_count, url}}.
+    최근 capture 중 순위 가장 높은(낮은 rank) 제품 1개. retail_rankings 없으면 {}.
+    """
+    cutoff = _cutoff_iso(days)
+    try:
+        rows = session.execute(text(f"""
+            WITH recent AS (
+                SELECT brand, country, category, product_name, rank, rating,
+                       review_count, product_url,
+                       ROW_NUMBER() OVER (PARTITION BY brand
+                           ORDER BY rank ASC NULLS LAST, review_count DESC NULLS LAST) rn
+                FROM {DB_SCHEMA}.retail_rankings
+                WHERE capture_date >= :cutoff AND brand IS NOT NULL AND rank IS NOT NULL
+            )
+            SELECT brand, country, category, product_name, rank, rating, review_count, product_url
+            FROM recent WHERE rn = 1
+        """), {"cutoff": cutoff}).fetchall()
+    except Exception:
+        return {}
+    return {r[0]: {"country": r[1], "category": r[2], "product": r[3], "rank": r[4],
+                   "rating": float(r[5]) if r[5] is not None else None,
+                   "review_count": r[6], "url": r[7] or ""} for r in rows}
+
+
+def get_retail_landscape(session: Session, days: int = 21, limit: int = 20) -> list[dict]:
+    """아마존 리테일 지형 — 카테고리별 상위 K뷰티 제품(모니터링+메이저). 대시보드용."""
+    cutoff = _cutoff_iso(days)
+    try:
+        rows = session.execute(text(f"""
+            WITH recent AS (
+                SELECT category, brand, is_monitored, product_name, rank, rating, review_count, product_url,
+                       ROW_NUMBER() OVER (PARTITION BY category, brand, product_name
+                           ORDER BY capture_date DESC) rn
+                FROM {DB_SCHEMA}.retail_rankings
+                WHERE capture_date >= :cutoff AND rank IS NOT NULL
+            )
+            SELECT category, brand, is_monitored, product_name, rank, rating, review_count, product_url
+            FROM recent WHERE rn = 1
+            ORDER BY rank ASC
+            LIMIT :lim
+        """), {"cutoff": cutoff, "lim": limit}).fetchall()
+    except Exception:
+        return []
+    return [{"category": r[0], "brand": r[1], "is_monitored": bool(r[2]), "product": r[3],
+             "rank": r[4], "rating": float(r[5]) if r[5] is not None else None,
+             "review_count": r[6], "url": r[7] or ""} for r in rows]
+
+
 def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) -> list[dict]:
     """핵심 서사 체인 합성 — (브랜드×국가)별 '무브→제품/성분→성과프록시'를 한 카드로.
 
@@ -1044,6 +1095,7 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
             mom_by_brand[m["brand"]] = m.get("momentum")
     except Exception:
         pass
+    retail_by_brand = get_retail_performance(session)   # 실측 '잘 나간다'
 
     stories = []
     for r in rows:
@@ -1053,12 +1105,15 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
         spike = spike_by_brand.get(brand)
         exp = export_by_cc.get(cc)
         mom = mom_by_brand.get(brand)
-        # 기회 스코어: 무브 강도(대표 스코어) + 활동 폭(캡) + 수요(검색) + 성과(수출) + 모멘텀
+        retail = retail_by_brand.get(brand)
+        # 기회 스코어: 무브 강도(대표 스코어) + 활동 폭(캡) + 수요(검색) + 성과(수출) + 모멘텀 + 리테일 실순위
         # cell_score 합계는 KR 대량기사에 쏠려서 대표스코어+활동폭으로 재균형
         opp = (sc or 0) * 1.0 + min(n_arts or 0, 6) * 6
         if spike and spike >= 1.5:  opp += min((spike - 1) * 20, 40)
         if exp and exp >= 15:       opp += min(exp * 0.4, 30)
         if mom and mom >= 1.3:      opp += min((mom - 1) * 25, 25)
+        if retail and retail.get("rank"):   # 실판매 순위 = 가장 강한 성과신호
+            opp += max(0, 45 - retail["rank"])   # 아마존 카테고리 1위 근접일수록 큰 가점
         stories.append({
             "brand": brand, "country": cc,
             "country_name": _CC_NAME.get(cc, cc),
@@ -1071,7 +1126,11 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
             "n_moves": n_arts or 0,
             "perf": {"search_spike": round(spike, 1) if spike else None,
                      "export_yoy": round(exp, 0) if exp is not None else None,
-                     "momentum": round(mom, 2) if mom else None},
+                     "momentum": round(mom, 2) if mom else None,
+                     "retail": ({"category": retail["category"], "rank": retail["rank"],
+                                 "rating": retail["rating"], "reviews": retail["review_count"],
+                                 "product": retail["product"], "url": retail["url"]}
+                                if retail and retail.get("rank") else None)},
             "opp_score": round(opp, 1),
         })
     stories.sort(key=lambda s: s["opp_score"], reverse=True)

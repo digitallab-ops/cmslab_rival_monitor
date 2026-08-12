@@ -134,6 +134,8 @@ def _signal_digest(session, weekly: bool = True) -> str:
             mv = s.get("move", {})
             perf = s.get("perf", {})
             pf = []
+            rt = perf.get("retail")
+            if rt and rt.get("rank"): pf.append(f"아마존{rt.get('category','')}#{rt['rank']}")
             if perf.get("search_spike"): pf.append(f"검색{perf['search_spike']}배")
             if perf.get("export_yoy") is not None: pf.append(f"수출{perf['export_yoy']:+.0f}%")
             if perf.get("momentum"): pf.append(f"모멘텀{perf['momentum']}")
