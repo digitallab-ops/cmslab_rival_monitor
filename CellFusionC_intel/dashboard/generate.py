@@ -2396,6 +2396,7 @@ a:hover { color: var(--gold); }
 .os-c-exp { color:var(--teal); background:rgba(70,214,195,.10); }
 .os-c-mom { color:var(--violet); background:rgba(139,120,220,.12); }
 .os-c-retail { color:var(--coral); background:rgba(255,106,86,.12); font-weight:700; }
+.os-c-core { color:var(--champ2); background:rgba(216,184,120,.16); border:1px solid rgba(216,184,120,.4); font-weight:800; }
 .os-dim { color:var(--lo); font-style:italic; }
 .os-action { display:flex; gap:8px; align-items:baseline; margin-top:9px; padding-top:9px;
   border-top:1px dashed var(--border); }
@@ -3283,8 +3284,16 @@ def _render_opportunity_stories(stories: list) -> str:
             rev = rt.get("reviews")
             rev_txt = (f"·{rev//1000}K리뷰" if rev and rev >= 1000 else (f"·{rev}리뷰" if rev else ""))
             rate_txt = f"⭐{rt['rating']}" if rt.get("rating") else ""
-            chips.append(f'<span class="os-chip os-c-retail" title="{_esc(rt.get("product",""))}">'
-                         f'🛒 아마존 {_esc(rt.get("category",""))} #{rt["rank"]} {rate_txt}{rev_txt}</span>')
+            core = rt.get("core")
+            # 핵심영역(선·BB·베이스) 순위 = 우리 텃밭 → 강조 칩 우선
+            if core and core.get("rank"):
+                chips.append(f'<span class="os-chip os-c-core" title="셀퓨전씨 핵심영역">'
+                             f'🎯 핵심 {_esc(core.get("category",""))} #{core["rank"]}'
+                             f'{" ⭐"+str(core["rating"]) if core.get("rating") else ""}</span>')
+            # 전체 최고순위(핵심영역과 다를 때만 중복 방지)
+            if not (core and core.get("category") == rt.get("category") and core.get("rank") == rt.get("rank")):
+                chips.append(f'<span class="os-chip os-c-retail" title="{_esc(rt.get("product",""))}">'
+                             f'🛒 아마존 {_esc(rt.get("category",""))} #{rt["rank"]} {rate_txt}{rev_txt}</span>')
         if perf.get("search_spike"): chips.append(f'<span class="os-chip os-c-dem">🔍 검색 {perf["search_spike"]}배</span>')
         if perf.get("export_yoy") is not None: chips.append(f'<span class="os-chip os-c-exp">📦 수출 {perf["export_yoy"]:+.0f}%</span>')
         if perf.get("momentum"): chips.append(f'<span class="os-chip os-c-mom">📈 모멘텀 {perf["momentum"]}</span>')

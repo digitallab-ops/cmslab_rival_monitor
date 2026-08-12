@@ -952,30 +952,36 @@ def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> l
 
 
 def get_retail_performance(session: Session, days: int = 21) -> dict:
-    """브랜드별 아마존 최고 순위 성과 — 서사의 '잘 나간다' 실측.
+    """브랜드별 아마존 성과 — 서사의 '잘 나간다' 실측. 핵심영역(선·BB·베이스) 특화 강조.
 
-    반환: {brand: {country, category, rank, product, rating, review_count, url}}.
-    최근 capture 중 순위 가장 높은(낮은 rank) 제품 1개. retail_rankings 없으면 {}.
+    반환: {brand: {overall best fields.., is_core, core:{category,rank,rating,reviews,product}|None}}.
+    overall=전 카테고리 최고순위, core=셀퓨전씨 핵심영역 내 최고순위(있으면). 없으면 {}.
     """
     cutoff = _cutoff_iso(days)
     try:
         rows = session.execute(text(f"""
-            WITH recent AS (
-                SELECT brand, country, category, product_name, rank, rating,
-                       review_count, product_url,
-                       ROW_NUMBER() OVER (PARTITION BY brand
-                           ORDER BY rank ASC NULLS LAST, review_count DESC NULLS LAST) rn
-                FROM {DB_SCHEMA}.retail_rankings
-                WHERE capture_date >= :cutoff AND brand IS NOT NULL AND rank IS NOT NULL
-            )
-            SELECT brand, country, category, product_name, rank, rating, review_count, product_url
-            FROM recent WHERE rn = 1
+            SELECT brand, country, category, product_name, rank, rating,
+                   review_count, product_url, COALESCE(is_core, FALSE)
+            FROM {DB_SCHEMA}.retail_rankings
+            WHERE brand IS NOT NULL AND rank IS NOT NULL
+              AND capture_date = (SELECT MAX(capture_date) FROM {DB_SCHEMA}.retail_rankings
+                                  WHERE capture_date >= :cutoff)
         """), {"cutoff": cutoff}).fetchall()
     except Exception:
         return {}
-    return {r[0]: {"country": r[1], "category": r[2], "product": r[3], "rank": r[4],
-                   "rating": float(r[5]) if r[5] is not None else None,
-                   "review_count": r[6], "url": r[7] or ""} for r in rows}
+    by_brand: dict = {}
+    for r in rows:
+        item = {"country": r[1], "category": r[2], "product": r[3], "rank": r[4],
+                "rating": float(r[5]) if r[5] is not None else None,
+                "review_count": r[6], "url": r[7] or "", "is_core": bool(r[8])}
+        by_brand.setdefault(r[0], []).append(item)
+    out: dict = {}
+    for brand, items in by_brand.items():
+        best = min(items, key=lambda x: x["rank"])
+        cores = [x for x in items if x["is_core"]]
+        core = min(cores, key=lambda x: x["rank"]) if cores else None
+        out[brand] = {**best, "core": core}
+    return out
 
 
 def get_retail_landscape(session: Session, days: int = 21, limit: int = 20) -> list[dict]:
@@ -1114,6 +1120,9 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
         if mom and mom >= 1.3:      opp += min((mom - 1) * 25, 25)
         if retail and retail.get("rank"):   # 실판매 순위 = 가장 강한 성과신호
             opp += max(0, 45 - retail["rank"])   # 아마존 카테고리 1위 근접일수록 큰 가점
+            _rc = retail.get("core")
+            if _rc and _rc.get("rank"):          # 핵심영역(선·BB) 순위 = 우리 텃밭 → 추가 가중
+                opp += max(0, 30 - _rc["rank"]) * 1.4
         stories.append({
             "brand": brand, "country": cc,
             "country_name": _CC_NAME.get(cc, cc),
@@ -1129,7 +1138,13 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
                      "momentum": round(mom, 2) if mom else None,
                      "retail": ({"category": retail["category"], "rank": retail["rank"],
                                  "rating": retail["rating"], "reviews": retail["review_count"],
-                                 "product": retail["product"], "url": retail["url"]}
+                                 "product": retail["product"], "url": retail["url"],
+                                 "is_core": retail.get("is_core", False),
+                                 "core": ({"category": retail["core"]["category"],
+                                           "rank": retail["core"]["rank"],
+                                           "rating": retail["core"]["rating"],
+                                           "reviews": retail["core"]["review_count"]}
+                                          if retail.get("core") else None)}
                                 if retail and retail.get("rank") else None)},
             "opp_score": round(opp, 1),
         })

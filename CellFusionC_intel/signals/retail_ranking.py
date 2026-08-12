@@ -30,17 +30,26 @@ _UA = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# (아마존 노드ID, 국가, 카테고리 라벨) — 나쁜 노드는 런타임에 스킵.
-# 셀퓨전씨 실제 경쟁 카테고리 우선: 선케어 + 베이스/BB(미국 주력). 스킨케어는 광역 맥락.
+# 셀퓨전씨 핵심영역(특화): 선케어 + 베이스/BB(미국 주력). is_core=True로 강조·가중.
+CORE_CATEGORIES = {"선케어", "BB크림", "CC크림", "파운데이션", "틴티드모이스처", "DD크림"}
+
+# (아마존 노드ID, 국가, 카테고리 라벨) — 전 카테고리 커버(넓게) + 핵심영역 강조.
+# 나쁜 노드는 런타임에 스킵. 아마존 실노드ID 확인 완료.
 AMAZON_NODES = [
-    ("11062591",   "US", "선케어"),        # ★ 셀퓨전씨 핵심 도메인
-    ("7792268011", "US", "BB크림"),        # ★ 미국 주력
+    # ── 핵심영역(선·베이스/BB) — 미국 주력 ──
+    ("11062591",   "US", "선케어"),
+    ("7792268011", "US", "BB크림"),
     ("7792269011", "US", "CC크림"),
     ("11058871",   "US", "파운데이션"),
     ("7792276011", "US", "틴티드모이스처"),
     ("7792270011", "US", "DD크림"),
-    ("11060451",   "US", "스킨케어"),      # 광역 K뷰티 맥락
-    ("11060711",   "US", "모이스처라이저"),
+    # ── 광역 K뷰티 스킨케어 맥락 ──
+    ("11060451",   "US", "스킨케어"),
+    ("11061301",   "US", "크림·모이스처"),
+    ("11060901",   "US", "클렌저"),
+    ("11061931",   "US", "토너"),
+    ("11062031",   "US", "트리트먼트·마스크"),
+    ("11061091",   "US", "스크럽"),
     ("11061941",   "US", "아이케어"),
 ]
 _BS_URL = "https://www.amazon.com/gp/bestsellers/beauty/{node}?pg={pg}"
@@ -147,6 +156,7 @@ def _fetch_node(node: str, country: str, category: str, pages: int = 2) -> list[
             out.append({
                 "retailer": "amazon", "country": country, "category": category,
                 "brand": brand, "is_monitored": brand in _MONITORED,
+                "is_core": category in CORE_CATEGORIES,
                 "product_name": title[:300], "rank": rank,
                 "rating": rating, "review_count": reviews, "product_url": href,
             })
@@ -167,6 +177,7 @@ def _ensure_table(session) -> None:
             category VARCHAR(40),
             brand VARCHAR(100),
             is_monitored BOOLEAN DEFAULT FALSE,
+            is_core BOOLEAN DEFAULT FALSE,
             product_name VARCHAR(300),
             rank INTEGER,
             rating REAL,
@@ -178,6 +189,9 @@ def _ensure_table(session) -> None:
         )
     """))
     session.execute(text(
+        f"ALTER TABLE {DB_SCHEMA}.retail_rankings "
+        f"ADD COLUMN IF NOT EXISTS is_core BOOLEAN DEFAULT FALSE"))
+    session.execute(text(
         f"CREATE INDEX IF NOT EXISTS ix_retail_brand_date "
         f"ON {DB_SCHEMA}.retail_rankings (brand, capture_date DESC)"))
     session.commit()
@@ -186,12 +200,12 @@ def _ensure_table(session) -> None:
 def _save(session, row: dict, cap_date: date) -> None:
     session.execute(text(f"""
         INSERT INTO {DB_SCHEMA}.retail_rankings
-            (retailer, country, category, brand, is_monitored, product_name,
+            (retailer, country, category, brand, is_monitored, is_core, product_name,
              rank, rating, review_count, product_url, capture_date)
-        VALUES (:retailer, :country, :category, :brand, :is_monitored, :product_name,
+        VALUES (:retailer, :country, :category, :brand, :is_monitored, :is_core, :product_name,
                 :rank, :rating, :review_count, :product_url, :cap)
         ON CONFLICT (retailer, country, category, product_name, capture_date) DO UPDATE SET
-            rank = EXCLUDED.rank, rating = EXCLUDED.rating,
+            rank = EXCLUDED.rank, rating = EXCLUDED.rating, is_core = EXCLUDED.is_core,
             review_count = EXCLUDED.review_count, captured_at = NOW()
     """), {**row, "cap": cap_date})
 

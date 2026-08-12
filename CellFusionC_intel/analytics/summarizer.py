@@ -294,6 +294,9 @@ def generate_opportunity_actions(stories: list) -> dict:
         pf = []
         rt = perf.get("retail")
         if rt and rt.get("rank"):
+            _core = rt.get("core")
+            if _core and _core.get("rank"):
+                pf.append(f"★핵심영역 아마존 {_core.get('category','')} #{_core['rank']}")
             pf.append(f"아마존 {rt.get('category','')} #{rt['rank']}"
                       + (f"(⭐{rt['rating']}·{rt['reviews']}리뷰)" if rt.get("rating") else ""))
         if perf.get("search_spike"): pf.append(f"검색{perf['search_spike']}배")
