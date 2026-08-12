@@ -2398,6 +2398,11 @@ a:hover { color: var(--gold); }
 .os-c-mom { color:var(--violet); background:rgba(139,120,220,.12); }
 .os-c-retail { color:var(--coral); background:rgba(255,106,86,.12); font-weight:700; }
 .os-c-core { color:var(--champ2); background:rgba(216,184,120,.16); border:1px solid rgba(216,184,120,.4); font-weight:800; }
+.os-read { margin-top:9px; padding:6px 9px; border-radius:6px; font-size:12px; font-weight:700; cursor:help; }
+.os-read-hot { color:var(--coral); background:rgba(255,106,86,.10); border-left:3px solid var(--coral); }
+.os-read-opp { color:var(--champ2); background:rgba(216,184,120,.10); border-left:3px solid var(--champ); }
+.os-read-stealth { color:var(--teal); background:rgba(70,214,195,.10); border-left:3px solid var(--teal); }
+.os-read-grow { color:var(--mid); background:rgba(255,255,255,.03); border-left:3px solid var(--border); }
 .os-dim { color:var(--lo); font-style:italic; }
 .os-action { display:flex; gap:8px; align-items:baseline; margin-top:9px; padding-top:9px;
   border-top:1px dashed var(--border); }
@@ -3312,6 +3317,11 @@ def _render_opportunity_stories(stories: list) -> str:
                     f'<span class="os-v os-perf">{"".join(chips)}</span></div>') if chips else \
                    ('<div class="os-row"><span class="os-k">성과</span>'
                     '<span class="os-v os-perf os-dim">성과 신호 축적 중</span></div>')
+        sr = s.get("signal_read") or {}
+        read_row = ""
+        if sr.get("label"):
+            read_row = (f'<div class="os-read os-read-{sr.get("tone","grow")}" title="{_esc(sr.get("why",""))}">'
+                        f'{_esc(sr["label"])}</div>')
         action = _esc(s.get("action") or "")
         action_row = (f'<div class="os-action"><span class="os-ac-k">👉 우리</span>'
                       f'<span class="os-ac-v">{action}</span></div>') if action else ""
@@ -3322,7 +3332,7 @@ def _render_opportunity_stories(stories: list) -> str:
             f'<span class="os-score" title="기회 스코어">{int(s.get("opp_score",0))}</span></div>'
             f'<div class="os-row"><span class="os-k">무브</span>'
             f'<span class="os-v"><span class="os-act">{_esc(act)}</span> {title} {src_link}</span></div>'
-            f'{prod_row}{perf_row}{action_row}'
+            f'{prod_row}{perf_row}{read_row}{action_row}'
             f'</div>'
         )
     return f'<div class="ostory-grid">{"".join(cards)}</div>'

@@ -1013,6 +1013,28 @@ def get_retail_landscape(session: Session, days: int = 21, limit: int = 20) -> l
              "review_count": r[6], "url": r[7] or ""} for r in rows]
 
 
+def _signal_read(sc, n_arts, spike, mom, retail) -> dict:
+    """리테일↔뉴스↔검색 교차 판독 — 신호 연결에서 나오는 한 줄 인사이트.
+
+    반환: {label, tone, why}. tone: hot(3박자)/opp(PR우세=기회)/stealth(숨은강자)/grow(성장중).
+    """
+    strong_news = (sc or 0) >= 60 or (n_arts or 0) >= 4
+    hot_demand = (spike and spike >= 1.5) or (mom and mom >= 1.5)
+    has_retail = bool(retail and retail.get("rank") and retail["rank"] <= 50)
+    buzz = strong_news or hot_demand
+    if buzz and has_retail:
+        return {"tone": "hot", "label": "🔥 실판매까지 검증된 급상승",
+                "why": "뉴스·검색·리테일 3박자 — 즉시 대응"}
+    if buzz and not has_retail:
+        return {"tone": "opp", "label": "📢 화제성 대비 실판매 약함(PR 우세)",
+                "why": "발표·검색은 뜨나 아마존 순위권 밖 — 우리가 실판매로 추월할 기회"}
+    if has_retail and not buzz:
+        return {"tone": "stealth", "label": "🥷 조용한 실판매 강자",
+                "why": "보도 잠잠한데 리테일 상위 — 과소평가, 경계 필요"}
+    return {"tone": "grow", "label": "🌱 성장 초기 신호",
+            "why": "단일 축 신호 — 추이 관찰"}
+
+
 def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) -> list[dict]:
     """핵심 서사 체인 합성 — (브랜드×국가)별 '무브→제품/성분→성과프록시'를 한 카드로.
 
@@ -1143,6 +1165,7 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
             "ingredients": ing_map.get((brand, cc), []),
             "has_negative": bool(has_neg),
             "n_moves": n_arts or 0,
+            "signal_read": _signal_read(sc, n_arts, spike, mom, retail),
             "perf": {"search_spike": round(spike, 1) if spike else None,
                      "export_yoy": round(exp, 0) if exp is not None else None,
                      "momentum": round(mom, 2) if mom else None,

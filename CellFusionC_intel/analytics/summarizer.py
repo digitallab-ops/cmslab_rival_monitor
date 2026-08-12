@@ -304,6 +304,7 @@ def generate_opportunity_actions(stories: list) -> dict:
         if perf.get("momentum"): pf.append(f"모멘텀{perf['momentum']}")
         prods = ", ".join(s.get("products", [])[:2])
         ings = ", ".join(s.get("ingredients", [])[:4])
+        sr = s.get("signal_read") or {}
         lines.append(
             f"[{i}] {s.get('country_name','')} · {s.get('brand','')} · "
             f"{_ACT_LABEL.get(mv.get('activity_type',''), mv.get('activity_type',''))} — "
@@ -311,6 +312,7 @@ def generate_opportunity_actions(stories: list) -> dict:
             + (f" | 제품: {prods}" if prods else "")
             + (f" | 성분: {ings}" if ings else "")
             + (f" | 성과: {' '.join(pf)}" if pf else "")
+            + (f" | 교차판독: {sr.get('label','')}({sr.get('why','')})" if sr.get("label") else "")
             + (" | ⚠️악재" if s.get("has_negative") else "")
         )
     stories_block = "\n".join(lines)
@@ -326,6 +328,8 @@ def generate_opportunity_actions(stories: list) -> dict:
 - ⚠️ 이들은 **경쟁사**다. "○○와 협업"·"○○의 유통망 활용" 같이 경쟁사와 손잡는 액션은 절대 금지.
   우리가 **독자적으로** 맞대응·선점·대체하는 액션만. (그 브랜드가 연 시장·채널·성분 트렌드를 우리가 뒤따라 공략)
 - 경쟁사 악재면 반사 기회(대체·점유율 방어)로 뒤집어라.
+- **교차판독을 반드시 활용**: 'PR우세'(화제성 대비 실판매 약함)면 우리가 실판매로 추월하는 액션,
+  '실판매 검증 급상승'이면 즉시 방어/대체, '숨은 실판매 강자'면 선제 견제.
 - 막연한 '모니터링'·'검토' 금지. 실행 동사로.
 반드시 JSON만: {{"actions": [{{"i": 0, "action": "..."}}, ...]}} — 모든 인덱스 포함."""
     try:
