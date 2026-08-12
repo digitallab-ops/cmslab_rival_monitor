@@ -48,6 +48,13 @@ AMAZON_SITES = {
     "DE": {"domain": "amazon.de", "lang": "de-DE,de;q=0.9", "nodes": [
         ("122878031", "스킨케어"), ("122880031", "메이크업"), ("122876031", "스킨케어세트"),
     ]},
+    # 루트 뷰티 베스트셀러(node="")로 국가 브레드스 확보(세부노드 없이). 프로브로 접근성 확인.
+    "GB": {"domain": "amazon.co.uk", "lang": "en-GB,en;q=0.9", "nodes": [("", "뷰티")]},
+    "FR": {"domain": "amazon.fr",    "lang": "fr-FR,fr;q=0.9", "nodes": [("", "뷰티")]},
+    "IT": {"domain": "amazon.it",    "lang": "it-IT,it;q=0.9", "nodes": [("", "뷰티")]},
+    "ES": {"domain": "amazon.es",    "lang": "es-ES,es;q=0.9", "nodes": [("", "뷰티")]},
+    "AU": {"domain": "amazon.com.au","lang": "en-AU,en;q=0.9", "nodes": [("", "뷰티")]},
+    "AE": {"domain": "amazon.ae",    "lang": "en-AE,en;q=0.9", "nodes": [("", "뷰티")]},
 }
 _BS_URL = "https://www.{domain}/gp/bestsellers/beauty/{node}?pg={pg}"
 

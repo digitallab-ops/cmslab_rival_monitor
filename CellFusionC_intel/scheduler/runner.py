@@ -464,12 +464,12 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # 주2회(월·목) 06:20 KST — 아마존 리테일 랭킹(실판매 성과). 검색트렌드 전.
+    # 매일 06:20 KST — 아마존 리테일 랭킹(실판매 성과·시계열). 랭킹 매일 변동 + 추세 축적.
     scheduler.add_job(
         job_retail_ranking,
-        trigger=CronTrigger(day_of_week="mon,thu", hour=6, minute=20),
+        trigger=CronTrigger(hour=6, minute=20),
         id="retail_ranking",
-        name="[주2회] 아마존 리테일 랭킹 수집",
+        name="[매일] 아마존 리테일 랭킹 수집(9개국)",
         max_instances=1,
         coalesce=True,
     )
