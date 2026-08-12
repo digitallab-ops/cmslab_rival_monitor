@@ -3300,10 +3300,11 @@ def _render_opportunity_stories(stories: list) -> str:
                 chips.append(f'<span class="os-chip os-c-core" title="셀퓨전씨 핵심영역">'
                              f'🎯 핵심 {_esc(core.get("category",""))} #{core["rank"]}'
                              f'{" ⭐"+str(core["rating"]) if core.get("rating") else ""}</span>')
-            # 전체 최고순위(핵심영역과 다를 때만 중복 방지)
+            # 전체 최고순위(핵심영역과 다를 때만 중복 방지). 다국가면 국기 표기.
             if not (core and core.get("category") == rt.get("category") and core.get("rank") == rt.get("rank")):
+                rflag = COUNTRY_FLAGS.get(rt.get("country", ""), "")
                 chips.append(f'<span class="os-chip os-c-retail" title="{_esc(rt.get("product",""))}">'
-                             f'🛒 아마존 {_esc(rt.get("category",""))} #{rt["rank"]} {rate_txt}{rev_txt}</span>')
+                             f'🛒 {rflag}아마존 {_esc(rt.get("category",""))} #{rt["rank"]} {rate_txt}{rev_txt}</span>')
         if perf.get("search_spike"): chips.append(f'<span class="os-chip os-c-dem">🔍 검색 {perf["search_spike"]}배</span>')
         if perf.get("export_yoy") is not None: chips.append(f'<span class="os-chip os-c-exp">📦 수출 {perf["export_yoy"]:+.0f}%</span>')
         if perf.get("momentum"): chips.append(f'<span class="os-chip os-c-mom">📈 모멘텀 {perf["momentum"]}</span>')

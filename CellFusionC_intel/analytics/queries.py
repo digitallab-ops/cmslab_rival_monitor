@@ -980,7 +980,12 @@ def get_retail_performance(session: Session, days: int = 21) -> dict:
         best = min(items, key=lambda x: x["rank"])
         cores = [x for x in items if x["is_core"]]
         core = min(cores, key=lambda x: x["rank"]) if cores else None
-        out[brand] = {**best, "core": core}
+        by_cc: dict = {}
+        for it in items:
+            cc = it["country"]
+            if cc not in by_cc or it["rank"] < by_cc[cc]["rank"]:
+                by_cc[cc] = it
+        out[brand] = {**best, "core": core, "by_country": by_cc}
     return out
 
 
@@ -1111,7 +1116,12 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
         spike = spike_by_brand.get(brand)
         exp = export_by_cc.get(cc)
         mom = mom_by_brand.get(brand)
-        retail = retail_by_brand.get(brand)
+        _rb = retail_by_brand.get(brand)
+        # 스토리 국가에 리테일 데이터 있으면 그 시장 순위 우선, 없으면 전체 최고(프록시)
+        retail = None
+        if _rb:
+            retail = dict((_rb.get("by_country") or {}).get(cc) or _rb)
+            retail["core"] = _rb.get("core")   # 핵심영역 신호는 브랜드 단위 유지
         # 기회 스코어: 무브 강도(대표 스코어) + 활동 폭(캡) + 수요(검색) + 성과(수출) + 모멘텀 + 리테일 실순위
         # cell_score 합계는 KR 대량기사에 쏠려서 대표스코어+활동폭으로 재균형
         opp = (sc or 0) * 1.0 + min(n_arts or 0, 6) * 6
@@ -1137,6 +1147,7 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
                      "export_yoy": round(exp, 0) if exp is not None else None,
                      "momentum": round(mom, 2) if mom else None,
                      "retail": ({"category": retail["category"], "rank": retail["rank"],
+                                 "country": retail.get("country", ""),
                                  "rating": retail["rating"], "reviews": retail["review_count"],
                                  "product": retail["product"], "url": retail["url"],
                                  "is_core": retail.get("is_core", False),

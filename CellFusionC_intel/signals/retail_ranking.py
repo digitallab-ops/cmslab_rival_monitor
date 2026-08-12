@@ -24,35 +24,32 @@ from storage.models import get_session
 
 logger = logging.getLogger(__name__)
 
-_UA = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/125.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+_UA_STR = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/125.0 Safari/537.36")
 
 # 셀퓨전씨 핵심영역(특화): 선케어 + 베이스/BB(미국 주력). is_core=True로 강조·가중.
 CORE_CATEGORIES = {"선케어", "BB크림", "CC크림", "파운데이션", "틴티드모이스처", "DD크림"}
 
-# (아마존 노드ID, 국가, 카테고리 라벨) — 전 카테고리 커버(넓게) + 핵심영역 강조.
-# 나쁜 노드는 런타임에 스킵. 아마존 실노드ID 확인 완료.
-AMAZON_NODES = [
-    # ── 핵심영역(선·베이스/BB) — 미국 주력 ──
-    ("11062591",   "US", "선케어"),
-    ("7792268011", "US", "BB크림"),
-    ("7792269011", "US", "CC크림"),
-    ("11058871",   "US", "파운데이션"),
-    ("7792276011", "US", "틴티드모이스처"),
-    ("7792270011", "US", "DD크림"),
-    # ── 광역 K뷰티 스킨케어 맥락 ──
-    ("11060451",   "US", "스킨케어"),
-    ("11061301",   "US", "크림·모이스처"),
-    ("11060901",   "US", "클렌저"),
-    ("11061931",   "US", "토너"),
-    ("11062031",   "US", "트리트먼트·마스크"),
-    ("11061091",   "US", "스크럽"),
-    ("11061941",   "US", "아이케어"),
-]
-_BS_URL = "https://www.amazon.com/gp/bestsellers/beauty/{node}?pg={pg}"
+# 다국가 아마존 사이트. US는 세부 카테고리(핵심영역 특화), JP·DE는 광역(스킨케어·메이크업).
+# 나쁜 노드는 런타임에 스킵. 아마존 실노드ID 확인 완료(JP·DE 구조 US와 동일).
+AMAZON_SITES = {
+    "US": {"domain": "amazon.com", "lang": "en-US,en;q=0.9", "nodes": [
+        # 핵심영역(선·베이스/BB)
+        ("11062591", "선케어"), ("7792268011", "BB크림"), ("7792269011", "CC크림"),
+        ("11058871", "파운데이션"), ("7792276011", "틴티드모이스처"), ("7792270011", "DD크림"),
+        # 광역 스킨케어
+        ("11060451", "스킨케어"), ("11061301", "크림·모이스처"), ("11060901", "클렌저"),
+        ("11061931", "토너"), ("11062031", "트리트먼트·마스크"), ("11061091", "스크럽"),
+        ("11061941", "아이케어"),
+    ]},
+    "JP": {"domain": "amazon.co.jp", "lang": "ja-JP,ja;q=0.9", "nodes": [
+        ("5267100051", "스킨케어"), ("170240011", "메이크업·페이스"),
+    ]},
+    "DE": {"domain": "amazon.de", "lang": "de-DE,de;q=0.9", "nodes": [
+        ("122878031", "스킨케어"), ("122880031", "메이크업"), ("122876031", "스킨케어세트"),
+    ]},
+}
+_BS_URL = "https://www.{domain}/gp/bestsellers/beauty/{node}?pg={pg}"
 
 # 비모니터링이지만 아마존 상위 K뷰티 메이저(경쟁 지형 파악용 — 브랜드 추가 후보)
 KBEAUTY_MAJORS = [
@@ -116,13 +113,16 @@ def _parse_rating(txt: str) -> "float | None":
         return None
 
 
-def _fetch_node(node: str, country: str, category: str, pages: int = 2) -> list[dict]:
+def _fetch_node(node: str, country: str, category: str,
+                domain: str = "amazon.com", lang: str = "en-US,en;q=0.9",
+                pages: int = 2) -> list[dict]:
     """한 카테고리 베스트셀러에서 매칭된 K뷰티 브랜드 행 추출."""
+    headers = {"User-Agent": _UA_STR, "Accept-Language": lang}
     out: list[dict] = []
     for pg in range(1, pages + 1):
-        url = _BS_URL.format(node=node, pg=pg)
+        url = _BS_URL.format(domain=domain, node=node, pg=pg)
         try:
-            r = requests.get(url, headers=_UA, timeout=20)
+            r = requests.get(url, headers=headers, timeout=20)
             if r.status_code != 200:
                 logger.info("리테일 노드 %s(%s) status=%s → 스킵", node, category, r.status_code)
                 break
@@ -152,7 +152,7 @@ def _fetch_node(node: str, country: str, category: str, pages: int = 2) -> list[
             rev_el = fo.select_one("span.a-size-small, a.a-size-small")
             reviews = _parse_reviews(rev_el.get_text(strip=True)) if rev_el else None
             link = fo.select_one("a.a-link-normal[href]")
-            href = ("https://www.amazon.com" + link["href"].split("?")[0]) if link and link.get("href", "").startswith("/") else ""
+            href = (f"https://www.{domain}" + link["href"].split("?")[0]) if link and link.get("href", "").startswith("/") else ""
             out.append({
                 "retailer": "amazon", "country": country, "category": category,
                 "brand": brand, "is_monitored": brand in _MONITORED,
@@ -218,20 +218,22 @@ def run() -> dict:
     session = get_session()
     try:
         _ensure_table(session)
-        for node, country, category in AMAZON_NODES:
-            try:
-                rows = _fetch_node(node, country, category)
-            except Exception as e:
-                logger.warning("리테일 %s 노드 오류: %s", category, e)
-                continue
-            for row in rows:
-                _save(session, row, cap_date)
-                captured += 1
-                if row["is_monitored"]:
-                    monitored += 1
-                by_brand.setdefault(row["brand"], []).append((category, row["rank"]))
-            session.commit()
-            logger.info("  리테일 %-12s → 매칭 %d건", category, len(rows))
+        for country, site in AMAZON_SITES.items():
+            for node, category in site["nodes"]:
+                try:
+                    rows = _fetch_node(node, country, category,
+                                       domain=site["domain"], lang=site["lang"])
+                except Exception as e:
+                    logger.warning("리테일 %s/%s 노드 오류: %s", country, category, e)
+                    continue
+                for row in rows:
+                    _save(session, row, cap_date)
+                    captured += 1
+                    if row["is_monitored"]:
+                        monitored += 1
+                    by_brand.setdefault(row["brand"], []).append((country, category, row["rank"]))
+                session.commit()
+                logger.info("  리테일 %s/%-12s → 매칭 %d건", country, category, len(rows))
     finally:
         session.close()
     logger.info("리테일 랭킹 수집: 저장 %d건(모니터링 %d) · 브랜드 %d",
