@@ -985,7 +985,7 @@ def get_retail_performance(session: Session, days: int = 21) -> dict:
             cc = it["country"]
             if cc not in by_cc or it["rank"] < by_cc[cc]["rank"]:
                 by_cc[cc] = it
-        out[brand] = {**best, "core": core, "by_country": by_cc}
+        out[brand] = {**best, "core": core, "by_country": by_cc, "by_category": items}
     return out
 
 
@@ -1011,6 +1011,40 @@ def get_retail_landscape(session: Session, days: int = 21, limit: int = 20) -> l
     return [{"category": r[0], "brand": r[1], "is_monitored": bool(r[2]), "product": r[3],
              "rank": r[4], "rating": float(r[5]) if r[5] is not None else None,
              "review_count": r[6], "url": r[7] or ""} for r in rows]
+
+
+_OUR_AREA = {"선케어", "BB크림", "CC크림", "파운데이션", "틴티드모이스처", "DD크림"}
+_BROAD_CATS = {"뷰티"}   # 광역 노드(전문 카테고리 아님 — 순위 해석 주의)
+_TREND_ING = {"PDRN", "엑소좀", "콜라겐", "레티놀", "센텔라", "나이아신아마이드",
+              "시카", "펩타이드", "히알루론산"}
+
+
+def _why_drivers(move: dict, perf: dict, ingredients: list) -> list:
+    """순위/화제가 '왜 높은지'를 다른 신호로 설명 — 퍼즐 시너지. 최대 3개."""
+    d = []
+    act = (move or {}).get("activity_type", "")
+    rt = (perf or {}).get("retail") or {}
+    _act_label = {"신제품_런칭": "🆕 신제품 출시", "인플루언서_협업": "📱 인플루언서 협업",
+                  "유통_채널": "🏪 신규 유통 입점", "신시장_진출": "🌏 신시장 진출",
+                  "가격_프로모션": "🏷 프로모션·가격", "투자_BD": "💰 투자·BD"}
+    if act in _act_label:
+        d.append(_act_label[act])
+    if perf.get("search_spike"):
+        d.append(f"🔍 검색 {perf['search_spike']}배↑")
+    for i in (ingredients or []):
+        if any(t in i for t in _TREND_ING):
+            d.append(f"🧪 트렌드성분 {i}")
+            break
+    rev, rate = rt.get("reviews"), rt.get("rating")
+    if rev and rev >= 10000 and rate and rate >= 4.5:
+        d.append("⭐ 리뷰 축적 스테디셀러")
+    elif rev is not None and rev < 1500 and rt.get("rank") and rt["rank"] <= 20:
+        d.append("🚀 신상 급부상")
+    if perf.get("export_yoy") is not None and perf["export_yoy"] >= 15:
+        d.append(f"📦 수출 +{perf['export_yoy']:.0f}%")
+    if perf.get("momentum") and perf["momentum"] >= 2:
+        d.append("📈 모멘텀 급등")
+    return d[:3] or ["관찰 초기 신호"]
 
 
 def _signal_read(sc, n_arts, spike, mom, retail) -> dict:
@@ -1155,7 +1189,31 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
             _rc = retail.get("core")
             if _rc and _rc.get("rank"):          # 핵심영역(선·BB) 순위 = 우리 텃밭 → 추가 가중
                 opp += max(0, 30 - _rc["rank"]) * 1.4
-        stories.append({
+        # 시장 포지션: 우리영역 vs 확장후보 (브랜드 전 카테고리 순위)
+        areas = {"our": [], "expansion": []}
+        for it in ((_rb or {}).get("by_category") or []):
+            tgt = "our" if it["category"] in _OUR_AREA else "expansion"
+            areas[tgt].append({"country": it["country"], "category": it["category"],
+                               "rank": it["rank"], "is_broad": it["category"] in _BROAD_CATS})
+        areas["our"].sort(key=lambda z: z["rank"])
+        areas["expansion"].sort(key=lambda z: z["rank"])
+
+        perf = {"search_spike": round(spike, 1) if spike else None,
+                "export_yoy": round(exp, 0) if exp is not None else None,
+                "momentum": round(mom, 2) if mom else None,
+                "retail": ({"category": retail["category"], "rank": retail["rank"],
+                            "country": retail.get("country", ""),
+                            "is_broad": retail.get("category", "") in _BROAD_CATS,
+                            "rating": retail["rating"], "reviews": retail["review_count"],
+                            "product": retail["product"], "url": retail["url"],
+                            "is_core": retail.get("is_core", False),
+                            "core": ({"category": retail["core"]["category"],
+                                      "rank": retail["core"]["rank"],
+                                      "rating": retail["core"]["rating"],
+                                      "reviews": retail["core"]["review_count"]}
+                                     if retail.get("core") else None)}
+                           if retail and retail.get("rank") else None)}
+        story = {
             "brand": brand, "country": cc,
             "country_name": _CC_NAME.get(cc, cc),
             "move": {"activity_type": act, "importance": imp, "title": title or "",
@@ -1166,22 +1224,12 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
             "has_negative": bool(has_neg),
             "n_moves": n_arts or 0,
             "signal_read": _signal_read(sc, n_arts, spike, mom, retail),
-            "perf": {"search_spike": round(spike, 1) if spike else None,
-                     "export_yoy": round(exp, 0) if exp is not None else None,
-                     "momentum": round(mom, 2) if mom else None,
-                     "retail": ({"category": retail["category"], "rank": retail["rank"],
-                                 "country": retail.get("country", ""),
-                                 "rating": retail["rating"], "reviews": retail["review_count"],
-                                 "product": retail["product"], "url": retail["url"],
-                                 "is_core": retail.get("is_core", False),
-                                 "core": ({"category": retail["core"]["category"],
-                                           "rank": retail["core"]["rank"],
-                                           "rating": retail["core"]["rating"],
-                                           "reviews": retail["core"]["review_count"]}
-                                          if retail.get("core") else None)}
-                                if retail and retail.get("rank") else None)},
+            "perf": perf,
+            "retail_areas": areas,
             "opp_score": round(opp, 1),
-        })
+        }
+        story["why"] = _why_drivers(story["move"], perf, story["ingredients"])
+        stories.append(story)
     stories.sort(key=lambda s: s["opp_score"], reverse=True)
     return stories
 

@@ -2381,33 +2381,39 @@ a:hover { color: var(--gold); }
 .os-neg { font-family:var(--mono); font-size:10px; font-weight:700; color:var(--coral);
   background:rgba(255,106,86,.12); border-radius:3px; padding:1px 6px; }
 .os-score { margin-left:auto; font-family:var(--mono); font-size:16px; font-weight:800; color:var(--champ); }
-.os-row { display:flex; gap:8px; margin-bottom:6px; font-size:12.5px; line-height:1.45; }
-.os-k { flex-shrink:0; width:34px; font-family:var(--mono); font-size:10px; color:var(--lo);
-  text-transform:uppercase; letter-spacing:.05em; padding-top:2px; }
-.os-v { flex:1; color:var(--mid); }
-.os-act { color:var(--hi); font-weight:600; }
-.os-src { color:var(--champ); font-size:11px; white-space:nowrap; text-decoration:none; }
+.os-loc b { color:var(--hi); font-size:15px; font-weight:700; }
+/* BLUF 판독(결론) */
+.os-verdict { font-size:12.5px; font-weight:800; padding:6px 10px; border-radius:6px;
+  border-left:3px solid; background:rgba(255,255,255,.03); margin-bottom:11px; cursor:help; }
+.os-read-hot { color:var(--coral); border-left-color:var(--coral); background:rgba(255,106,86,.10); }
+.os-read-opp { color:var(--champ2); border-left-color:var(--champ); background:rgba(216,184,120,.10); }
+.os-read-stealth { color:var(--teal); border-left-color:var(--teal); background:rgba(70,214,195,.10); }
+.os-read-grow { color:var(--mid); border-left-color:var(--border); background:rgba(255,255,255,.03); }
+/* 섹션(제품·왜·포지션) */
+.os-sec { margin-bottom:10px; }
+.os-k { font-family:var(--mono); font-size:9.5px; letter-spacing:.07em; color:var(--lo);
+  text-transform:uppercase; margin-bottom:4px; }
+.os-prod { font-size:14.5px; font-weight:700; color:var(--hi); line-height:1.35; }
+.os-rank { font-family:var(--mono); font-size:12px; color:var(--coral); font-weight:700; margin-top:3px; }
+.os-rank b { color:var(--coral); font-size:13.5px; }
+.os-why { display:flex; flex-wrap:wrap; gap:5px; }
+.os-wchip { font-size:11.5px; font-weight:600; color:var(--champ2); background:rgba(216,184,120,.12);
+  border:1px solid rgba(216,184,120,.25); border-radius:5px; padding:2px 7px; }
+.os-ing { display:inline-block; font-family:var(--mono); font-size:10px; color:var(--mid);
+  background:rgba(255,255,255,.04); border:1px solid var(--border); border-radius:4px; padding:1px 6px; }
+.os-pos { font-family:var(--mono); font-size:11.5px; color:var(--mid); margin-bottom:3px; line-height:1.5; }
+.os-tag { font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:4px; margin-right:6px; }
+.os-tag.our { color:var(--teal); background:rgba(70,214,195,.14); }
+.os-tag.exp { color:var(--champ); background:rgba(216,184,120,.14); }
+.os-move { font-size:11.5px; color:var(--lo); line-height:1.4; margin-bottom:2px; }
+.os-move .os-act { color:var(--mid); font-weight:700; }
+.os-src { color:var(--champ); font-size:10.5px; white-space:nowrap; text-decoration:none; }
 .os-src:hover { text-decoration:underline; }
-.os-ing { display:inline-block; font-family:var(--mono); font-size:10px; color:var(--champ2);
-  background:rgba(216,184,120,.10); border:1px solid rgba(216,184,120,.22); border-radius:3px;
-  padding:0 5px; margin-left:5px; }
-.os-perf { display:flex; flex-wrap:wrap; gap:5px; }
-.os-chip { font-family:var(--mono); font-size:10.5px; border-radius:3px; padding:1px 6px; }
-.os-c-dem { color:var(--amber); background:rgba(242,169,59,.10); }
-.os-c-exp { color:var(--teal); background:rgba(70,214,195,.10); }
-.os-c-mom { color:var(--violet); background:rgba(139,120,220,.12); }
-.os-c-retail { color:var(--coral); background:rgba(255,106,86,.12); font-weight:700; }
-.os-c-core { color:var(--champ2); background:rgba(216,184,120,.16); border:1px solid rgba(216,184,120,.4); font-weight:800; }
-.os-read { margin-top:9px; padding:6px 9px; border-radius:6px; font-size:12px; font-weight:700; cursor:help; }
-.os-read-hot { color:var(--coral); background:rgba(255,106,86,.10); border-left:3px solid var(--coral); }
-.os-read-opp { color:var(--champ2); background:rgba(216,184,120,.10); border-left:3px solid var(--champ); }
-.os-read-stealth { color:var(--teal); background:rgba(70,214,195,.10); border-left:3px solid var(--teal); }
-.os-read-grow { color:var(--mid); background:rgba(255,255,255,.03); border-left:3px solid var(--border); }
-.os-dim { color:var(--lo); font-style:italic; }
-.os-action { display:flex; gap:8px; align-items:baseline; margin-top:9px; padding-top:9px;
+.os-dim { color:var(--lo); font-style:italic; font-weight:400; }
+.os-action { display:flex; gap:8px; align-items:baseline; margin-top:11px; padding-top:10px;
   border-top:1px dashed var(--border); }
-.os-ac-k { flex-shrink:0; font-size:11px; font-weight:700; color:var(--champ); }
-.os-ac-v { flex:1; font-size:13px; font-weight:600; color:var(--hi); }
+.os-ac-k { flex-shrink:0; font-size:11px; font-weight:800; color:var(--champ); white-space:nowrap; }
+.os-ac-v { flex:1; font-size:13.5px; font-weight:700; color:var(--hi); }
 
 /* ── v2: 액션 배너 (최우선 정보, 크게) ── */
 .action-banner { display:flex; gap:16px; align-items:flex-start;
@@ -3268,71 +3274,100 @@ def _urgency_li(bullet: str) -> str:
     return f"<li>{_esc(clean)}{badge}</li>"
 
 
+def _clean_product_name(name: str, brand: str) -> str:
+    """제품명 정리 — 프로모 대괄호·선행 브랜드명 트림. (헤더에 브랜드 있으니 중복 제거)"""
+    import re as _re
+    n = name or ""
+    n = _re.sub(r"\[[^\]]*\]", "", n)                    # [Hudson's Pick] 등 프로모 태그 제거
+    n = _re.sub(r"^\s*(?:" + _re.escape(brand) + r"|d'?alba|skin1004|anua|cosrx)[\s\W]*", "",
+                n, flags=_re.I)                          # 선행 브랜드명 트림
+    n = n.split(",")[0]                                  # 첫 구절만(장황한 SEO 꼬리 제거)
+    return n.strip(" -–—·")[:48] or (name or "")[:48]
+
+
+def _retail_rank_line(rt: dict) -> str:
+    """리테일 순위 한 줄 — 광역/전문 라벨 + 국기 + 별점·리뷰. 순위 해석 명확화."""
+    rflag = COUNTRY_FLAGS.get(rt.get("country", ""), "")
+    cat = _esc(rt.get("category", ""))
+    scope = "뷰티 전체" if rt.get("is_broad") else cat   # 광역 노드면 '전체' 명시
+    rate = f" · ⭐{rt['rating']}" if rt.get("rating") else ""
+    rev = rt.get("reviews")
+    rev_txt = f" · {rev // 1000}K리뷰" if rev and rev >= 1000 else (f" · {rev}리뷰" if rev else "")
+    return f'🛒 {rflag}아마존 {scope} <b>#{rt["rank"]}</b>{rate}{rev_txt}'
+
+
 def _render_opportunity_stories(stories: list) -> str:
-    """핵심 서사 카드 — 나라·브랜드·무브·제품/성분·성과 → 우리가 할 것. 브리핑 최상단."""
+    """핵심 서사 카드(재구성) — 판독→제품(순위)→왜→시장포지션(우리/확장)→액션. BLUF·5W."""
     if not stories:
         return ""
     _ACT = {"신시장_진출": "신시장 진출", "유통_채널": "유통 채널", "신제품_런칭": "신제품 런칭",
             "인플루언서_협업": "인플루언서 협업", "투자_BD": "투자·BD", "브랜드_마케팅": "브랜드 마케팅",
             "실적_공시": "실적·공시", "가격_프로모션": "가격·프로모션", "기타": "기타"}
+
+    def _pos_line(items, limit=3):
+        seen, out = set(), []
+        for z in items:                                  # 이미 rank asc 정렬 → (국가,카테고리)별 최고만
+            key = (z["country"], z["category"])
+            if key in seen:
+                continue
+            seen.add(key)
+            lbl = "뷰티 전체" if z.get("is_broad") else z["category"]
+            out.append(f'{COUNTRY_FLAGS.get(z["country"], "")}{_esc(lbl)} #{z["rank"]}')
+            if len(out) >= limit:
+                break
+        return " · ".join(out) or "—"
+
     cards = []
     for s in stories[:6]:
-        mv = s.get("move", {})
+        brand = s.get("brand", "")
         cc = s.get("country", "")
         flag = COUNTRY_FLAGS.get(cc, "🌐")
-        act = _ACT.get(mv.get("activity_type", ""), mv.get("activity_type", ""))
-        title = _esc((mv.get("title") or "")[:80])
-        url = mv.get("url") or ""
-        src_link = (f'<a class="os-src" href="{_esc(url)}" target="_blank" rel="noopener">원문 ↗</a>'
-                    if url.startswith("http") else "")
         neg = '<span class="os-neg">⚠️ 악재</span>' if s.get("has_negative") else ""
-        prods = " · ".join(_esc(p) for p in (s.get("products") or [])[:2])
-        ing_badges = "".join(f'<span class="os-ing">{_esc(i)}</span>' for i in (s.get("ingredients") or [])[:5])
-        prod_row = ""
-        if prods or ing_badges:
-            prod_row = (f'<div class="os-row"><span class="os-k">제품</span>'
-                        f'<span class="os-v">{prods}{ing_badges}</span></div>')
-        perf = s.get("perf", {})
-        chips = []
-        rt = perf.get("retail")
-        if rt and rt.get("rank"):
-            rev = rt.get("reviews")
-            rev_txt = (f"·{rev//1000}K리뷰" if rev and rev >= 1000 else (f"·{rev}리뷰" if rev else ""))
-            rate_txt = f"⭐{rt['rating']}" if rt.get("rating") else ""
-            core = rt.get("core")
-            # 핵심영역(선·BB·베이스) 순위 = 우리 텃밭 → 강조 칩 우선
-            if core and core.get("rank"):
-                chips.append(f'<span class="os-chip os-c-core" title="셀퓨전씨 핵심영역">'
-                             f'🎯 핵심 {_esc(core.get("category",""))} #{core["rank"]}'
-                             f'{" ⭐"+str(core["rating"]) if core.get("rating") else ""}</span>')
-            # 전체 최고순위(핵심영역과 다를 때만 중복 방지). 다국가면 국기 표기.
-            if not (core and core.get("category") == rt.get("category") and core.get("rank") == rt.get("rank")):
-                rflag = COUNTRY_FLAGS.get(rt.get("country", ""), "")
-                chips.append(f'<span class="os-chip os-c-retail" title="{_esc(rt.get("product",""))}">'
-                             f'🛒 {rflag}아마존 {_esc(rt.get("category",""))} #{rt["rank"]} {rate_txt}{rev_txt}</span>')
-        if perf.get("search_spike"): chips.append(f'<span class="os-chip os-c-dem">🔍 검색 {perf["search_spike"]}배</span>')
-        if perf.get("export_yoy") is not None: chips.append(f'<span class="os-chip os-c-exp">📦 수출 {perf["export_yoy"]:+.0f}%</span>')
-        if perf.get("momentum"): chips.append(f'<span class="os-chip os-c-mom">📈 모멘텀 {perf["momentum"]}</span>')
-        perf_row = (f'<div class="os-row"><span class="os-k">성과</span>'
-                    f'<span class="os-v os-perf">{"".join(chips)}</span></div>') if chips else \
-                   ('<div class="os-row"><span class="os-k">성과</span>'
-                    '<span class="os-v os-perf os-dim">성과 신호 축적 중</span></div>')
+        # BLUF: 판독(결론)
         sr = s.get("signal_read") or {}
-        read_row = ""
-        if sr.get("label"):
-            read_row = (f'<div class="os-read os-read-{sr.get("tone","grow")}" title="{_esc(sr.get("why",""))}">'
-                        f'{_esc(sr["label"])}</div>')
+        verdict = (f'<div class="os-verdict os-read-{sr.get("tone","grow")}" title="{_esc(sr.get("why",""))}">'
+                   f'{_esc(sr.get("label",""))}</div>') if sr.get("label") else ""
+        # 🏆 잘 나가는 제품 = 순위를 낸 리테일 제품
+        perf = s.get("perf", {})
+        rt = perf.get("retail")
+        mv = s.get("move", {})
+        if rt and rt.get("rank"):
+            prod = _clean_product_name(rt.get("product") or "", brand) or "(제품명 미상)"
+            prod_block = (f'<div class="os-sec"><div class="os-k">🏆 잘 나가는 제품</div>'
+                          f'<div class="os-prod">{_esc(prod)}</div>'
+                          f'<div class="os-rank">{_retail_rank_line(rt)}</div></div>')
+        else:
+            # 리테일 매칭 없음 → 뉴스 신호 기반임을 명시(오해 방지)
+            npd = (s.get("products") or [None])[0]
+            prod_block = ('<div class="os-sec"><div class="os-k">🏆 잘 나가는 제품</div>'
+                          f'<div class="os-prod os-dim">{_esc(npd) if npd else "리테일 순위 매칭 없음"}</div>'
+                          '<div class="os-rank os-dim">뉴스·검색 신호 기반 (아마존 순위권 밖)</div></div>')
+        # 💡 왜 높나
+        why_chips = "".join(f'<span class="os-wchip">{_esc(w)}</span>' for w in (s.get("why") or []))
+        ing_extra = "".join(f'<span class="os-ing">{_esc(i)}</span>' for i in (s.get("ingredients") or [])[:4])
+        why_block = (f'<div class="os-sec"><div class="os-k">💡 왜 높나</div>'
+                     f'<div class="os-why">{why_chips}{ing_extra}</div></div>')
+        # 🗺 시장 포지션 — 우리영역 / 확장후보 (동등)
+        areas = s.get("retail_areas") or {"our": [], "expansion": []}
+        pos_block = (f'<div class="os-sec"><div class="os-k">🗺 시장 포지션</div>'
+                     f'<div class="os-pos"><span class="os-tag our">우리영역</span> {_pos_line(areas.get("our", []))}</div>'
+                     f'<div class="os-pos"><span class="os-tag exp">확장후보</span> {_pos_line(areas.get("expansion", []))}</div></div>')
+        # 무브(맥락) — 접힘성 한 줄 + 원문
+        url = mv.get("url") or ""
+        src = (f'<a class="os-src" href="{_esc(url)}" target="_blank" rel="noopener">원문 ↗</a>'
+               if url.startswith("http") else "")
+        move_line = (f'<div class="os-move"><span class="os-act">{_esc(_ACT.get(mv.get("activity_type",""), ""))}</span> '
+                     f'{_esc((mv.get("title") or "")[:70])} {src}</div>')
+        # 👉 우리가 할 것
         action = _esc(s.get("action") or "")
-        action_row = (f'<div class="os-action"><span class="os-ac-k">👉 우리</span>'
-                      f'<span class="os-ac-v">{action}</span></div>') if action else ""
+        action_block = (f'<div class="os-action"><span class="os-ac-k">👉 우리가 할 것</span>'
+                        f'<span class="os-ac-v">{action}</span></div>') if action else ""
         cards.append(
-            f'<div class="ostory" onclick="openHeatmapDrilldown(\'{_esc(s.get("brand",""))}\',\'{_esc(cc)}\',\'all\')">'
-            f'<div class="os-head"><span class="os-loc">{flag} {_esc(s.get("country_name",""))}</span>'
-            f'<span class="os-brand">{_esc(s.get("brand",""))}</span>{neg}'
-            f'<span class="os-score" title="기회 스코어">{int(s.get("opp_score",0))}</span></div>'
-            f'<div class="os-row"><span class="os-k">무브</span>'
-            f'<span class="os-v"><span class="os-act">{_esc(act)}</span> {title} {src_link}</span></div>'
-            f'{prod_row}{perf_row}{read_row}{action_row}'
+            f'<div class="ostory" onclick="openHeatmapDrilldown(\'{_esc(brand)}\',\'{_esc(cc)}\',\'all\')">'
+            f'<div class="os-head"><span class="os-loc">{flag} {_esc(s.get("country_name",""))} · '
+            f'<b>{_esc(brand)}</b></span>{neg}'
+            f'<span class="os-score" title="기회 스코어">기회 {int(s.get("opp_score",0))}</span></div>'
+            f'{verdict}{prod_block}{why_block}{pos_block}{move_line}{action_block}'
             f'</div>'
         )
     return f'<div class="ostory-grid">{"".join(cards)}</div>'
