@@ -1365,29 +1365,29 @@ _DASHBOARD_CSS = """
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   /* ── 목업 v2: 딥네이비/코발트 테마 ── 변수명 유지 → 전 렌더러 자동 리테마 */
-  --bg:      #03081a;   /* void-navy */
-  --void:    #03081a;
-  --surface: #0a1030;   /* 카드 (deep-indigo 리프트) */
-  --ink:     #0a1030;
-  --ink2:    #0e1740;
-  --elevated:#0e1740;
-  --deep:    #121a44;
-  --raise:   #121a44;
-  --border:  #262c5e;   /* inkline-violet */
-  --bhi:     #3a4380;
+  --bg:      #141b38;   /* 편안한 다크 네이비 (near-black에서 리프트, 눈 편하게) */
+  --void:    #141b38;
+  --surface: #1e2750;   /* 카드 (리프트) */
+  --ink:     #1e2750;
+  --ink2:    #27315e;
+  --elevated:#27315e;
+  --deep:    #2f3a6b;
+  --raise:   #2f3a6b;
+  --border:  #3a4682;   /* inkline-violet 밝게 */
+  --bhi:     #4c5aa0;
   /* 액센트 — 코발트/라벤더/틸 */
   --champ:   #8b95ff;   /* 주 텍스트 액센트 (구 골드 대체) */
   --gold:    #8b95ff;
   --accent:  #8b95ff;
   --champ2:  #aab1f2;   /* quartz-lavender */
-  --champ-d: #6b74b8;   /* 딤 라벤더 (eyebrow) */
+  --champ-d: #8189cc;   /* 딤 라벤더 (eyebrow) */
   --cobalt:  #3d50fc;   /* pulse-cobalt (강조 fill) */
   --blue:    #5b8def;
   --violet:  #8b7cf6;
   --teal:    #05e0e0;   /* signal-teal */
   --hi:      #f5f6ff;   /* glacier-white */
   --mid:     #aab1f2;   /* quartz-lavender */
-  --lo:      #7a83cc;   /* mist-lilac */
+  --lo:      #9199db;   /* mist-lilac (밝게) */
   --high:    #ff6b7a;
   --med:     #f0a256;
   --coral:   #ff6b7a;
@@ -3285,8 +3285,8 @@ def _render_composite_lb(composite: list, trend: dict = None) -> str:
         rows.append(
             f'<div class="r" onclick="openHeatmapDrilldown(\'{_esc(o["brand"])}\',\'all\',\'all\')">'
             f'<span class="rk">{o["rank"]}</span><span class="nm">{_esc(o["brand"])}</span>'
-            f'<span class="subs">{bars}</span>'
-            f'<span class="sc" style="color:{sccol}">{o["score"]}</span>{trend_html}</div>'
+            f'<span class="subs" title="4축 신호 상대강도(모멘텀·재무·상표·수요)">{bars}</span>'
+            f'{trend_html}</div>'
         )
     key = ('<div class="lb-key">'
            '<span title="최근 4주 뉴스 활동량·중요도 (가중 35%)"><i class="sub-mom"></i>모멘텀</span>'
@@ -3746,7 +3746,7 @@ def _build_full_html(
     <div class="eyebrow"><span class="lab">Situation</span><span class="rule"></span><span class="rt">실시간 신호 · 클릭 → 상세</span></div>
     <div class="cmd cmd-2">
       <div class="box"><div class="ph">핵심 무브 <span class="c">TOP</span></div>{move_stream_html}</div>
-      <div class="box"><div class="ph">종합 스코어 <span class="c">21</span><span class="info" data-tip="모멘텀35·재무25·수요25·상표선행15 가중합(0~100). 해당 축 데이터 없으면 그 축 빼고 재정규화. 최근 4주 기준.">?</span></div>{composite_lb_html}</div>
+      <div class="box"><div class="ph">브랜드 신호 강도 <span class="c">21</span><span class="info" data-tip="4축 신호(모멘텀·재무·상표·수요)의 상대 강도를 막대로 표시. 최근 4주 기준. 정렬은 내부 종합순위, 화면엔 원본 신호만.">?</span></div>{composite_lb_html}</div>
     </div>
 
     <div class="eyebrow"><span class="lab">Markets &amp; Pressure</span><span class="rule"></span><span class="rt jump" onclick="switchTab('strategy')">시장 탭 전체 →</span></div>
@@ -3783,18 +3783,17 @@ def _build_full_html(
       {search_spikes_html}
     </div>
 
-    <div class="lower-row">
-      <div class="section">
-        <div class="section-title">
-          브랜드 &times; 국가 분포 히트맵
-          <span class="section-sub">셀 클릭 시 HIGH/MED 기사 목록</span>
-        </div>
-        {heatmap_html}
+    <!-- 해외 상표 출원 (브랜드 선행신호 — 시장 탭에서 이동) -->
+    <div class="section">
+      <div class="section-title">
+        🪧 해외 상표 출원 = 진출 선행신호 <span class="section-sub">경쟁사가 미국·일본에 낸 상표(자기출원·화장품류) — 뉴스보다 먼저 잡히는 진출·신제품 조짐</span>
       </div>
-      <div class="section">
-        <div class="section-title">브랜드별 HIGH 비중</div>
-        {brand_high_html}
-      </div>
+      {trademark_html}
+    </div>
+
+    <div class="section">
+      <div class="section-title">브랜드별 HIGH 비중</div>
+      {brand_high_html}
     </div>
 
     <div class="section">
@@ -3831,12 +3830,12 @@ def _build_full_html(
       {growth_story_html}
     </div>
 
-    <!-- 해외 상표 출원 = 진출 선행신호 (KIPRIS) -->
+    <!-- 브랜드 × 국가 분포 (시장 관점 — 어느 시장에 경쟁이 몰리나) -->
     <div class="section">
       <div class="section-title">
-        🪧 해외 상표 출원 = 진출 선행신호 <span class="section-sub">경쟁사가 미국·일본에 낸 상표(자기출원·화장품류) — 뉴스보다 먼저 잡히는 진출·신제품 조짐</span>
+        브랜드 × 국가 분포 <span class="section-sub">어느 시장에 경쟁이 집중되나 · 셀 클릭 시 HIGH/MED 기사 목록</span>
       </div>
-      {trademark_html}
+      {heatmap_html}
     </div>
 
     <!-- 화장품 수출 규모·성장 전체 랭킹 (스킨케어 330499) -->
