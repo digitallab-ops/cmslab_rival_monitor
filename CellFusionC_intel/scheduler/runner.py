@@ -95,6 +95,23 @@ def _run_collection(label: str, brands: list[str], countries: list[str],
         notify_collection_summary(label, agg)
     except Exception as e:
         logger.warning("수집 요약 Slack 전송 실패: %s", e)
+    ping_dashboard_refresh()   # 수집 직후 Render 대시보드 재생성 트리거
+
+
+def ping_dashboard_refresh() -> None:
+    """수집/스냅샷 후 Render 대시보드 재생성 트리거(POST /api/refresh).
+
+    대시보드 HTML은 Render 프로세스 메모리에 캐시라 재배포 전엔 안 바뀜.
+    로컬 수집이 최신 데이터를 DB에 넣은 뒤 이 핑으로 화면을 최신화. 실패해도 무해.
+    """
+    import os
+    import requests
+    url = os.getenv("RENDER_EXTERNAL_URL") or "https://cmslab-rival-monitor.onrender.com"
+    try:
+        requests.post(url.rstrip("/") + "/api/refresh", timeout=10)
+        logger.info("대시보드 refresh 핑 전송: %s", url)
+    except Exception as e:
+        logger.warning("대시보드 refresh 핑 실패(무시): %s", e)
 
 
 def job_daily_tier1() -> None:
@@ -328,6 +345,7 @@ def job_retail_ranking() -> None:
         r = run_retail()
         logger.info("리테일 랭킹 수집 완료: 저장 %d(모니터링 %d) · 브랜드 %d",
                     r.get("captured", 0), r.get("monitored", 0), len(r.get("by_brand", {})))
+        ping_dashboard_refresh()
     except Exception as e:
         logger.warning("리테일 랭킹 수집 스킵(네트워크/차단 확인): %s", e)
 

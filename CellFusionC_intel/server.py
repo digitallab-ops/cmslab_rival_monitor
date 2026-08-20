@@ -12,6 +12,7 @@ import logging
 import os
 import sys
 import threading
+import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
@@ -28,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 # 생성된 HTML 캐시 (메모리)
 _dashboard_html: str = ""
+_dashboard_built_at: float = 0.0        # 마지막 생성 시각(epoch)
+_regenerating: bool = False             # 중복 재생성 방지
+_STALE_TTL = 3 * 3600                    # 이 시간 지나면 조회 시 자가 재생성(초)
 
 _LOADING_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
@@ -66,13 +70,36 @@ def _build_dashboard() -> str:
 
 
 def _prebuild():
-    global _dashboard_html
+    global _dashboard_html, _dashboard_built_at
     try:
         logger.info("대시보드 사전 생성 시작")
         _dashboard_html = _build_dashboard()
+        _dashboard_built_at = time.time()
         logger.info("대시보드 사전 생성 완료")
     except Exception as e:
         logger.error("대시보드 사전 생성 실패: %s", e)
+
+
+def _regen_async():
+    """백그라운드 재생성 (조회 TTL·수동 refresh 공용). 중복 방지 플래그."""
+    global _dashboard_html, _dashboard_built_at, _regenerating
+    if _regenerating:
+        return
+    _regenerating = True
+    try:
+        _dashboard_html = _build_dashboard()
+        _dashboard_built_at = time.time()
+        logger.info("대시보드 재생성 완료")
+    except Exception as e:
+        logger.error("대시보드 재생성 실패: %s", e)
+    finally:
+        _regenerating = False
+
+
+def _maybe_regen():
+    """조회 시 TTL 경과 + 재생성 중 아니면 백그라운드 재생성 킥(자가치유 폴백)."""
+    if _dashboard_html and not _regenerating and (time.time() - _dashboard_built_at) > _STALE_TTL:
+        threading.Thread(target=_regen_async, daemon=True).start()
 
 
 # ── MCP 서버 (Slack 봇 등 LLM이 데이터를 툴로 조회) ──────────────────────────
@@ -168,21 +195,17 @@ _NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
-    """메인 대시보드."""
+    """메인 대시보드. 조회 시 TTL 경과했으면 백그라운드 재생성(자가치유)."""
     if not _dashboard_html:
         return HTMLResponse(_LOADING_PAGE, status_code=200, headers=_NO_CACHE)
+    _maybe_regen()   # 오래됐으면 다음 조회를 위해 미리 갱신(현재 요청은 즉시 응답)
     return HTMLResponse(_dashboard_html, headers=_NO_CACHE)
 
 
 @app.post("/api/refresh")
 async def refresh(background_tasks: BackgroundTasks):
-    """대시보드 재생성 (백그라운드). 기사 수집 후 호출."""
-    def _regen():
-        global _dashboard_html
-        _dashboard_html = _build_dashboard()
-        logger.info("대시보드 재생성 완료")
-
-    background_tasks.add_task(_regen)
+    """대시보드 재생성 (백그라운드). 로컬 수집 직후 ping_dashboard_refresh가 호출."""
+    background_tasks.add_task(_regen_async)
     return {"status": "ok", "message": "재생성 중 — 잠시 후 새로고침하세요"}
 
 
