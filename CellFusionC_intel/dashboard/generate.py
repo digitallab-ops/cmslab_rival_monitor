@@ -3733,27 +3733,36 @@ def _build_full_html(
 
 <div class="page-body">
 
-  <!-- ===== 탭: 브리핑 (메인 종합) ===== -->
+  <!-- ===== 탭: 브리핑 (심플 종합 — 지금 대응→오늘→이번주→스토리) ===== -->
   <div class="tab-panel active" id="tab-overview">
-    <div class="eyebrow"><span class="lab">Opportunity Stories</span><span class="rule"></span><span class="rt">어느 나라·브랜드·무브·제품 → 우리가 할 것</span></div>
-    {stories_html}
+    <!-- 1) 지금 대응이 필요한 것 (최우선) -->
+    <div class="eyebrow"><span class="lab">지금 대응이 필요한 것</span><span class="rule"></span><span class="rt">이번 주 최우선</span></div>
     {action_banner_html}
-    {legend_html}
-    <div class="eyebrow"><span class="lab">Weekly Synthesis</span><span class="rule"></span><span class="rt">최근 7일 · AI 종합 인사이트</span></div>
-    {synth_html}
+
+    <!-- 2) 오늘 핵심 지표 -->
     {metric_rail_html}
 
-    <div class="eyebrow"><span class="lab">Situation</span><span class="rule"></span><span class="rt">실시간 신호 · 클릭 → 상세</span></div>
+    <!-- 3) 이번 주 동향 — 가장 활발한 시장 | 핵심 무브 -->
+    <div class="eyebrow"><span class="lab">이번 주 동향</span><span class="rule"></span><span class="rt jump" onclick="switchTab('strategy')">시장 탭 전체 →</span></div>
     <div class="cmd cmd-2">
+      <div class="box"><div class="ph">가장 활발한 시장 <span class="c">수출 YoY</span></div><div class="mkl">{market_list_html}</div></div>
       <div class="box"><div class="ph">핵심 무브 <span class="c">TOP</span></div>{move_stream_html}</div>
-      <div class="box"><div class="ph">브랜드 신호 강도 <span class="c">21</span><span class="info" data-tip="4축 신호(모멘텀·재무·상표·수요)의 상대 강도를 막대로 표시. 최근 4주 기준. 정렬은 내부 종합순위, 화면엔 원본 신호만.">?</span></div>{composite_lb_html}</div>
     </div>
 
-    <div class="eyebrow"><span class="lab">Markets &amp; Pressure</span><span class="rule"></span><span class="rt jump" onclick="switchTab('strategy')">시장 탭 전체 →</span></div>
-    <div class="duo">
-      <div class="box"><div class="ph">뜨는 시장 <span class="c">수출 YoY</span></div><div class="mkl">{market_list_html}</div></div>
-      <div class="box"><div class="ph">브랜드 &times; 국가 압박 <span class="c">셀 클릭 → 상세</span></div><div style="padding:12px 14px;overflow:auto">{heatmap_html}</div></div>
+    <!-- 4) 기회 스토리 (상세 — 상단 부담 줄여 아래로) -->
+    <div class="eyebrow"><span class="lab">Opportunity Stories</span><span class="rule"></span><span class="rt">나라·브랜드·무브·제품 → 우리가 할 것</span></div>
+    {stories_html}
+
+    <!-- 5) 주간 AI 종합 + 브랜드 신호 강도 -->
+    <div class="eyebrow"><span class="lab">주간 종합</span><span class="rule"></span><span class="rt">최근 7일 AI 인사이트</span></div>
+    {synth_html}
+    <div class="section">
+      <div class="section-title">브랜드 신호 강도
+        <span class="section-sub">4축 신호(모멘텀·재무·상표·수요) 상대강도 막대 · 최근 4주 · 정렬은 내부 종합순위</span>
+      </div>
+      {composite_lb_html}
     </div>
+    {legend_html}
   </div>
 
   <!-- ===== 탭: 경쟁사 ===== -->
