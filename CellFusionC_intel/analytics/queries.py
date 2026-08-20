@@ -1234,6 +1234,53 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
     return stories
 
 
+def get_nice_financials(session: Session, brand: str = None) -> list[dict]:
+    """NICE BizLine 재무(비상장 포함) — 브랜드별 매출·영업이익·광고비 2023~25.
+
+    brand 지정 시 그 브랜드만, 없으면 우리 21개 매칭 전체.
+    반환: [{brand, company, is_single_brand, is_cosmetic,
+            years:{2023:{revenue,op_income,ad_spend}, ...}}] (단위: 천원 원본).
+    """
+    try:
+        params = {}
+        where = "cb.matched_brands <> ''"
+        if brand:
+            where += " AND cb.matched_brands ILIKE :b"
+            params["b"] = f"%{brand}%"
+        rows = session.execute(text(f"""
+            SELECT cb.matched_brands, cb.company, cb.is_single_brand, cb.is_cosmetic,
+                   f.metric, f.year, f.amount, f.rank
+            FROM {DB_SCHEMA}.nice_company_brands cb
+            JOIN {DB_SCHEMA}.nice_financials f
+              ON f.company = cb.company AND f.industry_code = cb.industry_code
+            WHERE {where}
+            ORDER BY cb.company, f.year
+        """), params).fetchall()
+    except Exception:
+        return []
+    _MK = {"매출액": "revenue", "영업이익": "op_income", "광고비": "ad_spend"}
+    by_co: dict = {}
+    for mb, company, single, cos, metric, year, amount, rank in rows:
+        o = by_co.setdefault(company, {
+            "brand": mb, "company": company, "is_single_brand": bool(single),
+            "is_cosmetic": bool(cos), "years": {}})
+        yr = o["years"].setdefault(int(year), {"revenue": None, "op_income": None,
+                                               "ad_spend": None, "rank": rank})
+        key = _MK.get(metric)
+        if key:
+            yr[key] = amount
+    out = list(by_co.values())
+    # 매출 최신연도 desc 정렬
+    def _latest_rev(o):
+        ys = o["years"]
+        for y in (2025, 2024, 2023):
+            if ys.get(y, {}).get("revenue"):
+                return ys[y]["revenue"]
+        return 0
+    out.sort(key=_latest_rev, reverse=True)
+    return out
+
+
 def get_market_export_growth(session: Session, hs_like: str = "330499",
                              trailing: int = 3) -> list[dict]:
     """
