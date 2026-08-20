@@ -3749,11 +3749,7 @@ def _build_full_html(
       <div class="box"><div class="ph">핵심 무브 <span class="c">TOP</span></div>{move_stream_html}</div>
     </div>
 
-    <!-- 4) 기회 스토리 (상세 — 상단 부담 줄여 아래로) -->
-    <div class="eyebrow"><span class="lab">Opportunity Stories</span><span class="rule"></span><span class="rt">나라·브랜드·무브·제품 → 우리가 할 것</span></div>
-    {stories_html}
-
-    <!-- 5) 주간 AI 종합 + 브랜드 신호 강도 -->
+    <!-- 4) 주간 AI 종합 + 브랜드 신호 강도 -->
     <div class="eyebrow"><span class="lab">주간 종합</span><span class="rule"></span><span class="rt">최근 7일 AI 인사이트</span></div>
     {synth_html}
     <div class="section">
@@ -3762,6 +3758,10 @@ def _build_full_html(
       </div>
       {composite_lb_html}
     </div>
+
+    <!-- 5) 기회 스토리 (딥다이브 — 맨 아래) -->
+    <div class="eyebrow"><span class="lab">Opportunity Stories</span><span class="rule"></span><span class="rt">나라·브랜드·무브·제품 → 우리가 할 것 (상세)</span></div>
+    {stories_html}
     {legend_html}
   </div>
 
