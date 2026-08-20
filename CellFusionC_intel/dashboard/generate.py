@@ -41,6 +41,7 @@ from analytics.queries import (
     get_google_spikes,
     get_brand_composite_score,
     get_opportunity_stories,
+    get_nice_financials,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -678,6 +679,67 @@ def _render_financials(fins: list) -> str:
         '<div class="fin-note">※ DART 전자공시 기준(연결). ‘회사전체’는 해당 브랜드가 대기업의 '
         '일부라 수치가 회사 전체임(예: 구달=클리오, 센텔리안24=동국제약, 에스트라=아모레퍼시픽). '
         '비상장 외감법인(아누아·조선미녀·토리든 등)은 표준 재무 API 미제공으로 제외.</div>'
+    )
+
+
+# NICE 매칭 기업 중 상장사(코스피/코스닥) — 상장/비상장 구분 표기용(수동 큐레이션)
+_NICE_LISTED = {"동국제약(주)", "(주)파마리서치", "(주)클리오", "(주)브이티", "(주)에이피알"}
+
+
+def _eok(thousands) -> str:
+    """천원 → 억원 표기. NICE 재무 단위(천원) 전용."""
+    if thousands is None:
+        return "—"
+    return f"{thousands / 100000:,.0f}억"
+
+
+def _render_financials_nice(fins: list) -> str:
+    """NICE BizLine 재무 — 브랜드별 매출·영업이익·광고비 2023~25(비상장 포함). 연 단위."""
+    if not fins:
+        return ('<p class="no-data">재무 데이터 없음 (NICE BizLine 적재 전 · '
+                'python -m signals.nice_financials)</p>')
+    YRS = [2023, 2024, 2025]
+    body = []
+    for f in fins:
+        yrs = f["years"]
+        company = f["company"]
+        listed = ('<span class="fin-tag fin-listed">상장</span>' if company in _NICE_LISTED
+                  else '<span class="fin-tag fin-unlisted">비상장</span>')
+        scope = ('<span class="fin-tag fin-single">단일브랜드</span>' if f["is_single_brand"]
+                 else '<span class="fin-whole">회사전체</span>')
+        # 매출 3개년 + 최신 YoY
+        rev = [yrs.get(y, {}).get("revenue") for y in YRS]
+        rev_cells = " → ".join(_eok(v) for v in rev)
+        yoy_html = "—"
+        if rev[2] and rev[1]:
+            yoy = (rev[2] / rev[1] - 1) * 100
+            c = "#4ab884" if yoy >= 10 else ("#e05353" if yoy <= -5 else "var(--mid)")
+            yoy_html = f'<span style="color:{c}">{"+" if yoy >= 0 else ""}{yoy:.0f}%</span>'
+        # 영업이익'25 + OPM
+        op25 = yrs.get(2025, {}).get("op_income")
+        opm = (f'{op25 / rev[2] * 100:.0f}%' if op25 and rev[2] else "—")
+        # 광고비'25 + 매출대비
+        ad25 = yrs.get(2025, {}).get("ad_spend")
+        adr = (f'{ad25 / rev[2] * 100:.0f}%' if ad25 and rev[2] else "—")
+        body.append(
+            f'<tr><td class="fin-brand">{_esc(f["brand"])}</td>'
+            f'<td class="fin-corp">{_esc(company)} {listed}{scope}</td>'
+            f'<td class="fin-num fin-rev">{rev_cells}</td>'
+            f'<td class="fin-num">{yoy_html}</td>'
+            f'<td class="fin-num">{_eok(op25)} <span class="fin-sub">({opm})</span></td>'
+            f'<td class="fin-num">{_eok(ad25)} <span class="fin-sub">({adr})</span></td></tr>'
+        )
+    return (
+        '<div class="table-wrap"><table class="data-table fin-table">'
+        '<thead><tr><th>브랜드</th><th>운영사</th>'
+        '<th>매출 2023 → 2024 → 2025</th><th>매출 YoY</th>'
+        '<th>영업이익 2025 <span class="fin-sub">(이익률)</span></th>'
+        '<th>광고비 2025 <span class="fin-sub">(매출比)</span></th></tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>'
+        '<div class="fin-note">※ NICE BizLine 산업경쟁현황(연 단위, 단위 억원). '
+        '‘회사전체’는 브랜드가 대기업 일부라 수치가 회사 전체(예: 구달=클리오, 센텔리안24=동국제약). '
+        '‘단일브랜드’는 회사≈브랜드(예: 아누아=더파운더즈). '
+        'Cos de Baha·b.plain·에스트라·제로이드는 NICE 미포함.</div>'
     )
 
 
@@ -2021,6 +2083,9 @@ a:hover { color: var(--gold); }
 .fin-listed { background: rgba(74,184,132,0.14); color: #4ab884; }
 .fin-unlisted { background: rgba(78,88,112,0.28); color: var(--mid); }
 .fin-whole { font-size: 9px; color: var(--lo); margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; }
+.fin-single { background: rgba(216,184,120,0.14); color: var(--champ2, #e8cfa0); }
+.fin-sub { font-size: 10px; color: var(--lo); font-weight: 400; }
+.fin-rev { font-variant-numeric: tabular-nums; }
 .fin-note { font-size: 10.5px; color: var(--lo); line-height: 1.5; margin-top: 8px; }
 
 /* ── 글로벌 검색 급등(구글) ── */
@@ -3502,6 +3567,7 @@ def _build_full_html(
     export_growth: list = None,
     growth_story: dict = None,
     financials: list = None,
+    nice_financials: list = None,
     trademark_sig: dict = None,
     search_spikes: list = None,
     composite: list = None,
@@ -3534,6 +3600,7 @@ def _build_full_html(
     growth_story_html  = _render_growth_story(growth_story or {})
     growth_headline_html = _render_growth_headline(growth_story or {})
     financials_html   = _render_financials(financials or [])
+    financials_nice_html = _render_financials_nice(nice_financials or [])
     trademark_html    = _render_trademark(trademark_sig or {})
     search_spikes_html = _render_search_spikes(search_spikes or [])
     # ── 커맨드센터(브리핑 탭) 신규 블록 ──
@@ -3641,6 +3708,7 @@ def _build_full_html(
     <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">브리핑</button>
     <button class="tab-btn" data-tab="brands" onclick="switchTab('brands')">경쟁사</button>
     <button class="tab-btn" data-tab="strategy" onclick="switchTab('strategy')">시장</button>
+    <button class="tab-btn" data-tab="finance" onclick="switchTab('finance')">재무</button>
     <button class="tab-btn" data-tab="feed" onclick="switchTab('feed')">기록</button>
   </div>
   <div class="period-row">
@@ -3711,14 +3779,6 @@ def _build_full_html(
         🔺 글로벌 검색 급등 <span class="section-sub">구글 트렌드 글로벌·미국·일본 — 최근7일 vs 직전28일 급증(네이버=국내 보완, 해외 수요 조기신호)</span>
       </div>
       {search_spikes_html}
-    </div>
-
-    <!-- 경쟁사 실적 (DART 전자공시 성과 신호) -->
-    <div class="section">
-      <div class="section-title">
-        💰 경쟁사 실적 (DART) <span class="section-sub">운영사 실매출·영업이익·성장률 — 보도량(공급)과 대조해 '진짜 규모' 확인</span>
-      </div>
-      {financials_html}
     </div>
 
     <div class="lower-row">
@@ -3794,6 +3854,16 @@ def _build_full_html(
         <span class="section-sub">전 경쟁사 종합 분석 → 우리(씨엠에스랩) 관점 조언</span>
       </div>
       <div class="market-body" id="market-body"></div>
+    </div>
+  </div>
+
+  <!-- ===== 탭: 재무 (NICE BizLine · 연 단위 · 비상장 포함) ===== -->
+  <div class="tab-panel" id="tab-finance">
+    <div class="section">
+      <div class="section-title">
+        💰 재무 현황 <span class="section-sub">NICE BizLine 산업경쟁현황 · 매출·영업이익·광고비 (2023~2025, 연 단위) · 상장·비상장 통합</span>
+      </div>
+      {financials_nice_html}
     </div>
   </div>
 
@@ -4367,6 +4437,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             financials = get_competitor_financials(session)
         except Exception:
             financials = []
+        # NICE BizLine 재무(비상장 포함, 연 단위) — 재무 탭
+        try:
+            nice_financials = get_nice_financials(session)
+        except Exception:
+            nice_financials = []
         # 해외 상표 출원 선행신호(KIPRIS) — trademark_filings 없으면 빈 dict
         try:
             trademark_sig = get_trademark_signals(session)
@@ -4541,6 +4616,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         export_growth=export_growth,
         growth_story=growth_story,
         financials=financials,
+        nice_financials=nice_financials,
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
         composite=composite,
