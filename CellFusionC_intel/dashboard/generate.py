@@ -1636,6 +1636,8 @@ a:hover { color: var(--gold); }
   color: var(--lo);
   white-space: nowrap;
 }
+.period-basis-hint { margin-left:7px; font-size:9.5px; font-weight:600; color:var(--champ);
+  background:rgba(139,149,255,.12); border-radius:6px; padding:1px 7px; letter-spacing:0; cursor:help; text-transform:none; }
 .period-presets { display: flex; gap: 4px; }
 .period-btn {
   background: transparent;
@@ -3732,7 +3734,7 @@ def _build_full_html(
     <button class="tab-btn" data-tab="search" onclick="switchTab('search')">검색</button>
   </div>
   <div class="period-row">
-    <span class="period-row-label">기간</span>
+    <span class="period-row-label">기간<span class="period-basis-hint" title="상단 기간은 뉴스 수집 범위(KPI·기사·지도·브랜드동향)에 적용됩니다. 검색=주간, 수출=월간, 재무=연간처럼 데이터 성격상 자체 기준을 쓰는 모듈은 각 섹션에 기준을 표기합니다.">ⓘ 뉴스 기준</span></span>
     <div class="period-presets" id="pb-presets">
       <button class="period-btn{"" if days != 30 else " active"}" data-days="30" onclick="setPeriod(30)">30일</button>
       <button class="period-btn{"" if days != 60 else " active"}" data-days="60" onclick="setPeriod(60)">60일</button>
