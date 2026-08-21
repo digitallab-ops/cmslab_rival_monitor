@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(_HERE, ".env"))
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Query, BackgroundTasks
+from fastapi import FastAPI, Query, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,9 @@ async def lifespan(app: FastAPI):
     # 수집 스케줄러는 로컬 PC에서만 실행 (cli.py run).
     # Render는 대시보드 조회 전용(Supabase 읽기) — 여기서 스케줄러를 돌리면
     # 로컬과 이중 수집되어 OpenAI 토큰이 두 배로 소모됨.
+    # 검색 탭 챗봇도 같은 프로세스의 MCP를 localhost로 호출 → 기본 URL 보장(봇 미기동이어도).
+    _port = os.getenv("PORT", "8000")
+    os.environ.setdefault("MCP_SERVER_URL", f"http://127.0.0.1:{_port}/mcp")
     t = threading.Thread(target=_prebuild, daemon=True)
     t.start()
     # 마운트한 MCP 앱의 세션 매니저 task group을 부모 lifespan에서 기동해야 함.
@@ -207,6 +210,32 @@ async def refresh(background_tasks: BackgroundTasks):
     """대시보드 재생성 (백그라운드). 로컬 수집 직후 ping_dashboard_refresh가 호출."""
     background_tasks.add_task(_regen_async)
     return {"status": "ok", "message": "재생성 중 — 잠시 후 새로고침하세요"}
+
+
+@app.post("/api/ask")
+async def api_ask(request: Request):
+    """통합검색 챗봇 — 자연어 질문(기간·브랜드·국가)을 MCP 툴로 조회해 답변.
+    Slack 봇과 동일한 LLM tool-calling 로직(slack_bot.answer) 재사용."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    q = (body.get("question") or "").strip()
+    if not q:
+        return JSONResponse({"answer": "질문을 입력해 주세요."}, status_code=400)
+    if not os.getenv("OPENAI_API_KEY"):
+        return JSONResponse({"answer": "검색 기능 미설정(OPENAI_API_KEY 필요)."}, status_code=503)
+    try:
+        import slack_bot
+        parts = []
+        async def _collect(t):
+            if t:
+                parts.append(t)
+        ans = await slack_bot.answer(q, [], _collect)
+        return {"answer": ans or "".join(parts) or "관련 데이터를 찾지 못했어요."}
+    except Exception as e:
+        logger.warning("검색 응답 실패: %s", e)
+        return JSONResponse({"answer": f"검색 처리 중 오류: {e}"}, status_code=500)
 
 
 # ── 인사이트 API ─────────────────────────────────────────────────────────────

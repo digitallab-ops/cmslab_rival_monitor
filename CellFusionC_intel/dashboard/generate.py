@@ -2087,6 +2087,23 @@ a:hover { color: var(--gold); }
 .fin-unlisted { background: rgba(78,88,112,0.28); color: var(--mid); }
 .fin-whole { font-size: 9px; color: var(--lo); margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; }
 .fin-single { background: rgba(139,149,255,0.14); color: var(--champ2, #e8cfa0); }
+/* ── 검색 탭 (MCP 챗봇) ── */
+.search-examples { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.se-chip { font-size:12.5px; color:var(--mid); background:var(--deep); border:1px solid var(--border);
+  border-radius:999px; padding:6px 13px; cursor:pointer; font-family:inherit; transition:all .15s; }
+.se-chip:hover { color:var(--hi); border-color:var(--champ); background:var(--elevated); }
+.search-box { display:flex; gap:8px; margin-bottom:18px; }
+.search-input { flex:1; background:var(--deep); border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:12px 15px; color:var(--hi); font-size:14px; font-family:inherit; outline:none; }
+.search-input:focus { border-color:var(--champ); }
+.search-send { background:var(--cobalt); color:#fff; border:none; border-radius:var(--radius-sm);
+  padding:0 22px; font-size:14px; font-weight:700; cursor:pointer; font-family:inherit; }
+.search-send:hover { filter:brightness(1.12); }
+.search-chat { display:flex; flex-direction:column; gap:16px; }
+.sc-pair { border-bottom:1px solid var(--border); padding-bottom:16px; }
+.sc-q { font-size:14.5px; font-weight:700; color:var(--champ2); margin-bottom:8px; }
+.sc-q::before { content:"Q  "; color:var(--champ); font-family:var(--mono); }
+.sc-a { font-size:14px; color:var(--hi); line-height:1.65; white-space:normal; }
 .fin-sub { font-size: 10px; color: var(--lo); font-weight: 400; }
 .fin-rev { font-variant-numeric: tabular-nums; }
 .fin-note { font-size: 10.5px; color: var(--lo); line-height: 1.5; margin-top: 8px; }
@@ -3712,6 +3729,7 @@ def _build_full_html(
     <button class="tab-btn" data-tab="strategy" onclick="switchTab('strategy')">시장</button>
     <button class="tab-btn" data-tab="finance" onclick="switchTab('finance')">재무</button>
     <button class="tab-btn" data-tab="feed" onclick="switchTab('feed')">기록</button>
+    <button class="tab-btn" data-tab="search" onclick="switchTab('search')">검색</button>
   </div>
   <div class="period-row">
     <span class="period-row-label">기간</span>
@@ -3876,6 +3894,43 @@ def _build_full_html(
       {financials_nice_html}
     </div>
   </div>
+
+  <!-- ===== 탭: 검색 (MCP+챗봇 자연어 질의) ===== -->
+  <div class="tab-panel" id="tab-search">
+    <div class="section">
+      <div class="section-title">기간·브랜드·국가 검색
+        <span class="section-sub">자연어로 물어보면 데이터(뉴스·수출·재무·상표·검색·리테일)를 조회해 답합니다</span>
+      </div>
+      <div class="search-examples">
+        <button class="se-chip" onclick="askExample(this)">아누아가 최근 미국에서 뭐 했어?</button>
+        <button class="se-chip" onclick="askExample(this)">최근 30일 브라질에서 활발한 브랜드는?</button>
+        <button class="se-chip" onclick="askExample(this)">토리든 재무 실적 알려줘</button>
+        <button class="se-chip" onclick="askExample(this)">조선미녀가 유럽에서 한 활동은?</button>
+      </div>
+      <div class="search-box">
+        <input id="search-q" class="search-input" placeholder="예: 스킨1004가 일본에서 최근 뭐 하고 있어?" onkeydown="if(event.key==='Enter')runSearch()"/>
+        <button class="search-send" onclick="runSearch()">검색</button>
+      </div>
+      <div id="search-chat" class="search-chat"></div>
+    </div>
+  </div>
+  <script>
+  function askExample(el){{ document.getElementById('search-q').value=el.textContent; runSearch(); }}
+  async function runSearch(){{
+    var inp=document.getElementById('search-q'); var q=(inp.value||'').trim(); if(!q) return;
+    var chat=document.getElementById('search-chat');
+    var id='m'+Date.now();
+    var qe=q.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    chat.insertAdjacentHTML('afterbegin','<div class="sc-pair"><div class="sc-q">'+qe+'</div><div class="sc-a" id="'+id+'">답변 생성 중…</div></div>');
+    inp.value='';
+    try{{
+      var r=await fetch('/api/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:q}})}});
+      var d=await r.json();
+      var ans=(d.answer||'답을 찾지 못했어요.').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\\n/g,'<br>');
+      document.getElementById(id).innerHTML=ans;
+    }}catch(e){{ document.getElementById(id).innerHTML='오류: '+e; }}
+  }}
+  </script>
 
   <!-- ===== 탭: 기록 ===== -->
   <div class="tab-panel" id="tab-feed">
