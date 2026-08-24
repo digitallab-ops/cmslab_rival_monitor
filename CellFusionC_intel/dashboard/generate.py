@@ -42,6 +42,7 @@ from analytics.queries import (
     get_brand_composite_score,
     get_opportunity_stories,
     get_nice_financials,
+    get_brand_signal_summary,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -2088,6 +2089,20 @@ a:hover { color: var(--gold); }
 .fin-unlisted { background: rgba(78,88,112,0.28); color: var(--mid); }
 .fin-whole { font-size: 12px; color: var(--lo); margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 2px; }
 .fin-single { background: rgba(139,149,255,0.14); color: var(--champ2, #e8cfa0); }
+/* ── 브랜드 신호 요약(직관형) ── */
+.bsig { display:flex; flex-direction:column; }
+.bsig-row { display:flex; align-items:center; gap:11px; padding:11px 8px; border-bottom:1px solid var(--border); cursor:pointer; }
+.bsig-row:hover { background:var(--ink2); }
+.bsig-rank { flex-shrink:0; width:20px; font-family:var(--mono); font-size:13px; color:var(--lo); text-align:right; }
+.bsig-brand { flex-shrink:0; width:150px; font-size:14.5px; font-weight:700; color:var(--hi); }
+.bsig-tier { font-size:10px; font-weight:700; color:var(--champ); background:rgba(139,149,255,.14); border-radius:5px; padding:1px 5px; margin-left:6px; }
+.bsig-chips { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
+.bsig-chip { font-size:12.5px; font-weight:600; border-radius:6px; padding:3px 9px; white-space:nowrap; }
+.bsig-chip.t-up { color:#7ff0d8; background:rgba(5,224,224,.13); }
+.bsig-chip.t-down { color:#ffb0ba; background:rgba(255,107,122,.14); }
+.bsig-chip.t-flat { color:var(--mid); background:rgba(255,255,255,.05); }
+.bsig-note { font-size:12px; color:var(--lo); padding:12px 8px 2px; line-height:1.6; }
+.bsig-empty { padding:16px; color:var(--lo); }
 /* ── 검색 탭 (MCP 챗봇) ── */
 .search-examples { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
 .se-chip { font-size:12.5px; color:var(--mid); background:var(--deep); border:1px solid var(--border);
@@ -3275,6 +3290,28 @@ def _render_move_stream(high_articles: list, demand_tri: list) -> str:
     return f'<div class="stream">{body}</div>'
 
 
+def _render_brand_signals(summary: list) -> str:
+    """브랜드 신호 요약(직관형) — 불투명 막대 대신 실수치+라벨 칩. '왜 강한지' 바로 보이게."""
+    if not summary:
+        return ('<div class="bsig"><div class="bsig-empty">신호 데이터 축적 중</div></div>')
+    rows = []
+    for i, b in enumerate(summary, 1):
+        chips = "".join(
+            f'<span class="bsig-chip t-{sg["tone"]}">{sg["icon"]} {_esc(sg["text"])}</span>'
+            for sg in b["signals"])
+        tier = '<span class="bsig-tier">1군</span>' if b.get("tier") == 1 else ""
+        rows.append(
+            f'<div class="bsig-row" onclick="openHeatmapDrilldown(\'{_esc(b["brand"])}\',\'all\',\'all\')">'
+            f'<span class="bsig-rank">{i}</span>'
+            f'<span class="bsig-brand">{_esc(b["brand"])}{tier}</span>'
+            f'<div class="bsig-chips">{chips}</div></div>'
+        )
+    note = ('<div class="bsig-note">📰 기사=최근 4주 보도량(괄호=직전 4주 대비 배수) · '
+            '🔍 검색=구글 급등비 · 💰 매출=최신 연간 YoY · 🪧 상표=US·JP 출원 · 🛒 리테일=아마존 순위. '
+            '초록=상승·강세.</div>')
+    return f'<div class="bsig">{"".join(rows)}</div>{note}'
+
+
 def _render_composite_lb(composite: list, trend: dict = None) -> str:
     """브랜드 종합 스코어 리더보드 (21개 전부, 4색 서브신호 바). 추세 있으면 ▲▼."""
     if not composite:
@@ -3591,6 +3628,7 @@ def _build_full_html(
     trademark_sig: dict = None,
     search_spikes: list = None,
     composite: list = None,
+    brand_signals: list = None,
     stories: list = None,
     score_trend: dict = None,
 ) -> str:
@@ -3627,6 +3665,7 @@ def _build_full_html(
     metric_rail_html  = _render_metric_rail(stats, growth_story or {}, search_spikes or [], days)
     move_stream_html  = _render_move_stream(_dg.get("high") or high_articles, demand_tri or [])
     composite_lb_html = _render_composite_lb(composite or [], score_trend or {})
+    brand_signals_html = _render_brand_signals(brand_signals or [])
     _market7 = _dg.get("market") or market_text
     action_banner_html = _render_action_banner(_market7)
     stories_html      = _render_opportunity_stories(stories or [])
@@ -3772,10 +3811,10 @@ def _build_full_html(
     <div class="eyebrow"><span class="lab">주간 종합</span><span class="rule"></span><span class="rt">최근 7일 AI 인사이트</span></div>
     {synth_html}
     <div class="section">
-      <div class="section-title">브랜드 신호 강도
-        <span class="section-sub">4축 신호(모멘텀·재무·상표·수요) 상대강도 막대 · 최근 4주 · 정렬은 내부 종합순위</span>
+      <div class="section-title">브랜드 신호 요약
+        <span class="section-sub">각 브랜드가 왜 강한지 — 기사·검색·매출·상표·리테일 실수치로 (클릭 시 상세)</span>
       </div>
-      {composite_lb_html}
+      {brand_signals_html}
     </div>
 
     <!-- 5) 기회 스토리 (딥다이브 — 맨 아래) -->
@@ -4523,6 +4562,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             composite = get_brand_composite_score(session)
         except Exception:
             composite = []
+        # 브랜드 신호 요약(직관형 — 실수치 라벨) : #2 재설계
+        try:
+            brand_signals = get_brand_signal_summary(session, limit=12)
+        except Exception:
+            brand_signals = []
         # 핵심 서사 '기회 스토리' 합성 + AI 액션('우리가 할 것') — 실패해도 대시보드 무해
         try:
             stories = get_opportunity_stories(session, days=days, limit=6)
@@ -4686,6 +4730,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
         composite=composite,
+        brand_signals=brand_signals,
         stories=stories,
         score_trend=score_trend,
         category_battle=category_battle,

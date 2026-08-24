@@ -1069,6 +1069,67 @@ def _signal_read(sc, n_arts, spike, mom, retail) -> dict:
             "why": "단일 축 신호 — 추이 관찰"}
 
 
+def get_brand_signal_summary(session: Session, limit: int = 12) -> list[dict]:
+    """브랜드별 '직관적' 신호 요약 — 불투명 스코어 대신 실수치+라벨.
+
+    각 신호가 '무슨 수치·숫자·방향'을 글자로: 기사(모멘텀)·검색(수요)·재무·상표·리테일.
+    반환: [{brand, tier, signals:[{icon,kind,text,tone}], sort}]. 내부 정렬만, 화면엔 원본수치.
+    """
+    # 소스별 실수치 인덱싱
+    mom = {m["brand"]: m for m in (compute_brand_momentum(session) or [])}
+    spikes: dict = {}
+    for sp in (get_google_spikes(session) or []):
+        b, r = sp.get("brand"), sp.get("spike_ratio")
+        if b and (b not in spikes or (r or 0) > spikes[b]["spike_ratio"]):
+            spikes[b] = sp
+    fins = {f["brand"]: f for f in (get_nice_financials(session) or [])}
+    tm = {t["brand"]: t for t in (get_trademark_signals(session, months=3, limit=200).get("brands") or [])}
+    retail = get_retail_performance(session) or {}
+
+    from config.brands import ALL_BRANDS, TIER1_BRANDS
+    out = []
+    for brand in ALL_BRANDS:
+        sig = []
+        m = mom.get(brand)
+        if m and m.get("recent_4w"):
+            ratio = m.get("momentum") or 1.0
+            tone = "up" if ratio >= 1.5 else ("down" if ratio <= 0.7 else "flat")
+            arw = "▲" if ratio >= 1.5 else ("▼" if ratio <= 0.7 else "")
+            sig.append({"icon": "📰", "kind": "기사",
+                        "text": f"기사 {m['recent_4w']}건 (4주, {ratio:.1f}배{arw})", "tone": tone})
+        sp = spikes.get(brand)
+        if sp and (sp.get("spike_ratio") or 0) >= 1.5:
+            sig.append({"icon": "🔍", "kind": "검색",
+                        "text": f"검색 {sp['spike_ratio']:.1f}배↑ ({sp.get('geo','')})", "tone": "up"})
+        f = fins.get(brand)
+        if f:
+            ys = f["years"]
+            yoy = None
+            for a, b in ((2025, 2024), (2024, 2023)):
+                if ys.get(a, {}).get("revenue") and ys.get(b, {}).get("revenue"):
+                    yoy = (ys[a]["revenue"] / ys[b]["revenue"] - 1) * 100
+                    break
+            if yoy is not None:
+                sig.append({"icon": "💰", "kind": "재무",
+                            "text": f"매출 {yoy:+.0f}%", "tone": "up" if yoy >= 10 else ("down" if yoy <= -5 else "flat")})
+        t = tm.get(brand)
+        if t and t.get("recent"):
+            sig.append({"icon": "🪧", "kind": "상표",
+                        "text": f"상표 {t.get('country','')} {t['recent']}건", "tone": "up"})
+        rt = retail.get(brand)
+        if rt and rt.get("rank"):
+            cat = "뷰티" if rt.get("category") in ("뷰티",) else rt.get("category", "")
+            sig.append({"icon": "🛒", "kind": "리테일",
+                        "text": f"아마존 {cat} #{rt['rank']}", "tone": "up" if rt["rank"] <= 20 else "flat"})
+        if not sig:
+            continue
+        sort = (m.get("_sort_score", 0) if m else 0) + (len(sig) * 5)
+        out.append({"brand": brand, "tier": 1 if brand in TIER1_BRANDS else 2,
+                    "signals": sig, "sort": sort})
+    out.sort(key=lambda x: x["sort"], reverse=True)
+    return out[:limit]
+
+
 def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) -> list[dict]:
     """핵심 서사 체인 합성 — (브랜드×국가)별 '무브→제품/성분→성과프록시'를 한 카드로.
 
