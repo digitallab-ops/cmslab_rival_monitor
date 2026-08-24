@@ -3804,7 +3804,7 @@ def _build_full_html(
     <div class="eyebrow"><span class="lab">이번 주 동향</span><span class="rule"></span><span class="rt jump" onclick="switchTab('strategy')">시장 탭 전체 →</span></div>
     <div class="cmd cmd-2">
       <div class="box"><div class="ph">가장 활발한 시장 <span class="c">수출 YoY</span></div><div class="mkl">{market_list_html}</div></div>
-      <div class="box"><div class="ph">핵심 무브 <span class="c">TOP</span></div>{move_stream_html}</div>
+      <div class="box"><div class="ph">핵심 무브 <span class="c">기간 연동</span></div><div id="move-stream-wrap">{move_stream_html}</div></div>
     </div>
 
     <!-- 4) 주간 AI 종합 + 브랜드 신호 강도 -->
@@ -3972,6 +3972,29 @@ def _build_full_html(
   }}
   </script>
 
+  <script>
+  window.rebuildMoveStream = function(){{
+    var wrap=document.getElementById('move-stream-wrap');
+    if(!wrap || !window.HIGH_DATA) return;
+    var arr=HIGH_DATA.slice().sort(function(a,b){{return (b.score||0)-(a.score||0);}});
+    var seen={{}}, rows=[], n=0;
+    for(var i=0;i<arr.length && n<7;i++){{
+      var a=arr[i];
+      if(a.imp!=='high' && a.imp!=='medium') continue;
+      var k=(a.brand||'')+'|'+(a.country||'')+'|'+(a.act||'');
+      if(seen[k]) continue; seen[k]=1;
+      var dot=(a.imp==='high')?'dot-h':'dot-m';
+      var t=String(a.title||'').slice(0,76).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+      var ac=String(a.act||'').replace(/</g,'&lt;');
+      var bb=String(a.brand||'').replace(/"/g,'');
+      rows.push('<div class="ev" data-b="'+bb+'" data-c="'+(a.country||'')+'"><div class="m"><span class="'+dot+'">●</span>'+(a.country||'')+' · '+ac+'</div><div class="t">'+t+'</div></div>');
+      n++;
+    }}
+    wrap.innerHTML='<div class="stream">'+(rows.join('')||'<div class="ev"><div class="t" style="color:var(--lo)">이 기간 핵심 무브 없음</div></div>')+'</div>';
+    wrap.onclick=function(e){{ var el=e.target.closest('.ev'); if(el && el.dataset.b) openHeatmapDrilldown(el.dataset.b, el.dataset.c||'all','all'); }};
+  }};
+  </script>
+
   <!-- ===== 탭: 기록 ===== -->
   <div class="tab-panel" id="tab-feed">
     <div class="section">
@@ -4131,6 +4154,7 @@ function setPeriod(days) {{
   // Articles table + drilldown data
   HIGH_DATA = d.articles;
   renderArticlesTable(d.articles);
+  if (window.rebuildMoveStream) window.rebuildMoveStream();
 
   // Reset filters + collapse
   _fBrand = 'all'; _fAct = 'all';
@@ -4197,6 +4221,7 @@ function applyDateRange() {{
   var filtered = BASE_ARTICLES.filter(function(a) {{ return a.date >= fromStr && a.date <= toStr; }});
   HIGH_DATA = filtered;
   renderArticlesTable(filtered);
+  if (window.rebuildMoveStream) window.rebuildMoveStream();
 
   // Recompute KPIs
   var brands = {{}}, countries = {{}}, high = 0;
