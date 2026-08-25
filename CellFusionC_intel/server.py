@@ -240,6 +240,26 @@ async def api_ask(request: Request):
 
 # ── 인사이트 API ─────────────────────────────────────────────────────────────
 
+@app.get("/api/period")
+async def api_period(from_date: str = Query(..., alias="from"),
+                     to_date: str = Query(..., alias="to")):
+    """임의 구간(과거 포함) 브리핑 데이터 — KPI·기사·synth를 DB에서 직접 조회.
+    클라 90일 캐시로 못 보는 구간(예: 26년 1분기)을 서버가 계산해 반환."""
+    import re as _re
+    if not (_re.match(r"^\d{4}-\d{2}-\d{2}$", from_date or "") and _re.match(r"^\d{4}-\d{2}-\d{2}$", to_date or "")):
+        return JSONResponse({"error": "날짜 형식 오류(YYYY-MM-DD)"}, status_code=400)
+    if from_date > to_date:
+        return JSONResponse({"error": "시작일이 종료일보다 늦습니다"}, status_code=400)
+    try:
+        import asyncio as _a
+        from dashboard.generate import build_period_payload
+        payload = await _a.to_thread(build_period_payload, from_date, to_date)
+        return payload
+    except Exception as e:
+        logger.warning("구간 조회 실패: %s", e)
+        return JSONResponse({"error": f"구간 조회 오류: {e}"}, status_code=500)
+
+
 @app.get("/api/insights")
 async def api_insights(
     from_date: str = Query(..., description="시작일 YYYY-MM-DD"),

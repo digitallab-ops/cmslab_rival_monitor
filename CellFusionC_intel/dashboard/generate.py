@@ -43,6 +43,8 @@ from analytics.queries import (
     get_opportunity_stories,
     get_nice_financials,
     get_brand_signal_summary,
+    get_collection_stats_range,
+    get_brand_insights_raw_by_range,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -3809,7 +3811,7 @@ def _build_full_html(
 
     <!-- 4) 주간 AI 종합 + 브랜드 신호 강도 -->
     <div class="eyebrow"><span class="lab">주간 종합</span><span class="rule"></span><span class="rt">최근 7일 AI 인사이트</span></div>
-    {synth_html}
+    <div id="synth-wrap">{synth_html}</div>
     <div class="section">
       <div class="section-title">브랜드 신호 요약
         <span class="section-sub">각 브랜드가 왜 강한지 — 기사·검색·매출·상표·리테일 실수치로 (클릭 시 상세)</span>
@@ -4200,69 +4202,35 @@ function applyDateRange() {{
     if (msgEl) {{ msgEl.style.display=''; msgEl.textContent='시작일이 종료일보다 늦습니다.'; }}
     return;
   }}
-  if (msgEl) msgEl.style.display = 'none';
-
-  // Check coverage — base dataset covers 90 days back from generation date
-  var today  = new Date(); today.setHours(0,0,0,0);
-  var fromDt = new Date(fromStr + 'T00:00:00');
-  var daysBack = Math.round((today - fromDt) / 86400000);
-  if (daysBack > 90) {{
-    if (msgEl) {{
-      msgEl.style.display = '';
-      msgEl.textContent = '90일 이전 데이터는 재생성 필요: python cli.py report --days ' + (daysBack + 5);
-    }}
-    return;
-  }}
-
-  // Deactivate preset buttons
+  if (msgEl) {{ msgEl.style.display = ''; msgEl.textContent = '구간 조회 중…'; }}
   document.querySelectorAll('.period-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+  var lbl = document.getElementById('period-label'); if (lbl) lbl.textContent = fromStr + ' ~ ' + toStr;
 
-  // Client-side filter on 90-day base dataset
-  var filtered = BASE_ARTICLES.filter(function(a) {{ return a.date >= fromStr && a.date <= toStr; }});
-  HIGH_DATA = filtered;
-  renderArticlesTable(filtered);
-  if (window.rebuildMoveStream) window.rebuildMoveStream();
-
-  // Recompute KPIs
-  var brands = {{}}, countries = {{}}, high = 0;
-  filtered.forEach(function(a) {{
-    brands[a.brand] = 1; countries[a.country] = 1;
-    if (a.imp === 'high') high++;
-  }});
-  var kpi = {{ total: filtered.length, high: high, brands: Object.keys(brands).length, countries: Object.keys(countries).length }};
-  var el;
-  el = document.getElementById('kpi-total');     if (el) el.textContent = kpi.total.toLocaleString();
-  el = document.getElementById('kpi-high');      if (el) el.textContent = kpi.high.toLocaleString();
-  el = document.getElementById('kpi-brands');    if (el) el.textContent = kpi.brands.toLocaleString();
-  el = document.getElementById('kpi-countries'); if (el) el.textContent = kpi.countries.toLocaleString();
-
-  // 임의 구간엔 직전 동기 baseline이 없음 → 증감 숨김, 스파크라인은 구간 내 일자별로 재계산
-  ['kpi-d-total','kpi-d-high','kpi-d-brands','kpi-d-countries'].forEach(function(id) {{
-    var de = document.getElementById(id);
-    if (de) de.innerHTML = '<div class="d neu"><span class="cap">사용자 지정 구간</span></div>';
-  }});
-  var byDay = {{}};
-  filtered.forEach(function(a) {{ if (a.date) byDay[a.date] = (byDay[a.date]||0) + 1; }});
-  var days = Object.keys(byDay).sort();
-  var spSeries = days.map(function(d2) {{ return byDay[d2]; }});
-  var spEl2 = document.getElementById('kpi-spark'); if (spEl2) spEl2.innerHTML = _sparkSvg(spSeries);
-
-  // Recompute country stats for world map
-  var cStats = {{}};
-  filtered.forEach(function(a) {{
-    if (!cStats[a.country]) cStats[a.country] = {{total:0, high:0, medium:0}};
-    cStats[a.country].total++;
-    if (a.imp === 'high') cStats[a.country].high++;
-    else cStats[a.country].medium++;
-  }});
-  if (window._wmSetStats) window._wmSetStats(cStats);
-
-  // Update header label
-  var lbl = document.getElementById('period-label');
-  if (lbl) lbl.textContent = fromStr + ' ~ ' + toStr;
-
-  // Fetch insights for this custom date range
-  _fetchInsights(fromStr, toStr);
+  // 서버 조회 — 임의 구간(과거 포함, 90일 제한 없음). DB에서 KPI·기사·synth 계산.
+  fetch('/api/period?from=' + encodeURIComponent(fromStr) + '&to=' + encodeURIComponent(toStr))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(d) {{
+      if (d.error) {{ if (msgEl) {{ msgEl.style.display=''; msgEl.textContent=d.error; }} return; }}
+      if (msgEl) msgEl.style.display = 'none';
+      var arts = d.articles || [];
+      HIGH_DATA = arts; renderArticlesTable(arts);
+      if (window.rebuildMoveStream) window.rebuildMoveStream();
+      var s = d.stats || {{}};
+      var set = function(id, v) {{ var e=document.getElementById(id); if(e) e.textContent=(v||0).toLocaleString(); }};
+      set('kpi-total', s.total); set('kpi-high', s.high);
+      set('kpi-brands', s.brands_active); set('kpi-countries', s.countries_active);
+      ['kpi-d-total','kpi-d-high','kpi-d-brands','kpi-d-countries'].forEach(function(id) {{
+        var de=document.getElementById(id); if(de) de.innerHTML='<div class="d neu"><span class="cap">사용자 지정 구간</span></div>';
+      }});
+      var byDay={{}}; arts.forEach(function(a){{ if(a.date) byDay[a.date]=(byDay[a.date]||0)+1; }});
+      var ds=Object.keys(byDay).sort();
+      var spEl=document.getElementById('kpi-spark'); if(spEl) spEl.innerHTML=_sparkSvg(ds.map(function(x){{return byDay[x];}}));
+      var cStats={{}}; arts.forEach(function(a){{ if(!cStats[a.country])cStats[a.country]={{total:0,high:0,medium:0}}; cStats[a.country].total++; if(a.imp==='high')cStats[a.country].high++; else cStats[a.country].medium++; }});
+      if(window._wmSetStats) window._wmSetStats(cStats);
+      if(d.synth_html){{ var sw=document.getElementById('synth-wrap'); if(sw) sw.innerHTML=d.synth_html; }}
+      _fetchInsights(fromStr, toStr);
+    }})
+    .catch(function(e) {{ if (msgEl) {{ msgEl.style.display=''; msgEl.textContent='구간 조회 실패: '+e; }} }});
 }}
 
 function _fetchInsights(fromStr, toStr) {{
@@ -4521,6 +4489,43 @@ document.addEventListener('DOMContentLoaded', function() {{
 # ---------------------------------------------------------------------------
 # 공개 API
 # ---------------------------------------------------------------------------
+
+def build_period_payload(from_date: str, to_date: str) -> dict:
+    """임의 구간(from~to, 과거 포함) 브리핑 데이터 서버 조회 — /api/period용.
+
+    반환 {stats:{total,high,brands,countries}, articles:[js], synth_html}.
+    클라 90일 캐시로 못 보는 과거 구간(예: 26년 1분기)을 DB에서 직접 조회.
+    """
+    from storage.models import get_session
+    session = get_session()
+    try:
+        stats = get_collection_stats_range(session, from_date, to_date)
+        arts = get_high_articles(session, from_date=from_date, to_date=to_date)
+        arts_js = [_fmt_art_for_js(a) for a in arts]
+        # 구간 synth (범위 인사이트 → 시장종합 LLM → 렌더)
+        market_text = ""
+        try:
+            raw = get_brand_insights_raw_by_range(session, from_date, to_date)
+            if raw:
+                market_text = generate_market_overview(raw)
+        except Exception as e:
+            logger.warning("구간 synth 실패: %s", e)
+        try:
+            growth = get_market_growth_story(session)
+        except Exception:
+            growth = {}
+        try:
+            composite = get_brand_composite_score(session)
+        except Exception:
+            composite = []
+        stats_kpi = {"total": stats["total"], "high": stats["high"],
+                     "brands_active": stats["brands_active"], "countries_active": stats["countries_active"]}
+        synth_html = _render_synth(stats_kpi, market_text, growth, composite)
+        return {"stats": stats, "articles": arts_js, "synth_html": synth_html,
+                "from": from_date, "to": to_date}
+    finally:
+        session.close()
+
 
 def generate_report(output_path: str = "rival_report.html", days: int = 30) -> str:
     """

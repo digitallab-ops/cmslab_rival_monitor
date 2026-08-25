@@ -230,22 +230,42 @@ def get_collection_stats(session: Session, days: int = 30) -> dict:
     }
 
 
+def get_collection_stats_range(session: Session, from_date: str, to_date: str) -> dict:
+    """임의 구간 KPI (총수집·HIGH·활성브랜드·국가). 과거 포함, 90일 제한 없음."""
+    row = session.execute(text(f"""
+        SELECT COUNT(*), COUNT(*) FILTER (WHERE importance='high'),
+               COUNT(DISTINCT brand), COUNT(DISTINCT country)
+        FROM {DB_SCHEMA}.news_articles
+        WHERE (is_duplicate IS NOT TRUE)
+          AND published_date::date >= :fd AND published_date::date <= :td
+    """), {"fd": from_date, "td": to_date}).fetchone()
+    return {"total": row[0] or 0, "high": row[1] or 0,
+            "brands_active": row[2] or 0, "countries_active": row[3] or 0}
+
+
 def get_high_articles(
     session: Session,
     days: int = 30,
     brand: "str | None" = None,
     country: "str | None" = None,
     limit: int = 2500,
+    from_date: "str | None" = None,
+    to_date: "str | None" = None,
 ) -> list:
     """HIGH/MEDIUM 기사 목록 반환 (드릴다운용).
 
-    limit: 상한. 기본 2500 — 지도 마커(전체 카운트)와 드릴다운 목록이
-    어긋나지 않도록 전 국가 커버가 목표(작은 시장이 상위국에 밀려 잘리는 것 방지).
+    from_date/to_date 지정 시 임의 구간 조회(과거 포함, 90일 제한 없음) —
+    지정 없으면 최근 days일. limit 기본 2500(소국 잘림 방지).
     """
-    cutoff = _cutoff_iso(days)
-
     where_extras = ""
-    params: dict = {"cutoff": cutoff, "lim": int(limit)}
+    params: dict = {"lim": int(limit)}
+    if from_date and to_date:
+        date_filter = "published_date::date >= :fd AND published_date::date <= :td"
+        params["fd"] = from_date
+        params["td"] = to_date
+    else:
+        params["cutoff"] = _cutoff_iso(days)
+        date_filter = "published_date >= :cutoff"
     if brand:
         where_extras += " AND LOWER(brand) = :brand"
         params["brand"] = brand.lower()
@@ -268,7 +288,7 @@ def get_high_articles(
                   OR brand_focus != 'incidental' -- 신기사: incidental 제외
                   OR importance = 'high'         -- HIGH는 incidental이어도 표시
               )
-              AND published_date >= :cutoff
+              AND {date_filter}
               {where_extras}
             ORDER BY
                 CASE importance WHEN 'high' THEN 0 ELSE 1 END,
