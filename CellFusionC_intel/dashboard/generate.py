@@ -3722,6 +3722,10 @@ def _build_full_html(
             "articles":      v["articles"],
             "country_stats": v["country_stats"],
             "market":        _esc_s(v.get("market", "")),
+            "synth_html":    _render_synth(
+                {"total": v["kpi"]["total"], "high": v["kpi"]["high"],
+                 "brands_active": v["kpi"]["brands"], "countries_active": v["kpi"]["countries"]},
+                v.get("market", ""), growth_story or {}, composite or []),
             "insights": {
                 brand: {
                     "top_act":       _esc_s(ins["top_act"]),
@@ -4171,9 +4175,10 @@ function setPeriod(days) {{
   // World map
   if (window._wmSetStats) window._wmSetStats(d.country_stats);
 
-  // Insight cards + 시장 종합
+  // Insight cards + 시장 종합 + synth(주간 종합) 프리셋 스왑
   if (d.insights && window._renderInsights) window._renderInsights(d.insights);
   if (window._renderMarket) window._renderMarket(d.market || '');
+  if (d.synth_html) {{ var sw=document.getElementById('synth-wrap'); if(sw) sw.innerHTML=d.synth_html; }}
 }}
 
 // ── Date picker helpers ──
