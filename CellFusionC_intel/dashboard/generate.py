@@ -45,6 +45,8 @@ from analytics.queries import (
     get_brand_signal_summary,
     get_collection_stats_range,
     get_brand_insights_raw_by_range,
+    get_ingredient_trends,
+    get_negative_signals,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -744,6 +746,45 @@ def _render_financials_nice(fins: list) -> str:
         '‘단일브랜드’는 회사≈브랜드(예: 아누아=더파운더즈). '
         'Cos de Baha·b.plain·에스트라·제로이드는 NICE 미포함.</div>'
     )
+
+
+def _render_ingredient_trends(trends: list) -> str:
+    """경쟁사 성분 지형 — 어떤 성분이 뜨나(언급수·주도 브랜드). 제조사 R&D 인텔."""
+    if not trends:
+        return '<p class="no-data">성분 데이터 축적 중 (신규 수집분부터 · 분류기 성분 추출)</p>'
+    mx = max((t["mentions"] for t in trends), default=1)
+    rows = []
+    for t in trends[:12]:
+        w = int(t["mentions"] / mx * 100)
+        who = ", ".join(t.get("brands", [])[:4]) + ("…" if t.get("brand_cnt", 0) > 4 else "")
+        rows.append(
+            f'<div class="ing-row"><span class="ing-name">{_esc(t["ingredient"])}</span>'
+            f'<div class="ing-bar-wrap"><div class="ing-bar" style="width:{max(w,4)}%"></div></div>'
+            f'<span class="ing-n">{t["mentions"]}건 · {t.get("brand_cnt",0)}개</span>'
+            f'<span class="ing-who">{_esc(who)}</span></div>'
+        )
+    return f'<div class="ing-list">{"".join(rows)}</div>'
+
+
+def _render_negative_signals(negs: list) -> str:
+    """경쟁사 악재(리콜·논란·규제·실적악화) = 우리 기회 신호."""
+    if not negs:
+        return '<p class="no-data">최근 경쟁사 악재 없음</p>'
+    rows = []
+    for n in negs[:10]:
+        flag = COUNTRY_FLAGS.get(n.get("country", ""), "🌐")
+        act = ACTIVITY_LABELS.get(n.get("activity_type", ""), n.get("activity_type", ""))
+        link = (f'<a class="neg-src" href="{_esc(n["source_url"])}" target="_blank" rel="noopener">원문 ↗</a>'
+                if str(n.get("source_url", "")).startswith("http") else "")
+        imp = "HIGH" if n.get("importance") == "high" else "MED"
+        rows.append(
+            f'<div class="neg-row" onclick="openHeatmapDrilldown(\'{_esc(n.get("brand",""))}\',\'{_esc(n.get("country",""))}\',\'all\')">'
+            f'<div class="neg-top"><span class="neg-imp">⚠️ {imp}</span>'
+            f'<span class="neg-brand">{_esc(n.get("brand",""))}</span>'
+            f'<span class="neg-cc">{flag} {_esc(n.get("country",""))} · {_esc(act)}</span></div>'
+            f'<div class="neg-title">{_esc(n.get("title",""))[:80]} {link}</div></div>'
+        )
+    return f'<div class="neg-list">{"".join(rows)}</div>'
 
 
 def _render_search_spikes(spikes: list) -> str:
@@ -2105,6 +2146,25 @@ a:hover { color: var(--gold); }
 .bsig-chip.t-flat { color:var(--mid); background:rgba(255,255,255,.05); }
 .bsig-note { font-size:12px; color:var(--lo); padding:12px 8px 2px; line-height:1.6; }
 .bsig-empty { padding:16px; color:var(--lo); }
+/* ── 성분 지형 ── */
+.ing-list { display:flex; flex-direction:column; gap:7px; }
+.ing-row { display:grid; grid-template-columns:120px 1fr 90px 1fr; align-items:center; gap:10px; font-size:13px; }
+.ing-name { font-weight:700; color:var(--champ2); }
+.ing-bar-wrap { background:var(--deep); border-radius:6px; height:10px; overflow:hidden; }
+.ing-bar { height:100%; background:linear-gradient(90deg,var(--cobalt),var(--teal)); border-radius:6px; }
+.ing-n { font-family:var(--mono); font-size:12px; color:var(--mid); white-space:nowrap; }
+.ing-who { font-size:12px; color:var(--lo); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* ── 경쟁사 악재 ── */
+.neg-list { display:flex; flex-direction:column; gap:9px; }
+.neg-row { padding:11px 13px; background:rgba(255,107,122,.06); border:1px solid rgba(255,107,122,.2);
+  border-left:3px solid var(--coral); border-radius:8px; cursor:pointer; }
+.neg-row:hover { background:rgba(255,107,122,.11); }
+.neg-top { display:flex; align-items:center; gap:9px; margin-bottom:5px; }
+.neg-imp { font-family:var(--mono); font-size:10.5px; font-weight:800; color:var(--coral); }
+.neg-brand { font-size:14px; font-weight:700; color:var(--hi); }
+.neg-cc { font-size:12px; color:var(--lo); }
+.neg-title { font-size:13.5px; color:var(--mid); line-height:1.5; }
+.neg-src { color:var(--champ); font-size:11.5px; white-space:nowrap; }
 /* ── 검색 탭 (MCP 챗봇) ── */
 .search-examples { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
 .se-chip { font-size:12.5px; color:var(--mid); background:var(--deep); border:1px solid var(--border);
@@ -3627,6 +3687,8 @@ def _build_full_html(
     growth_story: dict = None,
     financials: list = None,
     nice_financials: list = None,
+    ingredient_trends: list = None,
+    negative_signals: list = None,
     trademark_sig: dict = None,
     search_spikes: list = None,
     composite: list = None,
@@ -3661,6 +3723,8 @@ def _build_full_html(
     growth_headline_html = _render_growth_headline(growth_story or {})
     financials_html   = _render_financials(financials or [])
     financials_nice_html = _render_financials_nice(nice_financials or [])
+    ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
+    negative_signals_html = _render_negative_signals(negative_signals or [])
     trademark_html    = _render_trademark(trademark_sig or {})
     search_spikes_html = _render_search_spikes(search_spikes or [])
     # ── 커맨드센터(브리핑 탭) 신규 블록 ──
@@ -3854,6 +3918,22 @@ def _build_full_html(
         🔺 글로벌 검색 급등 <span class="section-sub">구글 트렌드 글로벌·미국·일본 — 최근7일 vs 직전28일 급증(네이버=국내 보완, 해외 수요 조기신호)</span>
       </div>
       {search_spikes_html}
+    </div>
+
+    <!-- 경쟁사 악재 = 우리 기회 신호 -->
+    <div class="section">
+      <div class="section-title">
+        ⚠️ 경쟁사 악재 <span class="section-sub">리콜·품질이슈·논란·규제·실적악화 — 경쟁사 리스크 = 우리 반사 기회</span>
+      </div>
+      {negative_signals_html}
+    </div>
+
+    <!-- 경쟁사 성분 지형 (제조사 R&D 인텔) -->
+    <div class="section">
+      <div class="section-title">
+        🧪 경쟁사 성분 지형 <span class="section-sub">경쟁 신제품에 뜨는 성분(PDRN·엑소좀 등) — 언급수·주도 브랜드. 최근 30일</span>
+      </div>
+      {ingredient_trends_html}
     </div>
 
     <!-- 해외 상표 출원 (브랜드 선행신호 — 시장 탭에서 이동) -->
@@ -4582,6 +4662,14 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             nice_financials = get_nice_financials(session)
         except Exception:
             nice_financials = []
+        try:
+            ingredient_trends = get_ingredient_trends(session, days=30, limit=12)
+        except Exception:
+            ingredient_trends = []
+        try:
+            negative_signals = get_negative_signals(session, days=30, limit=10)
+        except Exception:
+            negative_signals = []
         # 해외 상표 출원 선행신호(KIPRIS) — trademark_filings 없으면 빈 dict
         try:
             trademark_sig = get_trademark_signals(session)
@@ -4762,6 +4850,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         growth_story=growth_story,
         financials=financials,
         nice_financials=nice_financials,
+        ingredient_trends=ingredient_trends,
+        negative_signals=negative_signals,
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
         composite=composite,
