@@ -1009,6 +1009,53 @@ def get_retail_performance(session: Session, days: int = 21) -> dict:
     return out
 
 
+def get_retail_rank_history(session: Session, days: int = 30) -> list[dict]:
+    """브랜드별 아마존 순위 시계열 — 일별 최고순위 추이. '누가 뜨고 지는지'.
+
+    반환: [{brand, dates:[...], ranks:[...], latest, first, delta(개선=+), category}], 개선순.
+    delta = first_rank - latest_rank (순위 낮아지면=개선, +값).
+    """
+    cutoff = _cutoff_iso(days)
+    try:
+        rows = session.execute(text(f"""
+            SELECT brand, capture_date::text, MIN(rank) AS best
+            FROM {DB_SCHEMA}.retail_rankings
+            WHERE is_monitored AND rank IS NOT NULL AND capture_date >= :cutoff
+            GROUP BY brand, capture_date
+            ORDER BY brand, capture_date
+        """), {"cutoff": cutoff}).fetchall()
+    except Exception:
+        return []
+    by: dict = {}
+    for brand, d, best in rows:
+        o = by.setdefault(brand, {"brand": brand, "dates": [], "ranks": []})
+        o["dates"].append(d)
+        o["ranks"].append(int(best))
+    # 최신 카테고리(대표) 붙이기
+    cats = {}
+    try:
+        for r in session.execute(text(f"""
+            SELECT DISTINCT ON (brand) brand, category FROM {DB_SCHEMA}.retail_rankings
+            WHERE is_monitored AND rank IS NOT NULL AND capture_date >= :cutoff
+            ORDER BY brand, capture_date DESC, rank ASC
+        """), {"cutoff": cutoff}).fetchall():
+            cats[r[0]] = r[1]
+    except Exception:
+        pass
+    out = []
+    for brand, o in by.items():
+        rk = o["ranks"]
+        if len(rk) < 2:
+            continue
+        o["latest"] = rk[-1]
+        o["first"] = rk[0]
+        o["delta"] = rk[0] - rk[-1]     # +면 순위 상승(개선)
+        o["category"] = cats.get(brand, "")
+        out.append(o)
+    out.sort(key=lambda x: (x["latest"], -x["delta"]))   # 현재 순위 좋고 개선된 순
+    return out
+
+
 def get_retail_landscape(session: Session, days: int = 21, limit: int = 20) -> list[dict]:
     """아마존 리테일 지형 — 카테고리별 상위 K뷰티 제품(모니터링+메이저). 대시보드용."""
     cutoff = _cutoff_iso(days)

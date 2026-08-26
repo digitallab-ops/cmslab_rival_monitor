@@ -47,6 +47,7 @@ from analytics.queries import (
     get_brand_insights_raw_by_range,
     get_ingredient_trends,
     get_negative_signals,
+    get_retail_rank_history,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -746,6 +747,37 @@ def _render_financials_nice(fins: list) -> str:
         '‘단일브랜드’는 회사≈브랜드(예: 아누아=더파운더즈). '
         'Cos de Baha·b.plain·에스트라·제로이드는 NICE 미포함.</div>'
     )
+
+
+def _render_rank_trends(history: list) -> str:
+    """아마존 리테일 순위 추세 — 브랜드별 일별 순위 스파크라인 + 변동. '누가 뜨고 지나'."""
+    if not history:
+        return '<p class="no-data">리테일 순위 추세 축적 중 (매일 스냅샷 · 2일 이상 필요)</p>'
+    rows = []
+    for h in history[:12]:
+        ranks = h["ranks"]
+        mx = max(ranks)
+        inv = [mx - r for r in ranks]      # 순위 반전: 좋은 순위(낮은 수)가 위로
+        spark = _sparkline_svg(inv, w=110, h=22)
+        dl = h["delta"]
+        if dl > 0:
+            tone, arw, dtxt = "var(--teal)", "▲", f"+{dl}"
+        elif dl < 0:
+            tone, arw, dtxt = "var(--coral)", "▼", f"{dl}"
+        else:
+            tone, arw, dtxt = "var(--lo)", "–", "0"
+        rows.append(
+            f'<div class="rt-row" onclick="openHeatmapDrilldown(\'{_esc(h["brand"])}\',\'all\',\'all\')">'
+            f'<span class="rt-brand">{_esc(h["brand"])}</span>'
+            f'<span class="rt-cat">{_esc(h.get("category",""))}</span>'
+            f'<span class="rt-now">#{h["latest"]}</span>'
+            f'<span class="rt-spark">{spark}</span>'
+            f'<span class="rt-delta" style="color:{tone}">{arw} {dtxt}</span></div>'
+        )
+    return ('<div class="rt-head"><span>브랜드</span><span>카테고리</span><span>현재</span>'
+            '<span>15일 추이</span><span>변동</span></div>'
+            f'<div class="rt-list">{"".join(rows)}</div>'
+            '<div class="rt-note">스파크라인 ↑ = 순위 상승(개선) · 변동 = 첫날 대비 순위 변화</div>')
 
 
 def _render_ingredient_trends(trends: list) -> str:
@@ -2165,6 +2197,20 @@ a:hover { color: var(--gold); }
 .neg-cc { font-size:12px; color:var(--lo); }
 .neg-title { font-size:13.5px; color:var(--mid); line-height:1.5; }
 .neg-src { color:var(--champ); font-size:11.5px; white-space:nowrap; }
+/* ── 아마존 리테일 순위 추세 ── */
+.rt-head, .rt-row { display:grid; grid-template-columns:140px 1fr 62px 120px 74px; align-items:center; gap:12px; }
+.rt-head { font-size:11px; font-weight:800; color:var(--champ); text-transform:uppercase; letter-spacing:.04em;
+  padding:0 12px 8px; border-bottom:1px solid var(--border); }
+.rt-list { display:flex; flex-direction:column; }
+.rt-row { padding:11px 12px; border-bottom:1px solid rgba(58,70,130,.35); cursor:pointer; transition:background .12s; }
+.rt-row:hover { background:var(--elevated); }
+.rt-brand { font-size:14px; font-weight:700; color:var(--hi); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rt-cat { font-size:12.5px; color:var(--lo); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rt-now { font-family:var(--mono); font-size:15px; font-weight:800; color:var(--champ2); }
+.rt-spark { display:block; }
+.rt-spark .spark { display:block; width:110px; height:22px; overflow:visible; }
+.rt-delta { font-family:var(--mono); font-size:13px; font-weight:800; text-align:right; white-space:nowrap; }
+.rt-note { font-size:11.5px; color:var(--lo); padding:10px 12px 0; }
 /* ── 검색 탭 (MCP 챗봇) ── */
 .search-examples { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
 .se-chip { font-size:12.5px; color:var(--mid); background:var(--deep); border:1px solid var(--border);
@@ -3695,6 +3741,7 @@ def _build_full_html(
     brand_signals: list = None,
     stories: list = None,
     score_trend: dict = None,
+    rank_trends: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -3725,6 +3772,7 @@ def _build_full_html(
     financials_nice_html = _render_financials_nice(nice_financials or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     negative_signals_html = _render_negative_signals(negative_signals or [])
+    rank_trends_html  = _render_rank_trends(rank_trends or [])
     trademark_html    = _render_trademark(trademark_sig or {})
     search_spikes_html = _render_search_spikes(search_spikes or [])
     # ── 커맨드센터(브리핑 탭) 신규 블록 ──
@@ -3997,6 +4045,14 @@ def _build_full_html(
         🌍 화장품 수출 시장 랭킹 <span class="section-sub">관세청 실수출액(스킨케어·기초 HS 330499) 규모순 + YoY · 진출 우선순위 하드데이터</span>
       </div>
       {export_growth_html}
+    </div>
+
+    <!-- 아마존 리테일 순위 추세 — 실판매 채널 성과(누가 뜨고 지나) -->
+    <div class="section">
+      <div class="section-title">
+        🛒 아마존 리테일 순위 추세 <span class="section-sub">아마존 베스트셀러 실순위(공식 BSR) 일별 스냅샷 — 첫날 대비 순위 변동으로 실판매에서 누가 뜨고 지는지 · 최근 15일</span>
+      </div>
+      {rank_trends_html}
     </div>
 
     {expansion_playbook_html}
@@ -4670,6 +4726,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             negative_signals = get_negative_signals(session, days=30, limit=10)
         except Exception:
             negative_signals = []
+        # 아마존 리테일 순위 추세(일별 스냅샷) — retail_rankings 없으면 빈 리스트
+        try:
+            rank_trends = get_retail_rank_history(session, days=30)
+        except Exception:
+            rank_trends = []
         # 해외 상표 출원 선행신호(KIPRIS) — trademark_filings 없으면 빈 dict
         try:
             trademark_sig = get_trademark_signals(session)
@@ -4852,6 +4913,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         nice_financials=nice_financials,
         ingredient_trends=ingredient_trends,
         negative_signals=negative_signals,
+        rank_trends=rank_trends,
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
         composite=composite,
