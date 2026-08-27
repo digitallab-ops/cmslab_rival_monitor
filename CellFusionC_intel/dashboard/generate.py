@@ -48,6 +48,8 @@ from analytics.queries import (
     get_ingredient_trends,
     get_negative_signals,
     get_retail_rank_history,
+    get_oliveyoung_movers,
+    get_oliveyoung_category_rank,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -778,6 +780,69 @@ def _render_rank_trends(history: list) -> str:
             '<span>15일 추이</span><span>변동</span></div>'
             f'<div class="rt-list">{"".join(rows)}</div>'
             '<div class="rt-note">스파크라인 ↑ = 순위 상승(개선) · 변동 = 첫날 대비 순위 변화</div>')
+
+
+def _oy_delta_span(delta) -> str:
+    """올영 순위 변동 배지 — +면 상승(개선/teal), -면 하락(coral)."""
+    d = delta or 0
+    if d > 0:
+        return f'<span class="oy-d up">▲{d}</span>'
+    if d < 0:
+        return f'<span class="oy-d dn">▼{abs(d)}</span>'
+    return '<span class="oy-d fl">–</span>'
+
+
+def _render_oliveyoung(flagship: dict, movers: list) -> str:
+    """국내 올리브영 — 선케어(간판) 국내 랭킹 + 전 카테고리 급변동. 아마존(해외)↔올영(국내) 대조."""
+    fe = (flagship or {}).get("entries") or []
+    if not fe and not movers:
+        return ('<p class="no-data">올리브영 랭킹 축적 중 (매일 스냅샷 · 원격 채널 MCP 수집 후)</p>')
+
+    # ── 선케어(간판) 국내 랭킹 ──
+    frows = []
+    for e in fe[:12]:
+        mon = e.get("is_monitored")
+        ours = e.get("is_ours")
+        brand = e.get("brand") or ""
+        prod = _clean_product_name(e.get("goods_name", ""), brand)
+        bcls = "oy-mon" if mon else ("oy-our" if ours else "")
+        blabel = _esc(brand) if brand else "—"
+        tag = ('<span class="oy-tag mon">경쟁</span>' if mon
+               else ('<span class="oy-tag our">자사</span>' if ours else ''))
+        frows.append(
+            f'<div class="oy-row"><span class="oy-rank">#{e["rank"]}</span>'
+            f'{_oy_delta_span(e.get("delta"))}'
+            f'<span class="oy-brand {bcls}">{blabel}{tag}</span>'
+            f'<span class="oy-prod">{_esc(prod)}</span></div>'
+        )
+    fcap = (flagship or {}).get("capture_date") or ""
+    flag_html = (
+        f'<div class="oy-block"><div class="oy-bt">☀️ 선케어 국내 TOP <span class="oy-sub">'
+        f'셀퓨전씨 간판 카테고리 · 올영 실랭킹 {fcap}</span></div>'
+        f'<div class="oy-list">{"".join(frows)}</div></div>'
+    ) if frows else ""
+
+    # ── 전 카테고리 급변동(전일 대비) ──
+    mrows = []
+    for m in movers[:10]:
+        mon = m.get("is_monitored")
+        brand = m.get("brand") or ""
+        prod = _clean_product_name(m.get("goods_name", ""), brand)
+        head = f'{_esc(brand)} · ' if brand else ""
+        bcls = "oy-mon" if mon else ""
+        mrows.append(
+            f'<div class="oy-mv"><span class="oy-cat">{_esc(m.get("category",""))}</span>'
+            f'<span class="oy-mvname {bcls}">{head}{_esc(prod)}</span>'
+            f'<span class="oy-mvrank">#{m["rank"]}</span>'
+            f'{_oy_delta_span(m.get("delta"))}</div>'
+        )
+    mv_html = (
+        f'<div class="oy-block"><div class="oy-bt">📈 국내 급변동 <span class="oy-sub">'
+        f'전 카테고리 전일 대비 순위 급등·급락 · ▲=상승</span></div>'
+        f'<div class="oy-list">{"".join(mrows)}</div></div>'
+    ) if mrows else ""
+
+    return f'<div class="oy-wrap">{flag_html}{mv_html}</div>'
 
 
 def _render_ingredient_trends(trends: list) -> str:
@@ -2211,6 +2276,32 @@ a:hover { color: var(--gold); }
 .rt-spark .spark { display:block; width:110px; height:22px; overflow:visible; }
 .rt-delta { font-family:var(--mono); font-size:13px; font-weight:800; text-align:right; white-space:nowrap; }
 .rt-note { font-size:11.5px; color:var(--lo); padding:10px 12px 0; }
+/* ── 국내 올리브영 ── */
+.oy-wrap { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+@media (max-width:900px) { .oy-wrap { grid-template-columns:1fr; } }
+.oy-block { background:var(--elevated); border:1px solid var(--border); border-radius:10px; padding:14px 15px; }
+.oy-bt { font-size:14px; font-weight:800; color:var(--hi); margin-bottom:10px; }
+.oy-sub { font-size:11px; font-weight:500; color:var(--lo); margin-left:6px; }
+.oy-list { display:flex; flex-direction:column; }
+.oy-row { display:grid; grid-template-columns:38px 44px 1fr; align-items:center; gap:8px;
+  padding:7px 4px; border-bottom:1px solid rgba(58,70,130,.32); }
+.oy-row:last-child, .oy-mv:last-child { border-bottom:none; }
+.oy-rank { font-family:var(--mono); font-size:14px; font-weight:800; color:var(--champ2); }
+.oy-d { font-family:var(--mono); font-size:12px; font-weight:800; text-align:center; }
+.oy-d.up { color:var(--teal); } .oy-d.dn { color:var(--coral); } .oy-d.fl { color:var(--lo); }
+.oy-brand { grid-column:3; font-size:13px; font-weight:700; color:var(--mid); display:flex; align-items:center; gap:6px; }
+.oy-brand.oy-mon { color:var(--champ); } .oy-brand.oy-our { color:var(--teal); }
+.oy-prod { grid-column:3; font-size:11.5px; color:var(--lo); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.oy-tag { font-size:9.5px; font-weight:800; padding:1px 5px; border-radius:3px; }
+.oy-tag.mon { background:rgba(139,149,255,.18); color:var(--champ); }
+.oy-tag.our { background:rgba(5,224,224,.16); color:var(--teal); }
+.oy-mv { display:grid; grid-template-columns:64px 1fr 42px 36px; align-items:center; gap:8px;
+  padding:7px 4px; border-bottom:1px solid rgba(58,70,130,.32); }
+.oy-cat { font-size:10.5px; font-weight:700; color:var(--champ); background:var(--deep);
+  border-radius:4px; padding:2px 6px; text-align:center; white-space:nowrap; }
+.oy-mvname { font-size:12px; color:var(--mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.oy-mvname.oy-mon { color:var(--hi); font-weight:700; }
+.oy-mvrank { font-family:var(--mono); font-size:12.5px; font-weight:700; color:var(--champ2); text-align:right; }
 /* ── 검색 탭 (MCP 챗봇) ── */
 .search-examples { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
 .se-chip { font-size:12.5px; color:var(--mid); background:var(--deep); border:1px solid var(--border);
@@ -3742,6 +3833,8 @@ def _build_full_html(
     stories: list = None,
     score_trend: dict = None,
     rank_trends: list = None,
+    oliveyoung_movers: list = None,
+    oliveyoung_flagship: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -3773,6 +3866,7 @@ def _build_full_html(
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     negative_signals_html = _render_negative_signals(negative_signals or [])
     rank_trends_html  = _render_rank_trends(rank_trends or [])
+    oliveyoung_html   = _render_oliveyoung(oliveyoung_flagship or {}, oliveyoung_movers or [])
     trademark_html    = _render_trademark(trademark_sig or {})
     search_spikes_html = _render_search_spikes(search_spikes or [])
     # ── 커맨드센터(브리핑 탭) 신규 블록 ──
@@ -4053,6 +4147,14 @@ def _build_full_html(
         🛒 아마존 리테일 순위 추세 <span class="section-sub">아마존 베스트셀러 실순위(공식 BSR) 일별 스냅샷 — 첫날 대비 순위 변동으로 실판매에서 누가 뜨고 지는지 · 최근 15일</span>
       </div>
       {rank_trends_html}
+    </div>
+
+    <!-- 국내 올리브영 (국내 최대 H&B 채널 — 아마존 해외와 대조) -->
+    <div class="section">
+      <div class="section-title">
+        🇰🇷 국내 올리브영 <span class="section-sub">국내 최대 H&amp;B 채널 실랭킹 — 셀퓨전씨 간판(선케어) 국내 지형 + 전 카테고리 급변동. 아마존(해외)↔올영(국내) 대조</span>
+      </div>
+      {oliveyoung_html}
     </div>
 
     {expansion_playbook_html}
@@ -4731,6 +4833,12 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             rank_trends = get_retail_rank_history(session, days=30)
         except Exception:
             rank_trends = []
+        # 국내 올리브영 랭킹(원격 채널 MCP 적재) — oliveyoung_rankings 없으면 빈 값
+        try:
+            oliveyoung_movers = get_oliveyoung_movers(session, limit=10)
+            oliveyoung_flagship = get_oliveyoung_category_rank(session, "선케어", 12)
+        except Exception:
+            oliveyoung_movers, oliveyoung_flagship = [], {}
         # 해외 상표 출원 선행신호(KIPRIS) — trademark_filings 없으면 빈 dict
         try:
             trademark_sig = get_trademark_signals(session)
@@ -4914,6 +5022,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         ingredient_trends=ingredient_trends,
         negative_signals=negative_signals,
         rank_trends=rank_trends,
+        oliveyoung_movers=oliveyoung_movers,
+        oliveyoung_flagship=oliveyoung_flagship,
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
         composite=composite,

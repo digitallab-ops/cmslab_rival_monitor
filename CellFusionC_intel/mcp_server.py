@@ -8,6 +8,8 @@ FastAPI(server.py)에 streamable-http로 마운트되며(/mcp), stateless 모드
 로컬 단독 실행: `python mcp_server.py` (기본 8100포트).
 """
 
+import os
+import json
 import logging
 
 from mcp.server.fastmcp import FastMCP
@@ -478,6 +480,75 @@ def get_search_spikes(scope: str = "all") -> dict:
                             "baseline_index": x["baseline"]} for x in spikes]}
     finally:
         s.close()
+
+
+# ── 올리브영 국내 채널 (원격 채널 MCP 라이브 프록시) ──────────────────────────
+# 대시보드는 oliveyoung_rankings 테이블(스케줄러 적재)을 쓰지만, 챗봇은 리뷰·인사이트
+# 등 미적재 데이터까지 최신으로 답해야 해 원격 채널 MCP를 실시간 프록시한다.
+_CHANNEL_MCP_URL = os.getenv("CHANNEL_MCP_URL", "https://oliveyoung-review.vercel.app/api/mcp")
+_CHANNEL_MCP_API_KEY = os.getenv("CHANNEL_MCP_API_KEY", "")
+
+
+async def _channel(tool_name: str, arguments: dict | None = None):
+    """원격 올리브영/채널 인사이트 MCP 툴 호출 (Streamable HTTP)."""
+    try:
+        from mcp.client.streamable_http import streamablehttp_client
+        from mcp import ClientSession as _ClientSession
+        headers: dict[str, str] = {}
+        if _CHANNEL_MCP_API_KEY:
+            headers["Authorization"] = f"Bearer {_CHANNEL_MCP_API_KEY}"
+        async with streamablehttp_client(_CHANNEL_MCP_URL, headers=headers) as (r, w, _):
+            async with _ClientSession(r, w) as sess:
+                await sess.initialize()
+                res = await sess.call_tool(tool_name, arguments or {})
+        if not res.content:
+            return {"available": True, "note": "결과 없음"}
+        txt = res.content[0].text
+        try:
+            return {"available": True, "data": json.loads(txt)}
+        except (ValueError, TypeError):
+            return {"available": True, "data": txt}
+    except Exception as e:
+        return {"available": False,
+                "note": f"올리브영 채널 MCP 접속 실패({tool_name}): {e}"}
+
+
+@rival_mcp.tool()
+async def get_oliveyoung_rankings(category: str = "") -> dict:
+    """올리브영 국내 카테고리별 베스트 순위(오늘 최신 Top20). 국내 최대 H&B 채널 실랭킹.
+
+    각 상품에 prev_rank·delta(전일대비)·is_ours(=셀퓨전씨 자사) 포함.
+    category: '선케어'·'스킨케어'·'마스크팩'·'클렌징'·'더모 코스메틱'·'바디케어'·'맨즈에딧'·'전체'.
+    비우면 전체 카테고리. "올영에서 선크림 몇 위야?", "국내 랭킹" 류 질문용.
+    """
+    return await _channel("get_market_rankings", {"category": category} if category else {})
+
+
+@rival_mcp.tool()
+async def get_oliveyoung_movers() -> dict:
+    """올리브영 최근 7일 순위 변동 큰 상품 Top20(total_change 양수=상승). 국내 '누가 뜨고 지나'."""
+    return await _channel("get_top_movers")
+
+
+@rival_mcp.tool()
+async def get_oliveyoung_review_alerts() -> dict:
+    """올리브영 최근 7일 부정 리뷰(별점1~2) 급증 상품 + 주요 키워드. 주로 셀퓨전씨 자사 리뷰 경보."""
+    return await _channel("get_negative_alerts")
+
+
+@rival_mcp.tool()
+async def get_oliveyoung_review_compare(category: str = "") -> dict:
+    """올리브영 리뷰 키워드로 본 경쟁사 vs 셀퓨전씨 강점·약점(긍정/부정 키워드 대조).
+
+    category 지정 시 해당 카테고리만. "경쟁사 대비 우리 약점?", "리뷰에서 뭘 칭찬해?" 류 질문용.
+    """
+    return await _channel("get_competitor_analysis", {"category": category} if category else {})
+
+
+@rival_mcp.tool()
+async def get_oliveyoung_daily_brief() -> dict:
+    """올리브영 오늘 자동 생성 종합 인사이트 브리핑(순위·리뷰·시장 동향 요약). "국내 현황 요약" 류."""
+    return await _channel("get_daily_brief")
 
 
 if __name__ == "__main__":

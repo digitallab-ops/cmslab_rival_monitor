@@ -350,6 +350,20 @@ def job_retail_ranking() -> None:
         logger.warning("리테일 랭킹 수집 스킵(네트워크/차단 확인): %s", e)
 
 
+def job_oliveyoung_ranking() -> None:
+    """올리브영 국내 랭킹 수집(국내 최대 H&B 채널·시계열). 원격 채널 MCP 프록시. 매일."""
+    logger.info("=== [매일] 올리브영 국내 랭킹 수집 시작 ===")
+    try:
+        from signals.oliveyoung_channel import run as run_oy
+        r = run_oy()
+        logger.info("올영 랭킹 수집 완료: 저장 %d · 모니터링 %d · 자사 %d · 브랜드 %d",
+                    r.get("captured", 0), r.get("monitored", 0),
+                    r.get("ours", 0), len(r.get("brands", {})))
+        ping_dashboard_refresh()
+    except Exception as e:
+        logger.warning("올영 랭킹 수집 스킵(원격 MCP/네트워크 확인): %s", e)
+
+
 def job_profile_sync() -> None:
     """Cafe24 → 자사 제품 라인 자동 동기화 (company_profile.md). 실패해도 파이프라인 무영향."""
     logger.info("=== 자사 제품 프로필 동기화 시작 ===")
@@ -488,6 +502,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(hour=6, minute=20),
         id="retail_ranking",
         name="[매일] 아마존 리테일 랭킹 수집(9개국)",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매일 06:30 KST — 올리브영 국내 랭킹(국내 최대 H&B 채널·시계열). 원격 채널 MCP 프록시.
+    scheduler.add_job(
+        job_oliveyoung_ranking,
+        trigger=CronTrigger(hour=6, minute=30),
+        id="oliveyoung_ranking",
+        name="[매일] 올리브영 국내 랭킹 수집",
         max_instances=1,
         coalesce=True,
     )

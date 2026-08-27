@@ -1080,6 +1080,61 @@ def get_retail_landscape(session: Session, days: int = 21, limit: int = 20) -> l
              "review_count": r[6], "url": r[7] or ""} for r in rows]
 
 
+def get_oliveyoung_movers(session: Session, limit: int = 12) -> list[dict]:
+    """올리브영 국내 급변동 — 최신 스냅샷에서 전일 대비 순위 변동 큰 상품. '국내에서 누가 뜨고 지나'.
+
+    반환: [{category, rank, prev_rank, delta, goods_name, brand, is_monitored, is_ours}], |delta|순.
+    delta>0 = 순위 상승(개선). 전체 카테고리는 중복이라 제외(세부 카테고리만).
+    """
+    try:
+        cap = session.execute(text(
+            f"SELECT MAX(capture_date) FROM {DB_SCHEMA}.oliveyoung_rankings")).scalar()
+        if not cap:
+            return []
+        rows = session.execute(text(f"""
+            SELECT category, rank_position, prev_rank, delta, goods_name,
+                   brand, is_monitored, is_ours
+            FROM {DB_SCHEMA}.oliveyoung_rankings
+            WHERE capture_date = :cap AND category <> '전체'
+              AND delta IS NOT NULL AND delta <> 0
+            ORDER BY ABS(delta) DESC, rank_position ASC
+            LIMIT :lim
+        """), {"cap": cap, "lim": limit}).fetchall()
+    except Exception:
+        return []
+    return [{"category": r[0], "rank": r[1], "prev_rank": r[2], "delta": r[3],
+             "goods_name": r[4] or "", "brand": r[5], "is_monitored": bool(r[6]),
+             "is_ours": bool(r[7])} for r in rows]
+
+
+def get_oliveyoung_category_rank(session: Session, category: str = "선케어",
+                                 limit: int = 15) -> dict:
+    """올리브영 특정 카테고리(기본 선케어=셀퓨전씨 간판) 국내 최신 랭킹 Top N.
+
+    반환: {category, capture_date, entries:[{rank, delta, goods_name, brand, is_monitored, is_ours}]}.
+    """
+    try:
+        cap = session.execute(text(
+            f"SELECT MAX(capture_date) FROM {DB_SCHEMA}.oliveyoung_rankings")).scalar()
+        if not cap:
+            return {"category": category, "capture_date": None, "entries": []}
+        rows = session.execute(text(f"""
+            SELECT rank_position, delta, goods_name, brand, is_monitored, is_ours
+            FROM {DB_SCHEMA}.oliveyoung_rankings
+            WHERE capture_date = :cap AND category = :cat
+            ORDER BY rank_position ASC
+            LIMIT :lim
+        """), {"cap": cap, "cat": category, "lim": limit}).fetchall()
+    except Exception:
+        return {"category": category, "capture_date": None, "entries": []}
+    return {
+        "category": category, "capture_date": str(cap),
+        "entries": [{"rank": r[0], "delta": r[1], "goods_name": r[2] or "",
+                     "brand": r[3], "is_monitored": bool(r[4]), "is_ours": bool(r[5])}
+                    for r in rows],
+    }
+
+
 _OUR_AREA = {"선케어", "BB크림", "CC크림", "파운데이션", "틴티드모이스처", "DD크림"}
 _BROAD_CATS = {"뷰티"}   # 광역 노드(전문 카테고리 아님 — 순위 해석 주의)
 _TREND_ING = {"PDRN", "엑소좀", "콜라겐", "레티놀", "센텔라", "나이아신아마이드",
