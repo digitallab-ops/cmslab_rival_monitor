@@ -50,6 +50,7 @@ from analytics.queries import (
     get_retail_rank_history,
     get_oliveyoung_movers,
     get_oliveyoung_category_rank,
+    get_oliveyoung_review_landscape,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -792,10 +793,20 @@ def _oy_delta_span(delta) -> str:
     return '<span class="oy-d fl">–</span>'
 
 
-def _render_oliveyoung(flagship: dict, movers: list) -> str:
-    """국내 올리브영 — 선케어(간판) 국내 랭킹 + 전 카테고리 급변동. 아마존(해외)↔올영(국내) 대조."""
+def _oy_clean_brand(name: str) -> str:
+    """올영 브랜드명 중복 접두 정리(예: '바이오더마바이오더' → '바이오더마')."""
+    n = (name or "").strip()
+    for cut in range(len(n) // 2, 1, -1):
+        if n[:cut] == n[cut:cut * 2]:
+            return n[:cut]
+    return n[:14]
+
+
+def _render_oliveyoung(flagship: dict, movers: list, reviews: list = None) -> str:
+    """국내 올리브영 — 선케어(간판) 랭킹 + 급변동 + 경쟁사 리뷰 감성. 아마존(해외)↔올영(국내) 대조."""
+    reviews = reviews or []
     fe = (flagship or {}).get("entries") or []
-    if not fe and not movers:
+    if not fe and not movers and not reviews:
         return ('<p class="no-data">올리브영 랭킹 축적 중 (매일 스냅샷 · 원격 채널 MCP 수집 후)</p>')
 
     # ── 선케어(간판) 국내 랭킹 ──
@@ -842,7 +853,33 @@ def _render_oliveyoung(flagship: dict, movers: list) -> str:
         f'<div class="oy-list">{"".join(mrows)}</div></div>'
     ) if mrows else ""
 
-    return f'<div class="oy-wrap">{flag_html}{mv_html}</div>'
+    # ── 경쟁사 리뷰 감성(평점·긍정/부정 키워드) — '왜 잘나가나 / 약점=공략' ──
+    rrows = []
+    for r in reviews[:8]:
+        sc = r.get("avg_score")
+        scls = "low" if (sc is not None and sc < 3.5) else ("mid" if (sc is not None and sc < 4.2) else "hi")
+        sc_txt = f"★{sc:.1f}" if sc is not None else "★—"
+        rc = r.get("review_count")
+        rc_txt = f"리뷰 {rc:,}" if rc else ""
+        brand = _oy_clean_brand(r.get("brand_name", "")) or (r.get("brand") or "—")
+        mon = '<span class="oy-tag mon">경쟁</span>' if r.get("is_monitored") else ""
+        neg = "".join(f'<span class="oy-kw neg">{_esc(w)}</span>' for w in (r.get("neg") or [])[:4])
+        pos = "".join(f'<span class="oy-kw pos">{_esc(w)}</span>' for w in (r.get("pos") or [])[:3])
+        rrows.append(
+            f'<div class="oy-rev"><div class="oy-rev-top">'
+            f'<span class="oy-cat">{_esc(r.get("category",""))}</span>'
+            f'<span class="oy-rev-brand">{_esc(brand)}{mon}</span>'
+            f'<span class="oy-score {scls}">{sc_txt}</span>'
+            f'<span class="oy-rev-cnt">{rc_txt}</span></div>'
+            f'<div class="oy-kws">{neg}{pos}</div></div>'
+        )
+    rev_html = (
+        f'<div class="oy-block oy-rev-block"><div class="oy-bt">💬 국내 리뷰 지형 <span class="oy-sub">'
+        f'경쟁사 제품 실리뷰 평점·부정(코럴)/긍정(틸) 키워드 — 낮은 평점·부정 키워드 = 우리 공략 포인트'
+        f'</span></div><div class="oy-rev-list">{"".join(rrows)}</div></div>'
+    ) if rrows else ""
+
+    return f'<div class="oy-wrap">{flag_html}{mv_html}</div>{rev_html}'
 
 
 def _render_ingredient_trends(trends: list) -> str:
@@ -2302,6 +2339,19 @@ a:hover { color: var(--gold); }
 .oy-mvname { font-size:12px; color:var(--mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .oy-mvname.oy-mon { color:var(--hi); font-weight:700; }
 .oy-mvrank { font-family:var(--mono); font-size:12.5px; font-weight:700; color:var(--champ2); text-align:right; }
+.oy-rev-block { margin-top:16px; }
+.oy-rev-list { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+@media (max-width:900px) { .oy-rev-list { grid-template-columns:1fr; } }
+.oy-rev { background:var(--deep); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+.oy-rev-top { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+.oy-rev-brand { font-size:13px; font-weight:700; color:var(--hi); display:flex; align-items:center; gap:5px; }
+.oy-score { font-family:var(--mono); font-size:13px; font-weight:800; }
+.oy-score.low { color:var(--coral); } .oy-score.mid { color:var(--champ2); } .oy-score.hi { color:var(--teal); }
+.oy-rev-cnt { font-size:11px; color:var(--lo); margin-left:auto; white-space:nowrap; }
+.oy-kws { display:flex; flex-wrap:wrap; gap:4px; }
+.oy-kw { font-size:11px; font-weight:600; padding:2px 7px; border-radius:4px; }
+.oy-kw.neg { background:rgba(255,107,122,.14); color:var(--coral); }
+.oy-kw.pos { background:rgba(5,224,224,.12); color:var(--teal); }
 /* ── 검색 탭 (MCP 챗봇) ── */
 .search-examples { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
 .se-chip { font-size:12.5px; color:var(--mid); background:var(--deep); border:1px solid var(--border);
@@ -3835,6 +3885,7 @@ def _build_full_html(
     rank_trends: list = None,
     oliveyoung_movers: list = None,
     oliveyoung_flagship: dict = None,
+    oliveyoung_reviews: list = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -3866,7 +3917,7 @@ def _build_full_html(
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     negative_signals_html = _render_negative_signals(negative_signals or [])
     rank_trends_html  = _render_rank_trends(rank_trends or [])
-    oliveyoung_html   = _render_oliveyoung(oliveyoung_flagship or {}, oliveyoung_movers or [])
+    oliveyoung_html   = _render_oliveyoung(oliveyoung_flagship or {}, oliveyoung_movers or [], oliveyoung_reviews or [])
     trademark_html    = _render_trademark(trademark_sig or {})
     search_spikes_html = _render_search_spikes(search_spikes or [])
     # ── 커맨드센터(브리핑 탭) 신규 블록 ──
@@ -4152,7 +4203,7 @@ def _build_full_html(
     <!-- 국내 올리브영 (국내 최대 H&B 채널 — 아마존 해외와 대조) -->
     <div class="section">
       <div class="section-title">
-        🇰🇷 국내 올리브영 <span class="section-sub">국내 최대 H&amp;B 채널 실랭킹 — 셀퓨전씨 간판(선케어) 국내 지형 + 전 카테고리 급변동. 아마존(해외)↔올영(국내) 대조</span>
+        🇰🇷 국내 올리브영 <span class="section-sub">국내 최대 H&amp;B 채널 — 선케어(간판) 국내 랭킹 + 급변동 + 경쟁사 리뷰 감성(평점·긍정/부정 키워드). 아마존(해외)↔올영(국내) 대조</span>
       </div>
       {oliveyoung_html}
     </div>
@@ -4837,8 +4888,9 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         try:
             oliveyoung_movers = get_oliveyoung_movers(session, limit=10)
             oliveyoung_flagship = get_oliveyoung_category_rank(session, "선케어", 12)
+            oliveyoung_reviews = get_oliveyoung_review_landscape(session, limit=8)
         except Exception:
-            oliveyoung_movers, oliveyoung_flagship = [], {}
+            oliveyoung_movers, oliveyoung_flagship, oliveyoung_reviews = [], {}, []
         # 해외 상표 출원 선행신호(KIPRIS) — trademark_filings 없으면 빈 dict
         try:
             trademark_sig = get_trademark_signals(session)
@@ -5024,6 +5076,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         rank_trends=rank_trends,
         oliveyoung_movers=oliveyoung_movers,
         oliveyoung_flagship=oliveyoung_flagship,
+        oliveyoung_reviews=oliveyoung_reviews,
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
         composite=composite,

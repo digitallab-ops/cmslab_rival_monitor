@@ -105,13 +105,25 @@ async def _fetch() -> dict:
     if CHANNEL_MCP_API_KEY:
         headers["Authorization"] = f"Bearer {CHANNEL_MCP_API_KEY}"
 
-    out = {"rankings": [], "movers": []}
+    out = {"rankings": [], "movers": [], "reviews": []}
     async with streamablehttp_client(CHANNEL_MCP_URL, headers=headers) as (r, w, _):
         async with ClientSession(r, w) as sess:
             await sess.initialize()
             out["rankings"] = await _call(sess, "get_market_rankings") or []
             out["movers"] = await _call(sess, "get_top_movers") or []
+            # 카테고리별 경쟁사 리뷰 감성(평점·긍정/부정 키워드). 희소·주간 데이터.
+            for cat in _REVIEW_CATS:
+                try:
+                    d = await _call(sess, "get_competitor_analysis", {"category": cat})
+                    if isinstance(d, list):
+                        out["reviews"].extend(d)
+                except Exception:
+                    continue
     return out
+
+
+# 리뷰 감성 수집 대상 카테고리(선케어=간판 우선, 나머지는 데이터 있는 것만).
+_REVIEW_CATS = ["선케어", "스킨케어", "마스크팩", "클렌징", "더모 코스메틱", "전체"]
 
 
 def _ensure_table(session) -> None:
@@ -138,7 +150,74 @@ def _ensure_table(session) -> None:
     session.execute(text(
         f"CREATE INDEX IF NOT EXISTS ix_oy_brand_date "
         f"ON {DB_SCHEMA}.oliveyoung_rankings (brand, capture_date DESC)"))
+    session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.oliveyoung_reviews (
+            id BIGSERIAL PRIMARY KEY,
+            week_start DATE,
+            category VARCHAR(40) NOT NULL,
+            goods_no VARCHAR(40) NOT NULL,
+            goods_name VARCHAR(300),
+            brand_name VARCHAR(120),
+            brand VARCHAR(100),
+            is_monitored BOOLEAN DEFAULT FALSE,
+            is_ours BOOLEAN DEFAULT FALSE,
+            rank_position INTEGER,
+            review_count INTEGER,
+            avg_score REAL,
+            positive_keywords TEXT,
+            negative_keywords TEXT,
+            capture_date DATE NOT NULL,
+            captured_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(category, goods_no, week_start)
+        )
+    """))
+    session.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_oy_rev_date "
+        f"ON {DB_SCHEMA}.oliveyoung_reviews (capture_date DESC, category)"))
     session.commit()
+
+
+def _kw_json(kws) -> str:
+    """[{word,cnt}] → JSON 텍스트(상위 8, ensure_ascii=False)."""
+    try:
+        return json.dumps([{"word": k.get("word"), "cnt": k.get("cnt")}
+                           for k in (kws or [])[:8]], ensure_ascii=False)
+    except Exception:
+        return "[]"
+
+
+def _save_review(session, r: dict, cap: date) -> dict:
+    gname = r.get("goods_name", "")
+    brand = _match_brand(gname) or _match_brand(r.get("brand_name", ""))
+    ours = _is_ours(gname, r.get("is_ours"))
+    row = {
+        "week_start": r.get("week_start"), "category": r.get("category_name", ""),
+        "goods_no": r.get("goods_no", ""), "goods_name": gname[:300],
+        "brand_name": (r.get("brand_name") or "")[:120], "brand": brand,
+        "is_monitored": brand in _MONITORED, "is_ours": ours,
+        "rank_position": r.get("rank_position"), "review_count": r.get("review_count"),
+        "avg_score": r.get("avg_score"),
+        "positive_keywords": _kw_json(r.get("positive_keywords")),
+        "negative_keywords": _kw_json(r.get("negative_keywords")),
+        "cap": cap,
+    }
+    session.execute(text(f"""
+        INSERT INTO {DB_SCHEMA}.oliveyoung_reviews
+            (week_start, category, goods_no, goods_name, brand_name, brand,
+             is_monitored, is_ours, rank_position, review_count, avg_score,
+             positive_keywords, negative_keywords, capture_date)
+        VALUES (:week_start, :category, :goods_no, :goods_name, :brand_name, :brand,
+                :is_monitored, :is_ours, :rank_position, :review_count, :avg_score,
+                :positive_keywords, :negative_keywords, :cap)
+        ON CONFLICT (category, goods_no, week_start) DO UPDATE SET
+            goods_name = EXCLUDED.goods_name, brand_name = EXCLUDED.brand_name,
+            brand = EXCLUDED.brand, is_monitored = EXCLUDED.is_monitored,
+            is_ours = EXCLUDED.is_ours, rank_position = EXCLUDED.rank_position,
+            review_count = EXCLUDED.review_count, avg_score = EXCLUDED.avg_score,
+            positive_keywords = EXCLUDED.positive_keywords,
+            negative_keywords = EXCLUDED.negative_keywords, captured_at = NOW()
+    """), row)
+    return row
 
 
 def _save_ranking(session, category: str, e: dict, cap: date) -> dict:
@@ -176,7 +255,7 @@ def run() -> dict:
         logger.error("올영 MCP 호출 실패: %s", e)
         return {"captured": 0, "monitored": 0, "ours": 0, "brands": {}, "error": str(e)}
 
-    captured = monitored = ours = 0
+    captured = monitored = ours = reviews = 0
     brands: dict = {}
     session = get_session()
     try:
@@ -193,11 +272,22 @@ def run() -> dict:
                     brands.setdefault(row["brand"], []).append(
                         (cname, row["rank_position"], row["delta"]))
             session.commit()
-        logger.info("올영 랭킹 수집: 저장 %d건 · 모니터링매칭 %d · 자사 %d · 브랜드 %d",
-                    captured, monitored, ours, len(brands))
+        # 경쟁사 리뷰 감성(평점·긍정/부정 키워드)
+        seen_rev = set()
+        for r in data.get("reviews", []):
+            key = (r.get("category_name", ""), r.get("goods_no", ""), r.get("week_start"))
+            if key in seen_rev or not r.get("goods_no"):
+                continue
+            seen_rev.add(key)
+            _save_review(session, r, cap)
+            reviews += 1
+        session.commit()
+        logger.info("올영 수집: 랭킹 %d건 · 모니터링 %d · 자사 %d · 브랜드 %d · 리뷰감성 %d건",
+                    captured, monitored, ours, len(brands), reviews)
     finally:
         session.close()
-    return {"captured": captured, "monitored": monitored, "ours": ours, "brands": brands}
+    return {"captured": captured, "monitored": monitored, "ours": ours,
+            "brands": brands, "reviews": reviews}
 
 
 if __name__ == "__main__":

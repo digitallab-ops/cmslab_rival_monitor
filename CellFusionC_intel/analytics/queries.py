@@ -1135,6 +1135,41 @@ def get_oliveyoung_category_rank(session: Session, category: str = "선케어",
     }
 
 
+def get_oliveyoung_review_landscape(session: Session, limit: int = 10) -> list[dict]:
+    """올리브영 국내 리뷰 감성 — 경쟁사 제품별 평점·긍정/부정 키워드. '왜 잘나가나 / 약점=공략'.
+
+    반환: [{category, brand_name, brand, is_monitored, is_ours, rank, review_count,
+            avg_score, pos:[words], neg:[words]}]. 선케어(간판) 우선 → 평점 낮은순(약점=기회).
+    """
+    import json as _json
+    try:
+        cap = session.execute(text(
+            f"SELECT MAX(capture_date) FROM {DB_SCHEMA}.oliveyoung_reviews")).scalar()
+        if not cap:
+            return []
+        rows = session.execute(text(f"""
+            SELECT category, brand_name, brand, is_monitored, is_ours, rank_position,
+                   review_count, avg_score, positive_keywords, negative_keywords
+            FROM {DB_SCHEMA}.oliveyoung_reviews
+            WHERE capture_date = :cap AND review_count IS NOT NULL
+            ORDER BY (category = '선케어') DESC, avg_score ASC NULLS LAST
+            LIMIT :lim
+        """), {"cap": cap, "lim": limit}).fetchall()
+    except Exception:
+        return []
+
+    def _words(js):
+        try:
+            return [k["word"] for k in _json.loads(js or "[]") if k.get("word")][:5]
+        except Exception:
+            return []
+
+    return [{"category": r[0], "brand_name": r[1] or "", "brand": r[2],
+             "is_monitored": bool(r[3]), "is_ours": bool(r[4]), "rank": r[5],
+             "review_count": r[6], "avg_score": float(r[7]) if r[7] is not None else None,
+             "pos": _words(r[8]), "neg": _words(r[9])} for r in rows]
+
+
 _OUR_AREA = {"선케어", "BB크림", "CC크림", "파운데이션", "틴티드모이스처", "DD크림"}
 _BROAD_CATS = {"뷰티"}   # 광역 노드(전문 카테고리 아님 — 순위 해석 주의)
 _TREND_ING = {"PDRN", "엑소좀", "콜라겐", "레티놀", "센텔라", "나이아신아마이드",
