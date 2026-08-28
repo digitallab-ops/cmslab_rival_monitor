@@ -4915,7 +4915,15 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         try:
             stories = get_opportunity_stories(session, days=days, limit=6)
             if stories:
-                _acts = generate_opportunity_actions(stories)
+                # 국내 올영 리뷰 약점 요약 → 액션 생성 근거로 주입(왜/우리가 할 것 연결)
+                _oy_intel = "\n".join(
+                    f"- [{r.get('category','')}] {_oy_clean_brand(r.get('brand_name',''))} "
+                    f"★{r.get('avg_score')}"
+                    + (f" 약점: {', '.join((r.get('neg') or [])[:4])}" if r.get('neg') else "")
+                    for r in (oliveyoung_reviews or [])[:6]
+                    if r.get("avg_score") is not None and (r.get("avg_score") < 4.3 or r.get("neg"))
+                )
+                _acts = generate_opportunity_actions(stories, oy_review_intel=_oy_intel)
                 for _s in stories:
                     _s["action"] = _acts.get(f"{_s.get('brand','')}|{_s.get('country','')}", "")
         except Exception as _e:

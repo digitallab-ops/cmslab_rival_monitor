@@ -279,10 +279,11 @@ def generate_market_overview(brand_insights_raw: dict, momentum: list | None = N
         return ""
 
 
-def generate_opportunity_actions(stories: list) -> dict:
+def generate_opportunity_actions(stories: list, oy_review_intel: str = "") -> dict:
     """기회 스토리들에 '우리가(셀퓨전씨) 할 것' 한 줄씩 배치 생성 (1 LLM 콜).
 
     stories: get_opportunity_stories() 결과. 반환: {f"{brand}|{country}": action_str}.
+    oy_review_intel: 국내 올리브영 경쟁사 리뷰 약점 요약(선택). 액션 근거로 주입.
     실패/빈 입력 시 {} — 대시보드는 액션 없이 스토리만 렌더(무해).
     """
     if not stories:
@@ -316,11 +317,13 @@ def generate_opportunity_actions(stories: list) -> dict:
             + (" | ⚠️악재" if s.get("has_negative") else "")
         )
     stories_block = "\n".join(lines)
+    oy_block = (f"\n[국내 올리브영 경쟁사 리뷰 약점 — 국내(KR)·선케어 관련 스토리 액션에 근거로 활용]\n"
+                f"{oy_review_intel}\n") if oy_review_intel.strip() else ""
     prompt = f"""당신은 씨엠에스랩(더마 선케어 브랜드 '셀퓨전씨' 운영)의 경쟁사 인텔리전스 분석가입니다.
 아래는 경쟁사들의 '기회 스토리'(어느 나라·어느 브랜드·어떤 무브·어떤 제품/성분·성과)입니다.
 
 {stories_block}
-
+{oy_block}
 {CMS_PROFILE}
 
 각 스토리마다 **"그래서 우리(셀퓨전씨)가 할 것"**을 딱 한 문장(한국어, 45자 이내)으로 제시하세요.
@@ -330,6 +333,8 @@ def generate_opportunity_actions(stories: list) -> dict:
 - 경쟁사 악재면 반사 기회(대체·점유율 방어)로 뒤집어라.
 - **교차판독을 반드시 활용**: 'PR우세'(화제성 대비 실판매 약함)면 우리가 실판매로 추월하는 액션,
   '실판매 검증 급상승'이면 즉시 방어/대체, '숨은 실판매 강자'면 선제 견제.
+- **국내(KR)·선케어 관련 스토리라면** 위 올리브영 리뷰 약점(경쟁사가 리뷰에서 까이는 지점: 지속력·트러블·패키징 등)을
+  우리 더마·선케어 강점으로 되받아치는 구체적 액션으로 연결하라.
 - 막연한 '모니터링'·'검토' 금지. 실행 동사로.
 반드시 JSON만: {{"actions": [{{"i": 0, "action": "..."}}, ...]}} — 모든 인덱스 포함."""
     try:
