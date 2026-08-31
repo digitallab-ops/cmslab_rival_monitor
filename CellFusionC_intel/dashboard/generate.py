@@ -57,6 +57,7 @@ from analytics.summarizer import (
     generate_opportunity_actions,
 )
 from storage.models import get_session
+from config.brands import ALL_BRANDS, BRAND_KO_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -2777,6 +2778,34 @@ a:hover { color: var(--gold); }
 .action-banner .ab-list li::before { content:"›"; position:absolute; left:0; color:var(--coral); font-weight:800; }
 .action-banner .ab-list li .insight-badge { margin-left:7px; vertical-align:middle; }
 @media (max-width:760px){ .action-banner{ flex-direction:column; gap:8px; } }
+/* ── 지금 대응 '근거 보기' ── */
+.ab-ev { margin-top:7px; font-weight:400; }
+.ab-ev > summary { display:inline-flex; align-items:center; gap:6px; cursor:pointer; list-style:none;
+  font-size:11.5px; font-weight:700; color:var(--champ); font-family:var(--mono);
+  border:1px solid var(--border); border-radius:6px; padding:3px 10px; width:fit-content;
+  background:var(--elevated); transition:all .12s; }
+.ab-ev > summary::-webkit-details-marker { display:none; }
+.ab-ev > summary::before { content:"▸"; color:var(--coral); }
+.ab-ev[open] > summary::before { content:"▾"; }
+.ab-ev > summary:hover { border-color:var(--champ); color:var(--hi); }
+.ab-ev-brand { color:var(--champ2); font-weight:800; }
+.ab-ev-body { margin-top:9px; padding:11px 13px; background:var(--deep); border:1px solid var(--border);
+  border-radius:8px; }
+.ab-ev-sig { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:10px; }
+.ev-chip { font-size:11.5px; font-weight:600; color:var(--mid); background:var(--elevated);
+  border:1px solid var(--border); border-radius:6px; padding:4px 9px; }
+.ev-chip b { color:var(--hi); font-weight:800; }
+.ev-chip .ev-sub { color:var(--lo); font-size:10px; margin-left:5px; }
+.ab-ev-arts { margin:0 0 9px; padding:0; list-style:none; display:flex; flex-direction:column; gap:6px; }
+.ab-ev-arts li { font-size:12px; color:var(--mid); line-height:1.45; padding-left:0; }
+.ab-ev-arts li::before { content:none; }
+.ev-date { font-family:var(--mono); font-size:10.5px; color:var(--champ); margin-right:4px; }
+.ev-ttl { color:var(--hi); }
+.ev-src { color:var(--lo); font-size:10.5px; margin-left:5px; }
+.ev-link { color:var(--teal); text-decoration:none; font-weight:800; margin-left:3px; }
+.ev-all { font-size:11px; font-weight:700; color:var(--champ); font-family:inherit; cursor:pointer;
+  background:none; border:none; padding:0; }
+.ev-all:hover { color:var(--hi); text-decoration:underline; }
 
 /* ── v2: 통합 범례 ── */
 .legend { border:1px solid var(--border); border-radius:var(--radius); background:var(--ink); margin-bottom:16px; }
@@ -3744,15 +3773,89 @@ def _render_opportunity_stories(stories: list) -> str:
     return f'<div class="ostory-grid">{"".join(cards)}</div>'
 
 
-def _render_action_banner(market_text: str) -> str:
-    """'지금 대응' 액션 배너 — 최상단·코럴 강조. [시급:X]은 기존 insight-badge로 통일."""
+def _detect_bullet_brand(text: str) -> "str | None":
+    """액션 문장에서 가장 먼저 등장하는 모니터링 브랜드(주어) 추출 — 영문·한국어명."""
+    best, pos = None, 10 ** 9
+    for b in ALL_BRANDS:
+        i = text.find(b)
+        if 0 <= i < pos:
+            pos, best = i, b
+        for ko in BRAND_KO_NAMES.get(b, []):
+            j = text.find(ko)
+            if 0 <= j < pos:
+                pos, best = j, b
+    return best
+
+
+def _action_evidence(brand: str, ctx: dict) -> tuple:
+    """브랜드의 '지금 대응' 근거 = 신호 칩 목록 + 근거 기사(HIGH 우선 top3)."""
+    signals = []
+    m = next((x for x in (ctx.get("momentum") or []) if x.get("brand") == brand), None)
+    if m and m.get("momentum"):
+        arw = {"rising": "▲", "cooling": "▼"}.get(m.get("signal"), "▶")
+        signals.append(f'{arw} 모멘텀 <b>{m["momentum"]}x</b>'
+                       f'<span class="ev-sub">최근4주 {m.get("recent_4w",0)}건·HIGH {m.get("recent_high",0)}</span>')
+    rt = next((x for x in (ctx.get("rank_trends") or []) if x.get("brand") == brand), None)
+    if rt and rt.get("latest"):
+        signals.append(f'🛒 아마존 {_esc(rt.get("category",""))} <b>#{rt["latest"]}</b>')
+    oy_rank, oy_cat = None, ""
+    for e in (ctx.get("oy_flagship") or {}).get("entries", []):
+        if e.get("brand") == brand:
+            oy_rank, oy_cat = e.get("rank"), (ctx.get("oy_flagship") or {}).get("category", "")
+            break
+    if oy_rank is None:
+        for e in (ctx.get("oy_movers") or []):
+            if e.get("brand") == brand:
+                oy_rank, oy_cat = e.get("rank"), e.get("category", "")
+                break
+    if oy_rank is not None:
+        signals.append(f'🇰🇷 올영 {_esc(oy_cat)} <b>#{oy_rank}</b>')
+    sp = next((x for x in (ctx.get("search_spikes") or []) if x.get("brand") == brand), None)
+    if sp and sp.get("spike_ratio"):
+        signals.append(f'🔺 검색 {_esc(sp.get("geo",""))} <b>{sp["spike_ratio"]}x</b>')
+    arts = [a for a in (ctx.get("high_articles") or []) if a.get("brand") == brand]
+    arts.sort(key=lambda a: (a.get("importance") != "high", -(a.get("score") or 0)))
+    return signals, arts[:3]
+
+
+def _render_action_banner(market_text: str, ctx: dict = None) -> str:
+    """'지금 대응' 액션 배너 — 최상단·코럴 강조 + 항목별 '근거 보기'(신호·기사) 펼침."""
     resp = _parse_market_sections(market_text)["respond"][:3]
     if not resp:
         return ""
+    ctx = ctx or {}
     items = []
     for b in resp:
         clean, badge = _urgency_badge(b)
-        items.append(f"<li>{_esc(clean)}{badge}</li>")
+        brand = _detect_bullet_brand(clean)
+        ev_html = ""
+        if brand:
+            signals, arts = _action_evidence(brand, ctx)
+            if signals or arts:
+                sig_html = ("".join(f'<span class="ev-chip">{s}</span>' for s in signals)
+                            if signals else "")
+                art_html = ""
+                for a in arts:
+                    ttl = _esc((a.get("title_ko") or a.get("title") or "")[:90])
+                    dt = _fmt_date(a.get("published_date"))
+                    flag = COUNTRY_FLAGS.get(a.get("country", ""), "🌐")
+                    src = _esc(a.get("source_name") or "")
+                    url = a.get("source_url") or ""
+                    link = (f'<a href="{_esc(url)}" target="_blank" rel="noopener" class="ev-link">↗</a>'
+                            if url else "")
+                    art_html += (f'<li><span class="ev-date">{_esc(dt)}</span> {flag} '
+                                 f'<span class="ev-ttl">{ttl}</span> {link}'
+                                 + (f'<span class="ev-src">{src}</span>' if src else "") + '</li>')
+                more = (f'<button class="ev-all" onclick="openHeatmapDrilldown(\'{_esc(brand)}\',\'all\',\'all\')">'
+                        f'{_esc(brand)} 전체 기사 보기 →</button>')
+                ev_html = (
+                    f'<details class="ab-ev"><summary>근거 보기 <span class="ab-ev-brand">{_esc(brand)}</span></summary>'
+                    f'<div class="ab-ev-body">'
+                    + (f'<div class="ab-ev-sig">{sig_html}</div>' if sig_html else "")
+                    + (f'<ul class="ab-ev-arts">{art_html}</ul>' if art_html else "")
+                    + more + '</div></details>'
+                )
+        items.append(f'<li>{_esc(clean)}{badge}{ev_html}</li>')
     lis = "".join(items)
     return (
         '<div class="action-banner">'
@@ -3926,7 +4029,14 @@ def _build_full_html(
     composite_lb_html = _render_composite_lb(composite or [], score_trend or {})
     brand_signals_html = _render_brand_signals(brand_signals or [])
     _market7 = _dg.get("market") or market_text
-    action_banner_html = _render_action_banner(_market7)
+    action_banner_html = _render_action_banner(_market7, {
+        "high_articles": _dg.get("high") or high_articles,
+        "momentum": momentum,
+        "rank_trends": rank_trends,
+        "oy_flagship": oliveyoung_flagship,
+        "oy_movers": oliveyoung_movers,
+        "search_spikes": search_spikes,
+    })
     stories_html      = _render_opportunity_stories(stories or [])
     legend_html       = _render_legend()
     synth_html        = _render_synth(_dg.get("stats") or stats,
