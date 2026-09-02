@@ -256,47 +256,63 @@ def _parse_date(entry) -> datetime:
 
 
 class MediaRSSCollector(BaseCollector):
-    """BeautyMatter / WWD Beauty / Glossy RSS 수집기."""
+    """BeautyMatter / WWD Beauty / Glossy RSS 수집기.
+
+    피드 35종은 브랜드·국가와 무관한 '글로벌' 소스라 collect() 호출마다 재파싱하면
+    브랜드×국가 수만큼(예: 7×15=105) × 35피드 = 3,675회 중복 fetch + 피드당 sleep으로
+    일일 수집의 최대 병목이 된다. → 수집 run 1회 동안 피드를 URL당 딱 한 번만 파싱해
+    캐시하고(엔트리 재사용), 브랜드 필터만 메모리에서 반복한다. reset_cache()로 run 경계.
+    """
 
     collector_type = "media_rss"
 
+    def __init__(self):
+        self._entry_cache: dict = {}      # url → [{"title","link","summary","entry"}...]
+
+    def reset_cache(self):
+        """수집 run 시작 시 호출 — 피드 캐시 비움(다음 run에 최신 피드 재파싱)."""
+        self._entry_cache = {}
+
+    def _feed_entries(self, feed_cfg: dict) -> list:
+        """피드 엔트리 캐시 조회/파싱. run당 URL 1회만 네트워크 fetch."""
+        url = feed_cfg["url"]
+        if url in self._entry_cache:
+            return self._entry_cache[url]
+        entries = []
+        try:
+            feed = feedparser.parse(url, agent=_FEED_UA)
+            for entry in feed.entries:
+                title = getattr(entry, "title", "").strip()
+                link = getattr(entry, "link", "").strip()
+                summary = getattr(entry, "summary", "").strip()
+                if not title or not link:
+                    continue
+                entries.append({"title": title, "link": link,
+                                "summary": summary, "entry": entry})
+            time.sleep(RSS_REQUEST_DELAY)     # 유니크 fetch당 1회만(브랜드마다 X)
+        except Exception as e:
+            logger.warning("미디어 RSS 피드 오류 (%s): %s", feed_cfg["key"], e)
+        self._entry_cache[url] = entries
+        return entries
+
     def collect(self, brand: str, country: str) -> list[RawArticle]:
-        """브랜드명이 제목 또는 요약에 포함된 기사만 반환."""
+        """브랜드명이 제목 또는 요약에 포함된 기사만 반환(캐시된 피드에서 필터)."""
         brand_lower = brand.lower()
         articles = []
-
         for feed_cfg in MEDIA_FEEDS:
-            try:
-                feed = feedparser.parse(feed_cfg["url"], agent=_FEED_UA)
-                matched = 0
-                for entry in feed.entries:
-                    title = getattr(entry, "title", "").strip()
-                    link = getattr(entry, "link", "").strip()
-                    summary = getattr(entry, "summary", "").strip()
-
-                    if not title or not link:
-                        continue
-
-                    if brand_lower not in f"{title} {summary}".lower():
-                        continue
-
-                    articles.append(RawArticle(
-                        title=title,
-                        url=link,
-                        published=_parse_date(entry),
-                        summary=summary,
-                        source_name=feed_cfg["name"],
-                        language=feed_cfg["language"],
-                        brand_hint=brand,
-                        country_hint=country,
-                    ))
-                    matched += 1
-
-                logger.debug("[%s] %s → %d건 매칭", brand, feed_cfg["name"], matched)
-                time.sleep(RSS_REQUEST_DELAY)
-
-            except Exception as e:
-                logger.warning("미디어 RSS 오류 (%s/%s): %s", feed_cfg["key"], brand, e)
-
-        logger.info("미디어 RSS 수집: %s → %d건 (%d개 피드)", brand, len(articles), len(MEDIA_FEEDS))
+            for e in self._feed_entries(feed_cfg):
+                if brand_lower not in f"{e['title']} {e['summary']}".lower():
+                    continue
+                articles.append(RawArticle(
+                    title=e["title"],
+                    url=e["link"],
+                    published=_parse_date(e["entry"]),
+                    summary=e["summary"],
+                    source_name=feed_cfg["name"],
+                    language=feed_cfg["language"],
+                    brand_hint=brand,
+                    country_hint=country,
+                ))
+        logger.info("미디어 RSS 수집: %s → %d건 (%d개 피드, 캐시 %d)",
+                    brand, len(articles), len(MEDIA_FEEDS), len(self._entry_cache))
         return articles

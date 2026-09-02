@@ -219,5 +219,6 @@ def run_pipeline(brand: str, country: str) -> PipelineStats:
 
 
 def reset_jangup_cache():
-    """장업신문 피드 캐시 초기화 (매일 첫 수집 전 호출)."""
+    """피드 캐시 초기화 (매일 첫 수집 전 호출) — 장업신문 + 미디어RSS(글로벌 피드 run당 1회 파싱)."""
     _jangup.reset_cache()
+    _media.reset_cache()

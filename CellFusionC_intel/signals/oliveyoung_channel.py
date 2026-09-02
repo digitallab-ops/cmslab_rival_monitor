@@ -97,7 +97,11 @@ async def _call(sess, name: str, args: dict | None = None):
 
 
 async def _fetch() -> dict:
-    """원격 MCP에서 랭킹(8카테고리) + 급변동 수집."""
+    """원격 MCP에서 랭킹(8카테고리) + 경쟁사 리뷰 감성 수집.
+
+    급변동은 우리가 적재한 일별 스냅샷의 delta로 계산(get_oliveyoung_movers)하므로
+    원격 get_top_movers는 호출하지 않는다(중복 round-trip 제거).
+    """
     from mcp.client.streamable_http import streamablehttp_client
     from mcp import ClientSession
 
@@ -105,12 +109,11 @@ async def _fetch() -> dict:
     if CHANNEL_MCP_API_KEY:
         headers["Authorization"] = f"Bearer {CHANNEL_MCP_API_KEY}"
 
-    out = {"rankings": [], "movers": [], "reviews": []}
+    out = {"rankings": [], "reviews": []}
     async with streamablehttp_client(CHANNEL_MCP_URL, headers=headers) as (r, w, _):
         async with ClientSession(r, w) as sess:
             await sess.initialize()
             out["rankings"] = await _call(sess, "get_market_rankings") or []
-            out["movers"] = await _call(sess, "get_top_movers") or []
             # 카테고리별 경쟁사 리뷰 감성(평점·긍정/부정 키워드). 희소·주간 데이터.
             for cat in _REVIEW_CATS:
                 try:
