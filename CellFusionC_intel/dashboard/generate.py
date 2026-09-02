@@ -33,6 +33,9 @@ from analytics.queries import (
     get_weekly_trend,
     upsert_insight_cache,
     purge_old_insights,
+    record_respond_items,
+    get_respond_feed,
+    purge_respond_feed,
     compute_brand_momentum,
     get_demand_triangulation,
     get_market_export_growth,
@@ -2538,6 +2541,13 @@ a:hover { color: var(--gold); }
 .action-banner .ab-list li { font-size:14.5px; font-weight:600; line-height:1.5; color:var(--hi); position:relative; padding-left:16px; }
 .action-banner .ab-list li::before { content:"›"; position:absolute; left:0; color:var(--coral); font-weight:800; }
 .action-banner .ab-list li .insight-badge { margin-left:7px; vertical-align:middle; }
+.action-banner .ab-label .ab-sub { display:block; font-size:9.5px; font-weight:600; color:var(--lo);
+  letter-spacing:0; text-transform:none; margin-top:3px; }
+.action-banner .ab-list li { display:flex; gap:9px; align-items:baseline; padding-left:0; }
+.action-banner .ab-list li::before { content:none; }
+.ab-day { flex:0 0 auto; font-family:var(--mono); font-size:10.5px; font-weight:800; color:var(--coral);
+  background:rgba(255,107,122,.12); border-radius:5px; padding:2px 7px; min-width:34px; text-align:center; }
+.ab-txt { flex:1; }
 @media (max-width:760px){ .action-banner{ flex-direction:column; gap:8px; } }
 /* ── 지금 대응 '근거 보기' ── */
 .ab-ev { margin-top:7px; font-weight:400; }
@@ -3540,48 +3550,82 @@ def _action_evidence(brand: str, ctx: dict) -> tuple:
     return signals, arts[:3]
 
 
-def _render_action_banner(market_text: str, ctx: dict = None) -> str:
-    """'지금 대응' 액션 배너 — 최상단·코럴 강조 + 항목별 '근거 보기'(신호·기사) 펼침."""
-    resp = _parse_market_sections(market_text)["respond"][:3]
-    if not resp:
+_URGENCY_BADGE = {
+    "높음": ("insight-badge-high-hot", "시급 높음"),
+    "중간": ("insight-badge-high-warm", "시급 중간"),
+    "낮음": ("insight-badge-high-low", "시급 낮음"),
+}
+
+
+def _ev_details(brand: str, ctx: dict) -> str:
+    """브랜드 '근거 보기' 펼침(신호 칩 + 근거 기사 + 전체 드릴다운). 없으면 빈 문자열."""
+    if not brand:
         return ""
+    signals, arts = _action_evidence(brand, ctx)
+    if not (signals or arts):
+        return ""
+    sig_html = "".join(f'<span class="ev-chip">{s}</span>' for s in signals) if signals else ""
+    art_html = ""
+    for a in arts:
+        ttl = _esc((a.get("title_ko") or a.get("title") or "")[:90])
+        dt = _fmt_date(a.get("published_date"))
+        flag = COUNTRY_FLAGS.get(a.get("country", ""), "🌐")
+        src = _esc(a.get("source_name") or "")
+        url = a.get("source_url") or ""
+        link = (f'<a href="{_esc(url)}" target="_blank" rel="noopener" class="ev-link">↗</a>'
+                if url else "")
+        art_html += (f'<li><span class="ev-date">{_esc(dt)}</span> {flag} '
+                     f'<span class="ev-ttl">{ttl}</span> {link}'
+                     + (f'<span class="ev-src">{src}</span>' if src else "") + '</li>')
+    more = (f'<button class="ev-all" onclick="openHeatmapDrilldown(\'{_esc(brand)}\',\'all\',\'all\')">'
+            f'{_esc(brand)} 전체 기사 보기 →</button>')
+    return (f'<details class="ab-ev"><summary>근거 보기 <span class="ab-ev-brand">{_esc(brand)}</span></summary>'
+            f'<div class="ab-ev-body">'
+            + (f'<div class="ab-ev-sig">{sig_html}</div>' if sig_html else "")
+            + (f'<ul class="ab-ev-arts">{art_html}</ul>' if art_html else "")
+            + more + '</div></details>')
+
+
+def _mmdd(datestr: str) -> str:
+    """'2026-09-02' → '9/2'. 실패 시 원본."""
+    try:
+        _, m, d = datestr.split("-")
+        return f"{int(m)}/{int(d)}"
+    except Exception:
+        return datestr or ""
+
+
+def _render_action_banner(market_text: str, ctx: dict = None, feed: list = None) -> str:
+    """'지금 대응' — 최근 7일 롤링 피드(날짜별 누적, 오래되면 소멸) + 항목별 '근거 보기'.
+
+    feed 있으면 롤링 피드로 렌더(매일 새 항목이 위로 쌓이고 7일 지나면 사라짐).
+    feed 없으면(초기·폴백) market_text의 respond 섹션을 파싱해 렌더.
+    """
     ctx = ctx or {}
-    items = []
-    for b in resp:
-        clean, badge = _urgency_badge(b)
-        brand = _detect_bullet_brand(clean)
-        ev_html = ""
-        if brand:
-            signals, arts = _action_evidence(brand, ctx)
-            if signals or arts:
-                sig_html = ("".join(f'<span class="ev-chip">{s}</span>' for s in signals)
-                            if signals else "")
-                art_html = ""
-                for a in arts:
-                    ttl = _esc((a.get("title_ko") or a.get("title") or "")[:90])
-                    dt = _fmt_date(a.get("published_date"))
-                    flag = COUNTRY_FLAGS.get(a.get("country", ""), "🌐")
-                    src = _esc(a.get("source_name") or "")
-                    url = a.get("source_url") or ""
-                    link = (f'<a href="{_esc(url)}" target="_blank" rel="noopener" class="ev-link">↗</a>'
-                            if url else "")
-                    art_html += (f'<li><span class="ev-date">{_esc(dt)}</span> {flag} '
-                                 f'<span class="ev-ttl">{ttl}</span> {link}'
-                                 + (f'<span class="ev-src">{src}</span>' if src else "") + '</li>')
-                more = (f'<button class="ev-all" onclick="openHeatmapDrilldown(\'{_esc(brand)}\',\'all\',\'all\')">'
-                        f'{_esc(brand)} 전체 기사 보기 →</button>')
-                ev_html = (
-                    f'<details class="ab-ev"><summary>근거 보기 <span class="ab-ev-brand">{_esc(brand)}</span></summary>'
-                    f'<div class="ab-ev-body">'
-                    + (f'<div class="ab-ev-sig">{sig_html}</div>' if sig_html else "")
-                    + (f'<ul class="ab-ev-arts">{art_html}</ul>' if art_html else "")
-                    + more + '</div></details>'
-                )
-        items.append(f'<li>{_esc(clean)}{badge}{ev_html}</li>')
-    lis = "".join(items)
+    feed = feed or []
+    lis = ""
+    if feed:
+        from datetime import datetime as _dt
+        _today = (_dt.utcnow().strftime("%Y-%m-%d"))
+        for it in feed[:12]:
+            cls, lab = _URGENCY_BADGE.get(it.get("urgency"), ("", ""))
+            badge = f'<span class="insight-badge {cls}">{lab}</span>' if cls else ""
+            d = it.get("date", "")
+            dlabel = "오늘" if d == _today else _mmdd(d)
+            ev = _ev_details(it.get("brand"), ctx)
+            lis += (f'<li><span class="ab-day">{_esc(dlabel)}</span>'
+                    f'<span class="ab-txt">{_esc(it.get("text",""))}{badge}{ev}</span></li>')
+    else:
+        resp = _parse_market_sections(market_text)["respond"][:3]
+        if not resp:
+            return ""
+        for b in resp:
+            clean, badge = _urgency_badge(b)
+            ev = _ev_details(_detect_bullet_brand(clean), ctx)
+            lis += f'<li>{_esc(clean)}{badge}{ev}</li>'
     return (
         '<div class="action-banner">'
-        '<div class="ab-label">⚑ 지금 대응해야 할 것</div>'
+        '<div class="ab-label">⚑ 지금 대응해야 할 것<span class="ab-sub">최근 7일 · 매일 갱신</span></div>'
         f'<ul class="ab-list">{lis}</ul>'
         '</div>'
     )
@@ -3687,6 +3731,7 @@ def _build_full_html(
     days: int,
     country_stats: dict = None,
     period_data: dict = None,
+    respond_feed: list = None,
     brand_radar: list = None,
     category_battle: list = None,
     expansion_playbook: list = None,
@@ -3749,7 +3794,7 @@ def _build_full_html(
         "oy_flagship": oliveyoung_flagship,
         "oy_movers": oliveyoung_movers,
         "search_spikes": search_spikes,
-    })
+    }, feed=respond_feed or [])
     stories_html      = _render_opportunity_stories(stories or [])
     legend_html       = _render_legend()
     synth_html        = _render_synth(_dg.get("stats") or stats,
@@ -4882,6 +4927,23 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
     # 현재 기간 brand_insights (하위 호환용)
     brand_insights = period_data.get(days, {}).get("insights", {})
 
+    # '지금 대응' 롤링 주간 피드 — 오늘의 대응항목을 날짜 달아 적재(중복 이벤트 스킵) →
+    # 최근 7일치를 위로 쌓아 표시, 오래되면 자동 소멸. (편중은 피드 회전으로 자연 해소)
+    try:
+        _resp_items = []
+        for _b in _parse_market_sections(dg_market or "")["respond"]:
+            _clean, _ = _urgency_badge(_b)      # 시급 태그 제거한 본문
+            _urg = ("높음" if "높음" in _b else "중간" if "중간" in _b
+                    else "낮음" if "낮음" in _b else None)
+            _resp_items.append({"brand": _detect_bullet_brand(_clean), "text": _clean,
+                                "urgency": _urg})
+        record_respond_items(session, _resp_items)
+        purge_respond_feed(session, keep_days=21)
+        respond_feed = get_respond_feed(session, days=7)
+    except Exception as _e:
+        logger.warning("대응 피드 처리 실패: %s", _e)
+        respond_feed = []
+
     chartjs_src  = _get_chartjs()
     html_content = _build_full_html(
         stats, high_articles, matrix, trend, distribution,
@@ -4915,6 +4977,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             "ref_date": (datetime.utcnow() + timedelta(hours=9)).strftime("%-m/%-d")
                         if os.name != "nt" else (datetime.utcnow() + timedelta(hours=9)).strftime("%#m/%#d"),
         },
+        respond_feed=respond_feed,
     )
 
     abs_path = os.path.abspath(output_path)

@@ -725,6 +725,90 @@ def purge_old_insights(session: Session, keep_days: int = 45) -> int:
         return 0
 
 
+# ── '지금 대응' 롤링 주간 피드 ────────────────────────────────────────────────
+# 매일의 대응항목을 날짜 달고 적재 → 최근 N일치를 위로 쌓아 보여주고 오래되면 사라짐.
+# 같은 사건이 날마다 재등록되지 않게 브랜드+문장유사도로 중복 제거(편중 방지의 정답:
+# 하드 게이트로 억누르지 않고 피드로 자연스럽게 회전).
+
+def _ensure_respond_feed(session) -> None:
+    session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.respond_feed (
+            id BIGSERIAL PRIMARY KEY,
+            item_date DATE NOT NULL,
+            brand VARCHAR(100),
+            text TEXT NOT NULL,
+            urgency VARCHAR(10),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    """))
+    session.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_respond_feed_date "
+        f"ON {DB_SCHEMA}.respond_feed (item_date DESC)"))
+    session.commit()
+
+
+def get_respond_feed(session: Session, days: int = 7) -> list[dict]:
+    """최근 days일 '지금 대응' 항목 — 최신 날짜·최신순. 반환 [{date,brand,text,urgency}]."""
+    try:
+        rows = session.execute(text(f"""
+            SELECT item_date::text, brand, text, urgency
+            FROM {DB_SCHEMA}.respond_feed
+            WHERE item_date >= CURRENT_DATE - (:d || ' days')::interval
+            ORDER BY item_date DESC, created_at DESC
+        """), {"d": days}).fetchall()
+    except Exception:
+        return []
+    return [{"date": r[0], "brand": r[1], "text": r[2], "urgency": r[3]} for r in rows]
+
+
+def record_respond_items(session: Session, items: list) -> int:
+    """오늘의 대응항목을 피드에 적재. 최근 7일 피드와 브랜드+문장유사도(≥0.6) 중복은
+    스킵(같은 사건 재등록 방지) → 하루 여러 번 재생성돼도 안전. 반환: 신규 적재 수."""
+    from difflib import SequenceMatcher
+    if not items:
+        return 0
+    try:
+        _ensure_respond_feed(session)
+        recent = get_respond_feed(session, days=7)   # 오늘 것 포함 → 재실행 시 재적재 방지
+        import datetime as _dtm
+        today = _dtm.date.today().isoformat()
+        added = 0
+        for it in items:
+            b = it.get("brand")
+            txt = (it.get("text") or "").strip()
+            if not txt:
+                continue
+            # 같은 브랜드(널 아님)가 오늘 이미 있으면 스킵(문장 리워딩으로 유사도 dedup을
+            # 빠져나가는 같은날 중복 방지) + 최근 7일 내 브랜드·문장유사도(≥0.6) 중복 스킵.
+            dup = any(
+                (b and e.get("brand") == b and e.get("date") == today)
+                or (e.get("brand") == b and SequenceMatcher(None, e.get("text", ""), txt).ratio() >= 0.6)
+                for e in recent)
+            if dup:
+                continue
+            session.execute(text(f"""
+                INSERT INTO {DB_SCHEMA}.respond_feed (item_date, brand, text, urgency)
+                VALUES (CURRENT_DATE, :b, :t, :u)
+            """), {"b": b, "t": txt, "u": it.get("urgency")})
+            recent.append({"brand": b, "text": txt, "date": today})  # 배치 내 중복도 방지
+            added += 1
+        session.commit()
+        return added
+    except Exception:
+        session.rollback()
+        return 0
+
+
+def purge_respond_feed(session: Session, keep_days: int = 21) -> None:
+    try:
+        session.execute(text(
+            f"DELETE FROM {DB_SCHEMA}.respond_feed "
+            f"WHERE item_date < CURRENT_DATE - (:d || ' days')::interval"), {"d": keep_days})
+        session.commit()
+    except Exception:
+        session.rollback()
+
+
 def get_brand_insights_raw_by_range(session: Session, from_date: str, to_date: str) -> dict:
     """명시적 날짜 범위 기반 브랜드 인사이트 원자료 (API 엔드포인트용)."""
     params = {"from_date": from_date, "to_date": to_date}
