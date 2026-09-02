@@ -735,18 +735,21 @@ def _render_rank_trends(history: list) -> str:
             tone, arw, dtxt = "var(--coral)", "▼", f"{dl}"
         else:
             tone, arw, dtxt = "var(--lo)", "–", "0"
+        flag = COUNTRY_FLAGS.get(h.get("country", ""), "🌐")
+        cat_lbl = f'{flag} {_esc(h.get("category",""))}'
         rows.append(
             f'<div class="rt-row" onclick="openHeatmapDrilldown(\'{_esc(h["brand"])}\',\'all\',\'all\')">'
             f'<span class="rt-brand">{_esc(h["brand"])}</span>'
-            f'<span class="rt-cat">{_esc(h.get("category",""))}</span>'
+            f'<span class="rt-cat">{cat_lbl}</span>'
             f'<span class="rt-now">#{h["latest"]}</span>'
             f'<span class="rt-spark">{spark}</span>'
             f'<span class="rt-delta" style="color:{tone}">{arw} {dtxt}</span></div>'
         )
-    return ('<div class="rt-head"><span>브랜드</span><span>카테고리</span><span>현재</span>'
+    return ('<div class="rt-head"><span>브랜드</span><span>국가·카테고리</span><span>현재</span>'
             '<span>15일 추이</span><span>변동</span></div>'
             f'<div class="rt-list">{"".join(rows)}</div>'
-            '<div class="rt-note">스파크라인 ↑ = 순위 상승(개선) · 변동 = 첫날 대비 순위 변화</div>')
+            '<div class="rt-note">순위는 <b>각 국가·카테고리별 베스트셀러 기준</b>(시장 전체 1등이 아님) · '
+            '브랜드별 최고순위 노드 표시 · 스파크라인 ↑=순위 상승(개선) · 변동=첫날 대비</div>')
 
 
 def _oy_delta_span(delta) -> str:

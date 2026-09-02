@@ -1037,6 +1037,8 @@ def get_ingredient_trends(session: Session, days: int = 30, limit: int = 15) -> 
                    array_agg(DISTINCT brand) AS brands
             FROM ing
             WHERE char_length(ingredient) >= 2
+              -- AI 추출 노이즈(null/none 등) 제거: '성분 지형'에 성분명 없는 항목 오노출 방지
+              AND lower(ingredient) NOT IN ('null','none','n/a','na','nan','-','undefined','기타','없음')
             GROUP BY ingredient
             ORDER BY mentions DESC, brand_cnt DESC
             LIMIT :lim
@@ -1048,7 +1050,13 @@ def get_ingredient_trends(session: Session, days: int = 30, limit: int = 15) -> 
 
 
 def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> list[dict]:
-    """경쟁사 악재(negative sentiment) 목록 — '기회 신호'. incidental 제외, HIGH·MED만."""
+    """경쟁사 악재(negative sentiment) 목록 — '기회 신호'. 브랜드 무관 업종·증시 노이즈 제외.
+
+    정합성: 분류기가 '패션·섬유주 약세'(→VT), 'K뷰티 가품 글로벌화'(→조선미녀) 같은
+    업종·시장 전반 기사를 특정 브랜드 악재로 오태깅하는 경우가 많아(대부분 실적_공시),
+    업종/증시/가품 키워드 블록리스트로 걸러 브랜드 고유 악재만 노출한다.
+    (정교한 연관도 임계값은 분류단 개선 과제 — 여기선 표시 계층에서 1차 방어.)
+    """
     cutoff = _cutoff_iso(days)
     try:
         rows = session.execute(text(f"""
@@ -1060,6 +1068,8 @@ def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> l
               AND published_date >= :cutoff
               AND (brand_focus IS NULL OR brand_focus != 'incidental')
               AND importance IN ('high', 'medium')
+              -- 업종·증시·가품 등 브랜드 무관 노이즈 제외(제목 기준 1차 방어)
+              AND COALESCE(title_ko, title) !~ '패션·섬유|뷰티주|증시|코스피|코스닥|종목|급등|급락|가품|위조|짝퉁|기권'
             ORDER BY CASE importance WHEN 'high' THEN 0 ELSE 1 END, published_date DESC
             LIMIT :lim
         """), {"cutoff": cutoff, "lim": limit}).fetchall()
@@ -1131,15 +1141,16 @@ def get_retail_rank_history(session: Session, days: int = 30) -> list[dict]:
         o = by.setdefault(brand, {"brand": brand, "dates": [], "ranks": []})
         o["dates"].append(d)
         o["ranks"].append(int(best))
-    # 최신 카테고리(대표) 붙이기
+    # 최신 최고순위 노드의 국가·카테고리 붙이기(정합성: 순위는 국가·카테고리별 값이라
+    # 맥락 없이 '#2'만 보이면 시장 전체 1등처럼 오해됨 → 국가+카테고리를 함께 노출)
     cats = {}
     try:
         for r in session.execute(text(f"""
-            SELECT DISTINCT ON (brand) brand, category FROM {DB_SCHEMA}.retail_rankings
+            SELECT DISTINCT ON (brand) brand, category, country FROM {DB_SCHEMA}.retail_rankings
             WHERE is_monitored AND rank IS NOT NULL AND capture_date >= :cutoff
             ORDER BY brand, capture_date DESC, rank ASC
         """), {"cutoff": cutoff}).fetchall():
-            cats[r[0]] = r[1]
+            cats[r[0]] = (r[1], r[2])
     except Exception:
         pass
     out = []
@@ -1150,7 +1161,9 @@ def get_retail_rank_history(session: Session, days: int = 30) -> list[dict]:
         o["latest"] = rk[-1]
         o["first"] = rk[0]
         o["delta"] = rk[0] - rk[-1]     # +면 순위 상승(개선)
-        o["category"] = cats.get(brand, "")
+        _cat, _cc = cats.get(brand, ("", ""))
+        o["category"] = _cat
+        o["country"] = _cc
         out.append(o)
     out.sort(key=lambda x: (x["latest"], -x["delta"]))   # 현재 순위 좋고 개선된 순
     return out
