@@ -36,7 +36,6 @@ from analytics.queries import (
     get_demand_triangulation,
     get_market_export_growth,
     get_market_growth_story,
-    get_competitor_financials,
     get_trademark_signals,
     get_google_spikes,
     get_brand_composite_score,
@@ -655,52 +654,14 @@ def _won_eok(v) -> str:
     return f"{eok/1e4:,.2f}조" if eok >= 1e4 else f"{eok:,.0f}억"
 
 
-def _render_financials(fins: list) -> str:
-    """경쟁사 실적(DART) — 매출·영업이익·영업이익률·매출 YoY 테이블."""
-    if not fins:
-        return ('<p class="no-data">재무 데이터 없음 '
-                '(DART 수집 전 · 매월 4일 갱신)</p>')
-    body = []
-    for f in fins:
-        yoy = f["rev_yoy_pct"]
-        if yoy is None:
-            yoy_html = '<span class="fin-yoy" style="color:var(--lo)">—</span>'
-        else:
-            c = "#4ab884" if yoy >= 10 else ("#e05353" if yoy <= -5 else "var(--mid)")
-            yoy_html = f'<span class="fin-yoy" style="color:{c}">{"+" if yoy >= 0 else ""}{yoy:.0f}%</span>'
-        listed = ('<span class="fin-tag fin-listed">상장</span>' if f["stock_code"]
-                  else '<span class="fin-tag fin-unlisted">비상장</span>')
-        whole = '' if f["is_brand_level"] else '<span class="fin-whole">회사전체</span>'
-        opm = f'{f["opm"]:.0f}%' if f["opm"] is not None else '-'
-        body.append(
-            f'<tr><td class="fin-brand">{_esc(f["brand"])}</td>'
-            f'<td class="fin-corp">{_esc(f["corp_name"])}{listed}{whole}</td>'
-            f'<td class="fin-num">{f["year"]}</td>'
-            f'<td class="fin-num fin-rev">{_won_eok(f["revenue"])}</td>'
-            f'<td class="fin-num">{yoy_html}</td>'
-            f'<td class="fin-num">{_won_eok(f["op_income"])}</td>'
-            f'<td class="fin-num">{opm}</td></tr>'
-        )
-    return (
-        '<div class="table-wrap"><table class="data-table fin-table">'
-        '<thead><tr><th>브랜드</th><th>운영사</th><th>기준연도</th>'
-        '<th>매출</th><th>YoY</th><th>영업이익</th><th>영업이익률</th></tr></thead>'
-        f'<tbody>{"".join(body)}</tbody></table></div>'
-        '<div class="fin-note">※ DART 전자공시 기준(연결). ‘회사전체’는 해당 브랜드가 대기업의 '
-        '일부라 수치가 회사 전체임(예: 구달=클리오, 센텔리안24=동국제약, 에스트라=아모레퍼시픽). '
-        '비상장 외감법인(아누아·조선미녀·토리든 등)은 표준 재무 API 미제공으로 제외.</div>'
-    )
-
-
-# NICE 매칭 기업 중 상장사(코스피/코스닥) — 상장/비상장 구분 표기용(수동 큐레이션)
-_NICE_LISTED = {"동국제약(주)", "(주)파마리서치", "(주)클리오", "(주)브이티", "(주)에이피알"}
-
-
 def _eok(thousands) -> str:
     """천원 → 억원 표기. NICE 재무 단위(천원) 전용."""
     if thousands is None:
         return "—"
     return f"{thousands / 100000:,.0f}억"
+
+
+_NICE_LISTED = {"동국제약(주)", "(주)파마리서치", "(주)클리오", "(주)브이티", "(주)에이피알"}
 
 
 def _render_financials_nice(fins: list) -> str:
@@ -1028,43 +989,6 @@ def _render_growth_story(story: dict) -> str:
     return f'<div class="gs-grid">{"".join(cards)}</div>'
 
 
-def _render_growth_headline(story: dict) -> str:
-    """개요 상단 배너 — 전체 수출 YoY + 성장 top 시장(경쟁사 활동 맥락) 요약."""
-    o = (story or {}).get("overall")
-    markets = (story or {}).get("markets") or []
-    if not o or o.get("yoy_pct") is None:
-        return ""
-    yoy = o["yoy_pct"]
-    col = _yoy_badge_color(yoy)
-    arrow = "▲" if yoy >= 0 else "▼"
-    chips = []
-    for m in markets[:4]:
-        cc = m["country_code"]
-        flag = COUNTRY_FLAGS.get(cc, "🌐")
-        name = _COUNTRY_KO_LBL.get(cc, m["country_name"] or cc)
-        top_brand = m["moves"][0]["brand"] if m["moves"] else ""
-        ctx = f'<span class="gh-chip-ctx">{_esc(top_brand)} 등 {len(m["moves"])}건</span>' if top_brand else ""
-        chips.append(
-            f'<button class="gh-chip" onclick="switchTab(\'strategy\')">'
-            f'<span class="gh-chip-flag">{flag}</span>'
-            f'<span class="gh-chip-name">{_esc(name)}</span>'
-            f'<span class="gh-chip-yoy" style="color:{_yoy_badge_color(m["yoy_pct"])}">'
-            f'{"+" if (m["yoy_pct"] or 0) >= 0 else ""}{m["yoy_pct"]:.0f}%</span>'
-            f'{ctx}</button>'
-        )
-    return (
-        '<div class="gh-band">'
-        '<div class="gh-left">'
-        '<div class="gh-label">주요국 화장품 수출 (관세청 · 최근 3개월 YoY)</div>'
-        f'<div class="gh-big" style="color:{col}">{arrow} {"+" if yoy >= 0 else ""}{yoy:.1f}%</div>'
-        f'<div class="gh-sub">${o["cur_musd"]:,.0f}M · 성장 {o["growers"]}개국 / 둔화 {o["decliners"]}개국</div>'
-        '</div>'
-        f'<div class="gh-right"><div class="gh-right-lbl">🔥 뜨는 시장 — 실수출↑ 그리고 경쟁사 활동↑</div>'
-        f'<div class="gh-chips">{"".join(chips)}</div></div>'
-        '</div>'
-    )
-
-
 def _briefing_md_to_html(text: str) -> str:
     """브리핑 마크다운-라이트(### 헤더 / - 불릿 / *굵게*) → HTML."""
     import re as _re
@@ -1134,170 +1058,6 @@ def _render_briefing_archive(briefings: list) -> str:
         f'<div class="bfa-list">{"".join(items)}</div>'
         '</div>'
     )
-
-
-def _digest_market_teaser(market_text: str) -> list:
-    """시장 인사이트 첫 섹션의 앞 불릿 2~3개 추출."""
-    if not market_text:
-        return []
-    import re as _re
-    for part in _re.split(r"###\s+", market_text):
-        part = part.strip()
-        if not part:
-            continue
-        nl = part.find("\n")
-        body = part[nl + 1:] if nl >= 0 else ""
-        bullets = [ln.strip().lstrip("-•").strip().replace("**", "")
-                   for ln in body.split("\n") if ln.strip().startswith(("-", "•"))]
-        if bullets:
-            return bullets[:3]
-    return []
-
-
-def _render_overview_digest(stats, momentum, category_battle, expansion_playbook,
-                            high_articles, market_text, ref_date="") -> str:
-    """개요 탭 지도 아래 '이번 주(최근 7일) 종합 요약' — 내러티브 중심 + 데이터 + 탭 점프."""
-    import re as _re
-    rising = [m for m in momentum if m.get("signal") == "rising"][:4]
-    cooling = [m for m in momentum if m.get("signal") == "cooling"][:2]
-    cats = [c for c in category_battle if c.get("total")][:4]
-    mkts = [m for m in expansion_playbook if m.get("moves")][:4]
-    # 최고 무브: 같은 사건 반복 방지 — (브랜드·국가·활동) 조합당 1건
-    _seen, moves = set(), []
-    for a in (high_articles or []):
-        k = (a.get("brand", ""), a.get("country", ""), a.get("activity_type", ""))
-        if k in _seen:
-            continue
-        _seen.add(k); moves.append(a)
-        if len(moves) >= 6:
-            break
-
-    def jump(tab, label):
-        return f'<button class="dg-jump" onclick="switchTab(\'{tab}\')">{label} →</button>'
-
-    # KPI 라인 (최근 7일)
-    kpi = (f'<div class="dg-kpi">'
-           f'<span>📥 수집 <b>{stats.get("total", 0)}</b></span>'
-           f'<span>🔴 HIGH <b>{stats.get("high", 0)}</b></span>'
-           f'<span>🏷 브랜드 <b>{stats.get("brands_active", 0)}</b></span>'
-           f'<span>🌐 국가 <b>{stats.get("countries_active", 0)}</b></span>'
-           f'</div>')
-
-    # 1) 시장 인사이트 → 3색 컬럼(🚨대응/🎯기회/👀점검)으로 직관화
-    narr_html = ""
-    if market_text.strip():
-        cols = []
-        for part in _re.split(r"###\s+", market_text):
-            part = part.strip()
-            if not part:
-                continue
-            nl = part.find("\n")
-            label = (part if nl < 0 else part[:nl]).strip()
-            body = "" if nl < 0 else part[nl + 1:]
-            bullets = [ln.strip().lstrip("-•").strip().replace("**", "")
-                       for ln in body.split("\n") if ln.strip().startswith(("-", "•"))]
-            if not bullets:
-                continue
-            if "대응" in label:
-                kind, icon = "respond", "🚨"
-            elif "기회" in label or "확장" in label:
-                kind, icon = "opportunity", "🎯"
-            else:
-                kind, icon = "check", "👀"
-            lis = "".join(_urgency_li(b) for b in bullets[:3])
-            cols.append(f'<div class="dg-col dg-col-{kind}">'
-                        f'<div class="dg-col-h">{icon} {_esc(label)}</div>'
-                        f'<ul>{lis}</ul></div>')
-        if cols:
-            narr_html = (
-                '<div class="dg-block dg-narr">'
-                '<div class="dg-block-h">🧠 이번 주 시장 인사이트 · 셀퓨전씨 액션'
-                + jump("strategy", "전략 탭 자세히") + '</div>'
-                '<div class="dg-cols">' + "".join(cols) + '</div>'
-                '</div>'
-            )
-
-    # 2) 이번 주 최고 임팩트 무브 (top 8, details 포함)
-    mv_rows = ""
-    for a in moves:
-        cc = a.get("country", "")
-        flag = COUNTRY_FLAGS.get(cc, "")
-        impc = "dg-imp-high" if a.get("importance") == "high" else "dg-imp-med"
-        impl = "HIGH" if a.get("importance") == "high" else "MED"
-        act = ACTIVITY_LABELS.get(a.get("activity_type", ""), a.get("activity_type", ""))
-        title = _esc((a.get("title_ko") or a.get("title") or "")[:80])
-        url = _esc(a.get("source_url", ""))
-        thtml = f'<a href="{url}" target="_blank" rel="noopener">{title}</a>' if url else title
-        sc = a.get("score") or 0
-        det = _esc((a.get("details") or "")[:70])
-        det_html = f'<div class="dg-mv-det">{det}</div>' if det else ""
-        mv_rows += (f'<div class="dg-move2"><div class="dg-move2-top">'
-                    f'<span class="dg-badge {impc}">{impl}</span>'
-                    f'<span class="dg-sc">{sc}점</span>'
-                    f'<span class="dg-mv-b">{_esc(a.get("brand",""))}</span>'
-                    f'<span class="dg-mv-cc">{flag}{_esc(cc)}</span>'
-                    f'<span class="dg-mv-act">{_esc(act)}</span></div>'
-                    f'<div class="dg-mv-t">{thtml}</div>{det_html}</div>')
-    mv_rows = mv_rows or '<div class="dg-empty">이번 주 무브먼트 없음</div>'
-
-    # 3) 모멘텀 / 카테고리 / 핫스팟 미니 그리드
-    mo_rows = ""
-    for m in rising:
-        mo_rows += (f'<div class="dg-li"><span class="dg-up">▲</span> '
-                    f'<b>{_esc(m["brand"])}</b> <span class="dg-x">{m["momentum"]}x</span>'
-                    f'<span class="dg-sub">최근 {m["recent_4w"]}건·HIGH {m["recent_high"]}</span></div>')
-    for m in cooling:
-        mo_rows += (f'<div class="dg-li"><span class="dg-down">▼</span> '
-                    f'<b>{_esc(m["brand"])}</b> <span class="dg-x dg-x-dn">{m["momentum"]}x</span>'
-                    f'<span class="dg-sub">최근 {m["recent_4w"]}건</span></div>')
-    mo_rows = mo_rows or '<div class="dg-empty">데이터 축적 중</div>'
-
-    cat_rows = ""
-    for c in cats:
-        lead = (c["moves"][0]["brand"] if c.get("moves") else "?")
-        cat_rows += (f'<div class="dg-li"><b>{_esc(c["category"])}</b> '
-                     f'<span class="dg-cnt">{c["total"]}건 <span class="dg-hi">HIGH {c["high"]}</span></span>'
-                     f'<span class="dg-sub">주도 {_esc(lead)}</span></div>')
-    cat_rows = cat_rows or '<div class="dg-empty">데이터 축적 중</div>'
-
-    mk_rows = ""
-    for m in mkts:
-        cc = m["country"]
-        flag = COUNTRY_FLAGS.get(cc, "🌐")
-        name = _COUNTRY_KO_LBL.get(cc, cc)
-        chs = " · ".join(m.get("channels", [])[:2]) or "채널 파악중"
-        mk_rows += (f'<div class="dg-li">{flag} <b>{_esc(name)}</b> '
-                    f'<span class="dg-cnt">{m["moves"]}건</span>'
-                    f'<span class="dg-sub">{_esc(chs)}</span></div>')
-    mk_rows = mk_rows or '<div class="dg-empty">데이터 축적 중</div>'
-
-    ref = f' · 기준 {_esc(ref_date)}' if ref_date else ""
-    return f"""
-  <div class="section" id="overview-digest">
-    <div class="section-title">📋 이번 주 종합 요약
-      <span class="section-sub">최근 7일{ref} · 매일 수집분 반영 · 항목별 '자세히'로 상세 탭 이동</span>
-    </div>
-    {kpi}
-    {narr_html}
-    <div class="dg-block">
-      <div class="dg-block-h">🔴 이번 주 최고 임팩트 무브 {jump("feed", "기사 전체")}</div>
-      <div class="dg-moves">{mv_rows}</div>
-    </div>
-    <div class="dg-grid">
-      <div class="dg-card">
-        <div class="dg-card-h">📈 브랜드 모멘텀 {jump("brands", "경쟁사")}</div>
-        {mo_rows}
-      </div>
-      <div class="dg-card">
-        <div class="dg-card-h">🥊 우리 카테고리 압박 {jump("strategy", "우리 관점")}</div>
-        {cat_rows}
-      </div>
-      <div class="dg-card">
-        <div class="dg-card-h">🧭 해외 진출 핫스팟 {jump("strategy", "우리 관점")}</div>
-        {mk_rows}
-      </div>
-    </div>
-  </div>"""
 
 
 def _render_brand_activity_bar(brand_act: list) -> str:
@@ -3590,45 +3350,6 @@ def _render_brand_signals(summary: list) -> str:
     return f'<div class="bsig">{"".join(rows)}</div>{note}'
 
 
-def _render_composite_lb(composite: list, trend: dict = None) -> str:
-    """브랜드 종합 스코어 리더보드 (21개 전부, 4색 서브신호 바). 추세 있으면 ▲▼."""
-    if not composite:
-        return ('<div class="lb"><div class="ev"><div class="t" style="color:var(--lo);padding:6px">'
-                '종합 스코어 데이터 축적 중</div></div></div>')
-    trend = trend or {}
-    rows = []
-    for o in composite:
-        subs = o["subs"]
-        bars = ""
-        for key, cls in (("momentum", "sub-mom"), ("financial", "sub-fin"),
-                         ("trademark", "sub-tm"), ("demand", "sub-dem")):
-            v = subs.get(key)
-            h = int(round((v or 0) * 100)) if v is not None else 3
-            op = "" if v is not None else "opacity:.25"
-            bars += f'<i class="{cls}" style="height:{max(h,3)}%;{op}"></i>'
-        sccol = "var(--champ2)" if o["rank"] <= 2 else "var(--hi)"
-        # 시계열 추세(주간 스냅샷 ≥2점일 때만): 첫 대비 증감
-        tr = trend.get(o["brand"]) or {}
-        dl = tr.get("delta")
-        trend_html = ""
-        if tr.get("points", 0) >= 2 and dl is not None and abs(dl) >= 0.5:
-            tc = "var(--teal)" if dl > 0 else "var(--coral)"
-            arw = "▲" if dl > 0 else "▼"
-            trend_html = f'<span class="lb-tr" style="color:{tc}" title="지난 스냅샷 대비">{arw}{abs(dl):.0f}</span>'
-        rows.append(
-            f'<div class="r" onclick="openHeatmapDrilldown(\'{_esc(o["brand"])}\',\'all\',\'all\')">'
-            f'<span class="rk">{o["rank"]}</span><span class="nm">{_esc(o["brand"])}</span>'
-            f'<span class="subs" title="4축 신호 상대강도(모멘텀·재무·상표·수요)">{bars}</span>'
-            f'{trend_html}</div>'
-        )
-    key = ('<div class="lb-key">'
-           '<span title="최근 4주 뉴스 활동량·중요도 (가중 35%)"><i class="sub-mom"></i>모멘텀</span>'
-           '<span title="매출·영업이익 등 재무 실적 (가중 25%)"><i class="sub-fin"></i>재무</span>'
-           '<span title="US·JP 화장품 상표 출원 = 진출 선행신호 (가중 15%)"><i class="sub-tm"></i>상표</span>'
-           '<span title="네이버·구글 검색 수요 (가중 25%)"><i class="sub-dem"></i>수요</span></div>')
-    return f'<div class="lb">{"".join(rows)}</div>{key}'
-
-
 def _parse_market_sections(market_text: str) -> dict:
     """시장요약 텍스트(### 대응/기회/점검) → {respond,opportunity,check: [bullets]}."""
     import re as _re
@@ -3975,7 +3696,6 @@ def _build_full_html(
     demand_tri: list = None,
     export_growth: list = None,
     growth_story: dict = None,
-    financials: list = None,
     nice_financials: list = None,
     ingredient_trends: list = None,
     negative_signals: list = None,
@@ -3984,7 +3704,6 @@ def _build_full_html(
     composite: list = None,
     brand_signals: list = None,
     stories: list = None,
-    score_trend: dict = None,
     rank_trends: list = None,
     oliveyoung_movers: list = None,
     oliveyoung_flagship: dict = None,
@@ -4006,16 +3725,10 @@ def _build_full_html(
     expansion_playbook_html = _render_expansion_playbook(expansion_playbook or [])
     briefing_archive_html = _render_briefing_archive(briefing_archive or [])
     _dg = digest or {}
-    overview_digest_html = _render_overview_digest(
-        _dg.get("stats") or stats, momentum or [], _dg.get("cat") or [],
-        _dg.get("expansion") or [], _dg.get("high") or [], _dg.get("market") or "",
-        _dg.get("ref_date") or "")
     radar_html        = _render_brand_radar(brand_radar or [])
     demand_html       = _render_demand_signal(demand_tri or [])
     export_growth_html = _render_export_growth(export_growth or [])
     growth_story_html  = _render_growth_story(growth_story or {})
-    growth_headline_html = _render_growth_headline(growth_story or {})
-    financials_html   = _render_financials(financials or [])
     financials_nice_html = _render_financials_nice(nice_financials or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     negative_signals_html = _render_negative_signals(negative_signals or [])
@@ -4026,7 +3739,6 @@ def _build_full_html(
     # ── 커맨드센터(브리핑 탭) 신규 블록 ──
     metric_rail_html  = _render_metric_rail(stats, growth_story or {}, search_spikes or [], days)
     move_stream_html  = _render_move_stream(_dg.get("high") or high_articles, demand_tri or [])
-    composite_lb_html = _render_composite_lb(composite or [], score_trend or {})
     brand_signals_html = _render_brand_signals(brand_signals or [])
     _market7 = _dg.get("market") or market_text
     action_banner_html = _render_action_banner(_market7, {
@@ -4946,7 +4658,6 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         distribution  = get_activity_distribution(session, days=days)
         brand_act     = get_brand_activity_matrix(session, days=days)
         brand_high    = get_brand_high_ratio(session, days=days)
-        insights_raw  = get_brand_insights_raw(session, days=days)
         country_stats = get_country_signal_stats(session, days=days)
         category_battle = get_category_battle(session, days=days)
         # 해외 진출 플레이북은 진입 이벤트가 드물어 윈도우를 넓게(최소 90일) 잡아 밀도 확보
@@ -4971,11 +4682,6 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             growth_story = get_market_growth_story(session)
         except Exception:
             growth_story = {"overall": None, "markets": []}
-        # 경쟁사 실적(DART) — competitor_financials 없으면 빈 리스트
-        try:
-            financials = get_competitor_financials(session)
-        except Exception:
-            financials = []
         # NICE BizLine 재무(비상장 포함, 연 단위) — 재무 탭
         try:
             nice_financials = get_nice_financials(session)
@@ -5039,12 +4745,6 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception as _e:
             logger.warning("기회 스토리 생성 실패: %s", _e)
             stories = []
-        # 시계열 추세(주간 스냅샷 누적분) — 없으면 빈 dict(무해)
-        try:
-            from analytics.history import get_score_trend
-            score_trend = get_score_trend(session)
-        except Exception:
-            score_trend = {}
         # 시장 인사이트 정량 근거: 브랜드 모멘텀(최근4주 속도) — 기간 무관 단일 계산
         try:
             market_momentum = compute_brand_momentum(session)
@@ -5187,7 +4887,6 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         demand_tri=demand_tri,
         export_growth=export_growth,
         growth_story=growth_story,
-        financials=financials,
         nice_financials=nice_financials,
         ingredient_trends=ingredient_trends,
         negative_signals=negative_signals,
@@ -5200,7 +4899,6 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         composite=composite,
         brand_signals=brand_signals,
         stories=stories,
-        score_trend=score_trend,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
         briefing_archive=briefing_archive,
