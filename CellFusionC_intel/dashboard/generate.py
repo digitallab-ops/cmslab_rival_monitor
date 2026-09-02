@@ -32,6 +32,7 @@ from analytics.queries import (
     get_insights_cache_by_period,
     get_weekly_trend,
     upsert_insight_cache,
+    purge_old_insights,
     compute_brand_momentum,
     get_demand_triangulation,
     get_market_export_growth,
@@ -4873,6 +4874,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                 upsert_insight_cache(insight_session, "__DIGEST7__", _dg_from, _dg_to, {
                     "summary": dg_market, "top_act": None, "top_pct": 0, "high_pct": 0.0,
                 })
+        # 오래된 캐시행 정리(무한 증가 방지) — 리포트 생성 1회당 1 DELETE(경미).
+        purge_old_insights(insight_session, keep_days=45)
     finally:
         insight_session.close()
 

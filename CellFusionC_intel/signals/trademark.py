@@ -97,22 +97,25 @@ def _nice_has_cosmetic(nice: str, cls: str) -> bool:
     return 3 in classes
 
 
-def _search(term: str, country: str) -> list[dict]:
+_DOCS_PER_PAGE = 500
+_MAX_PAGES = 4               # 브랜드당 최대 2000건(상한 — 무한루프·과호출 방지)
+
+
+def _search_page(term: str, country: str, page: int) -> "list[dict] | None":
+    """한 페이지 조회·파싱. 에러면 None(상위서 중단)."""
     params = {
         "tradeMarkName": term, "collectionValues": country,
-        "accessKey": _key(), "docsCount": 500, "currentPage": 1,
+        "accessKey": _key(), "docsCount": _DOCS_PER_PAGE, "currentPage": page,
         "sortField": "applicationDate", "sortState": "true",
     }
     r = requests.get(_URL, params=params, timeout=30)
     r.raise_for_status()
     root = ET.fromstring(r.content)
-    # 에러 체크(KIPRIS Plus: successYN=N / resultCode)
     yn = root.findtext(".//successYN")
     if yn and yn.upper() == "N":
-        logger.warning("KIPRIS 오류(%s/%s): %s", term, country,
+        logger.warning("KIPRIS 오류(%s/%s p%d): %s", term, country, page,
                        root.findtext(".//resultMsg") or root.findtext(".//resultCode"))
-        return []
-    # 컨테이너 태그명을 몰라도 되도록 parent-map으로 레코드 그룹핑
+        return None
     parent = {c: p for p in root.iter() for c in p}
     recs: dict = {}
     for f in _FIELDS:
@@ -121,11 +124,21 @@ def _search(term: str, country: str) -> list[dict]:
             if p is None:
                 continue
             recs.setdefault(id(p), {})[f] = (el.text or "").strip()
-    out = []
-    for rec in recs.values():
-        if not (rec.get("applicationNumber") or rec.get("tradeMarkName")):
-            continue
-        out.append(rec)
+    return [rec for rec in recs.values()
+            if rec.get("applicationNumber") or rec.get("tradeMarkName")]
+
+
+def _search(term: str, country: str) -> list[dict]:
+    """전 페이지 조회 — 한 페이지가 상한(500) 미만이면 마지막으로 보고 중단.
+    예전엔 1페이지만 가져와 대형 브랜드는 500건 초과분이 조용히 유실됐다."""
+    out: list[dict] = []
+    for page in range(1, _MAX_PAGES + 1):
+        recs = _search_page(term, country, page)
+        if not recs:
+            break
+        out.extend(recs)
+        if len(recs) < _DOCS_PER_PAGE:
+            break
     return out
 
 

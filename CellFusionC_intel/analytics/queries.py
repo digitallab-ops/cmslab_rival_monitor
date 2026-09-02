@@ -710,6 +710,21 @@ def upsert_insight_cache(
     session.commit()
 
 
+def purge_old_insights(session: Session, keep_days: int = 45) -> int:
+    """오래된 brand_insights 캐시 행 정리 — UNIQUE 키가 날짜 기반이라 매일 새 행이
+    쌓여 무한 증가한다. generated_at 기준 keep_days 초과분 삭제(테이블 비대 방지). 반환: 삭제행수."""
+    try:
+        r = session.execute(text(f"""
+            DELETE FROM {DB_SCHEMA}.brand_insights
+            WHERE generated_at < NOW() - (:d || ' days')::interval
+        """), {"d": keep_days})
+        session.commit()
+        return r.rowcount or 0
+    except Exception:
+        session.rollback()
+        return 0
+
+
 def get_brand_insights_raw_by_range(session: Session, from_date: str, to_date: str) -> dict:
     """명시적 날짜 범위 기반 브랜드 인사이트 원자료 (API 엔드포인트용)."""
     params = {"from_date": from_date, "to_date": to_date}
