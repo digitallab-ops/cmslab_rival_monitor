@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _dashboard_html: str = ""
 _dashboard_built_at: float = 0.0        # 마지막 생성 시각(epoch)
 _regenerating: bool = False             # 중복 재생성 방지
+_regen_lock = threading.Lock()          # 체크-앤-셋 원자화(동시요청·refresh 레이스 방지)
 _STALE_TTL = 3 * 3600                    # 이 시간 지나면 조회 시 자가 재생성(초)
 
 _LOADING_PAGE = """<!doctype html>
@@ -81,11 +82,13 @@ def _prebuild():
 
 
 def _regen_async():
-    """백그라운드 재생성 (조회 TTL·수동 refresh 공용). 중복 방지 플래그."""
+    """백그라운드 재생성 (조회 TTL·수동 refresh 공용). 락으로 중복 재생성 방지."""
     global _dashboard_html, _dashboard_built_at, _regenerating
-    if _regenerating:
-        return
-    _regenerating = True
+    # 체크-앤-셋을 락 안에서 원자적으로 — 동시 요청/refresh가 둘 다 통과하는 레이스 차단.
+    with _regen_lock:
+        if _regenerating:
+            return
+        _regenerating = True
     try:
         _dashboard_html = _build_dashboard()
         _dashboard_built_at = time.time()
@@ -93,7 +96,8 @@ def _regen_async():
     except Exception as e:
         logger.error("대시보드 재생성 실패: %s", e)
     finally:
-        _regenerating = False
+        with _regen_lock:
+            _regenerating = False
 
 
 def _maybe_regen():
@@ -212,10 +216,34 @@ async def refresh(background_tasks: BackgroundTasks):
     return {"status": "ok", "message": "재생성 중 — 잠시 후 새로고침하세요"}
 
 
+# /api/ask 남용 방지 — 공개 챗봇이라 인증은 못 걸지만(대시보드 JS가 호출),
+# 길이 상한 + 간단한 인메모리 IP 레이트리밋으로 비용/남용 폭주만 차단.
+_ASK_MAX_LEN = 500
+_ASK_RATE_MAX = 12          # 분당 IP별 허용 횟수
+_ask_hits: dict = {}
+
+
+def _ask_rate_ok(ip: str) -> bool:
+    now = time.time()
+    hits = [t for t in _ask_hits.get(ip, []) if now - t < 60]
+    if len(hits) >= _ASK_RATE_MAX:
+        _ask_hits[ip] = hits
+        return False
+    hits.append(now)
+    _ask_hits[ip] = hits
+    if len(_ask_hits) > 2000:      # 메모리 상한(오래된 IP 정리)
+        for k in [k for k, v in _ask_hits.items() if not any(now - t < 60 for t in v)]:
+            _ask_hits.pop(k, None)
+    return True
+
+
 @app.post("/api/ask")
 async def api_ask(request: Request):
     """통합검색 챗봇 — 자연어 질문(기간·브랜드·국가)을 MCP 툴로 조회해 답변.
     Slack 봇과 동일한 LLM tool-calling 로직(slack_bot.answer) 재사용."""
+    ip = request.client.host if request.client else "?"
+    if not _ask_rate_ok(ip):
+        return JSONResponse({"answer": "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요."}, status_code=429)
     try:
         body = await request.json()
     except Exception:
@@ -223,19 +251,21 @@ async def api_ask(request: Request):
     q = (body.get("question") or "").strip()
     if not q:
         return JSONResponse({"answer": "질문을 입력해 주세요."}, status_code=400)
+    if len(q) > _ASK_MAX_LEN:
+        return JSONResponse({"answer": f"질문이 너무 깁니다({_ASK_MAX_LEN}자 이내)."}, status_code=400)
     if not os.getenv("OPENAI_API_KEY"):
         return JSONResponse({"answer": "검색 기능 미설정(OPENAI_API_KEY 필요)."}, status_code=503)
     try:
         import slack_bot
-        parts = []
-        async def _collect(t):
-            if t:
-                parts.append(t)
-        ans = await slack_bot.answer(q, [], _collect)
-        return {"answer": ans or "".join(parts) or "관련 데이터를 찾지 못했어요."}
+        # /api/ask는 단발 JSON 응답 — 스트리밍 콜백 불필요(slack_bot은 on_delta를
+        # 동기 호출하므로 no-op 동기 콜백을 넘긴다). 예전의 async _collect는 await되지
+        # 않아 코루틴이 버려지고 parts가 항상 비어 무의미했음.
+        ans = await slack_bot.answer(q, [], lambda t: None)
+        return {"answer": ans or "관련 데이터를 찾지 못했어요."}
     except Exception as e:
         logger.warning("검색 응답 실패: %s", e)
-        return JSONResponse({"answer": f"검색 처리 중 오류: {e}"}, status_code=500)
+        return JSONResponse({"answer": "검색 처리 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요."},
+                            status_code=500)
 
 
 # ── 인사이트 API ─────────────────────────────────────────────────────────────
@@ -257,7 +287,7 @@ async def api_period(from_date: str = Query(..., alias="from"),
         return payload
     except Exception as e:
         logger.warning("구간 조회 실패: %s", e)
-        return JSONResponse({"error": f"구간 조회 오류: {e}"}, status_code=500)
+        return JSONResponse({"error": "구간 조회 중 오류가 발생했습니다."}, status_code=500)
 
 
 @app.get("/api/insights")

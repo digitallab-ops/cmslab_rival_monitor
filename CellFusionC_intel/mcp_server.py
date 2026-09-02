@@ -489,18 +489,26 @@ _CHANNEL_MCP_URL = os.getenv("CHANNEL_MCP_URL", "https://oliveyoung-review.verce
 _CHANNEL_MCP_API_KEY = os.getenv("CHANNEL_MCP_API_KEY", "")
 
 
+_CHANNEL_TIMEOUT = 15.0     # 원격(Vercel 콜드스타트) 지연 시 챗봇/요청이 무한 대기하지 않도록
+
+
+async def _channel_call(tool_name: str, arguments: dict | None = None):
+    from mcp.client.streamable_http import streamablehttp_client
+    from mcp import ClientSession as _ClientSession
+    headers: dict[str, str] = {}
+    if _CHANNEL_MCP_API_KEY:
+        headers["Authorization"] = f"Bearer {_CHANNEL_MCP_API_KEY}"
+    async with streamablehttp_client(_CHANNEL_MCP_URL, headers=headers) as (r, w, _):
+        async with _ClientSession(r, w) as sess:
+            await sess.initialize()
+            return await sess.call_tool(tool_name, arguments or {})
+
+
 async def _channel(tool_name: str, arguments: dict | None = None):
-    """원격 올리브영/채널 인사이트 MCP 툴 호출 (Streamable HTTP)."""
+    """원격 올리브영/채널 인사이트 MCP 툴 호출 (Streamable HTTP, 타임아웃 가드)."""
+    import asyncio as _asyncio
     try:
-        from mcp.client.streamable_http import streamablehttp_client
-        from mcp import ClientSession as _ClientSession
-        headers: dict[str, str] = {}
-        if _CHANNEL_MCP_API_KEY:
-            headers["Authorization"] = f"Bearer {_CHANNEL_MCP_API_KEY}"
-        async with streamablehttp_client(_CHANNEL_MCP_URL, headers=headers) as (r, w, _):
-            async with _ClientSession(r, w) as sess:
-                await sess.initialize()
-                res = await sess.call_tool(tool_name, arguments or {})
+        res = await _asyncio.wait_for(_channel_call(tool_name, arguments), timeout=_CHANNEL_TIMEOUT)
         if not res.content:
             return {"available": True, "note": "결과 없음"}
         txt = res.content[0].text
@@ -508,9 +516,11 @@ async def _channel(tool_name: str, arguments: dict | None = None):
             return {"available": True, "data": json.loads(txt)}
         except (ValueError, TypeError):
             return {"available": True, "data": txt}
+    except _asyncio.TimeoutError:
+        return {"available": False, "note": f"올리브영 채널 MCP 응답 지연({tool_name}) — 잠시 후 다시 시도"}
     except Exception as e:
-        return {"available": False,
-                "note": f"올리브영 채널 MCP 접속 실패({tool_name}): {e}"}
+        logger.warning("채널 MCP 호출 실패(%s): %s", tool_name, e)
+        return {"available": False, "note": f"올리브영 채널 데이터를 불러오지 못했습니다({tool_name})."}
 
 
 @rival_mcp.tool()

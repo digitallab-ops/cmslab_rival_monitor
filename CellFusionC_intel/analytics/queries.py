@@ -984,9 +984,10 @@ def get_retail_performance(session: Session, days: int = 21) -> dict:
                    review_count, product_url, COALESCE(is_core, FALSE)
             FROM {DB_SCHEMA}.retail_rankings
             WHERE brand IS NOT NULL AND rank IS NOT NULL
-              AND capture_date = (SELECT MAX(capture_date) FROM {DB_SCHEMA}.retail_rankings
-                                  WHERE capture_date >= :cutoff)
-        """), {"cutoff": cutoff}).fetchall()
+              AND capture_date = (SELECT MAX(capture_date) FROM {DB_SCHEMA}.retail_rankings)
+        """), {}).fetchall()
+        # 주: 예전엔 서브쿼리에 capture_date>=cutoff를 넣어, 스크래핑이 cutoff보다
+        # 오래 멈추면 MAX가 NULL→전체 빈값이 됐다. 실제 최신 스냅샷을 항상 쓰도록 변경.
     except Exception:
         return {}
     by_brand: dict = {}

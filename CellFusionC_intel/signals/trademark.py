@@ -163,6 +163,12 @@ def _ensure_table(session) -> None:
 
 def _save(session, brand: str, country: str, rec: dict) -> bool:
     """저장. 반환: 신규 insert면 True(기존 갱신이면 False) — 조기경보용."""
+    # app_number 결측 시 '-'로 통일하면 UNIQUE(brand,country,app_number)에 걸려
+    # 이름만 다른 상표들이 한 행으로 붕괴(데이터 손실) → 상표명 기반 대체키 사용.
+    an = (rec.get("applicationNumber", "") or "").strip()[:40]
+    if not an:
+        mk = (rec.get("tradeMarkName", "") or "").strip()
+        an = ("NM:" + mk[:36]) if mk else "-"
     row = session.execute(text(f"""
         INSERT INTO {DB_SCHEMA}.trademark_filings
             (brand, country, mark_name, applicant, right_holder, app_number,
@@ -177,7 +183,7 @@ def _save(session, brand: str, country: str, rec: dict) -> bool:
         "mk": rec.get("tradeMarkName", "")[:200],
         "ap": rec.get("applicant", "")[:200],
         "rh": rec.get("rightHolder", "")[:200],
-        "an": rec.get("applicationNumber", "")[:40] or "-",
+        "an": an,
         "ad": _parse_date(rec.get("applicationDate", "")),
         "rd": _parse_date(rec.get("registrationDate", "")),
         "nc": rec.get("niceCode", "")[:80],
