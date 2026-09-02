@@ -4849,6 +4849,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                 market = generate_market_overview(
                     p_raw, momentum=market_momentum,
                     category_battle=period_cat_battle.get(p),
+                    composite=composite,
                 )
                 if market:
                     _from, _to = period_date_ranges[p]
@@ -4862,7 +4863,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         if not dg_market:
             try:
                 dg_market = generate_market_overview(
-                    dg_raw, momentum=market_momentum, category_battle=dg_cat)
+                    dg_raw, momentum=market_momentum, category_battle=dg_cat,
+                    composite=composite)
             except Exception:
                 dg_market = ""
             if dg_market:

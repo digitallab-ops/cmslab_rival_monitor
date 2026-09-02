@@ -1834,10 +1834,14 @@ def compute_brand_momentum(session: Session) -> list[dict]:
     Returns list of dicts sorted by momentum desc.
     """
     now = datetime.utcnow()
+    now_cap      = now.isoformat()
     recent_start = (now - timedelta(weeks=4)).isoformat()
     prev_start   = (now - timedelta(weeks=8)).isoformat()
     prev_end     = recent_start
 
+    # is_duplicate 필터 추가: 다른 쿼리는 모두 중복을 거르는데 이 모멘텀 쿼리만 빠져
+    # 있어, 같은 사건의 중복기사가 recent_4w/prev_4w를 부풀리고 모멘텀이 종합스코어의
+    # 지배축이라 왜곡이 전파됐다. published_date 상한(now)으로 미래일자 오류행도 제외.
     rows = session.execute(text(f"""
         SELECT
             brand,
@@ -1848,7 +1852,8 @@ def compute_brand_momentum(session: Session) -> list[dict]:
                               AND  importance = 'high')                            AS recent_high,
             COUNT(*)                                                               AS total
         FROM {DB_SCHEMA}.news_articles
-        WHERE published_date >= :prev_start
+        WHERE published_date >= :prev_start AND published_date < :now_cap
+          AND (is_duplicate IS NOT TRUE)
           AND (brand_focus != 'incidental' OR brand_focus IS NULL)
         GROUP BY brand
         ORDER BY brand
@@ -1856,6 +1861,7 @@ def compute_brand_momentum(session: Session) -> list[dict]:
         "recent_start": recent_start,
         "prev_start":   prev_start,
         "prev_end":     prev_end,
+        "now_cap":      now_cap,
     }).fetchall()
 
     # monitored_brands에서 현재 tier 가져오기
@@ -1960,17 +1966,19 @@ def get_brand_radar(session: Session) -> list[dict]:
 
 
 # 서브신호 → 한국어 라벨
-_COMPOSITE_DRV = {"momentum": "모멘텀", "financial": "실적", "trademark": "상표", "demand": "수요"}
+_COMPOSITE_DRV = {"momentum": "모멘텀", "financial": "실적", "trademark": "상표",
+                  "demand": "수요", "retail": "아마존", "oliveyoung": "올영"}
 _VERDICT_DEMAND = {"real": 1.0, "latent": 0.7, "stable": 0.4, "pr": 0.2}
 
 
 def get_brand_composite_score(session: Session) -> list[dict]:
     """
-    브랜드 종합 스코어 — 모멘텀·재무·상표선행·수요 4축을 0~100으로 통합.
+    브랜드 종합 스코어 — 모멘텀·재무·상표·수요·아마존·올영 6축을 0~100으로 통합.
 
     기존 쿼리 조합(새 SQL 없음). 각 서브신호 0~1 정규화 후, 결측은 제외하고
-    존재하는 축의 가중치로 재정규화. 전 활성 브랜드 커버. 전체 실패 시 [].
-    반환: [{brand,tier,score,rank,subs{4:0~1|None},present{4:bool},verdict,drivers[상위2]}]
+    존재하는 축의 가중치로 재정규화 + 커버리지 계수(여러 축이 높아야 고득점).
+    실판매(아마존·올영) 축을 포함해 '조용한 실판매 강자'도 반영. 전체 실패 시 [].
+    반환: [{brand,tier,score,rank,subs{6:0~1|None},present{6:bool},verdict,drivers[상위2]}]
     """
     try:
         mo_list = compute_brand_momentum(session)
@@ -1987,13 +1995,30 @@ def get_brand_composite_score(session: Session) -> list[dict]:
         spikes: dict = {}
         for s in get_google_spikes(session):
             spikes[s["brand"]] = max(spikes.get(s["brand"], 0), s["spike_ratio"])
+        # 실판매 축 — 아마존(해외) 최고순위 + 올영(국내) 최고순위
+        retail_perf = get_retail_performance(session)          # {brand: {rank(최고), ...}}
+        oy_best: dict = {}
+        try:
+            _cap = session.execute(text(
+                f"SELECT MAX(capture_date) FROM {DB_SCHEMA}.oliveyoung_rankings")).scalar()
+            if _cap:
+                for r in session.execute(text(f"""
+                    SELECT brand, MIN(rank_position) FROM {DB_SCHEMA}.oliveyoung_rankings
+                    WHERE capture_date = :cap AND is_monitored
+                      AND brand IS NOT NULL AND rank_position IS NOT NULL
+                    GROUP BY brand"""), {"cap": _cap}).fetchall():
+                    oy_best[r[0]] = r[1]
+        except Exception:
+            oy_best = {}
     except Exception:
         return []
 
     recent_vals = sorted(m["recent_4w"] for m in mo_list) or [1]
     p90 = recent_vals[max(0, int(len(recent_vals) * 0.9) - 1)] or 1  # 볼륨 정규화 분모
     tm_max = max(tm_sum.values()) if tm_sum else 0
-    W = {"momentum": 0.35, "financial": 0.25, "trademark": 0.15, "demand": 0.25}
+    # 모멘텀 비중을 낮추고 실판매(아마존·올영) 축을 추가 — 뉴스 편중 완화, 실성과 반영.
+    W = {"momentum": 0.28, "financial": 0.18, "demand": 0.14,
+         "trademark": 0.10, "retail": 0.18, "oliveyoung": 0.12}
 
     out = []
     for brand, tier in active:
@@ -2040,7 +2065,25 @@ def get_brand_composite_score(session: Session) -> list[dict]:
             subs["demand"] = None
             present["demand"] = False
 
-        # 가변 가중합
+        # 아마존(해외) 실판매 — 최고순위 낮을수록 高. 1위=1.0, 50위+=0.
+        rp = retail_perf.get(brand)
+        if rp and rp.get("rank"):
+            subs["retail"] = round(max(0.0, 1.0 - (rp["rank"] - 1) / 49.0), 3)
+            present["retail"] = True
+        else:
+            subs["retail"] = None
+            present["retail"] = False
+
+        # 올리브영(국내) 실판매 — Top20 기준. 1위=1.0, 20위=0.
+        oyr = oy_best.get(brand)
+        if oyr:
+            subs["oliveyoung"] = round(max(0.0, 1.0 - (oyr - 1) / 19.0), 3)
+            present["oliveyoung"] = True
+        else:
+            subs["oliveyoung"] = None
+            present["oliveyoung"] = False
+
+        # 가변 가중합 + 커버리지 계수(축이 많이 잡힐수록 신뢰↑ → 여러 축 고득점이어야 상위)
         num = den = 0.0
         contrib: dict = {}
         for k, w in W.items():
@@ -2048,7 +2091,9 @@ def get_brand_composite_score(session: Session) -> list[dict]:
                 num += w * subs[k]
                 den += w
                 contrib[k] = w * subs[k]
-        score = round(100 * num / den) if den > 0 else None
+        present_n = sum(1 for k in W if present.get(k))
+        coverage = 0.7 + 0.3 * min(present_n, 3) / 3.0   # 1축=0.8 … 3축+=1.0
+        score = round(100 * (num / den) * coverage) if den > 0 else None
 
         drivers = [k for k, _ in sorted(contrib.items(), key=lambda kv: kv[1], reverse=True)[:2]]
         out.append({

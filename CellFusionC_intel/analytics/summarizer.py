@@ -185,12 +185,14 @@ def _build_quant_context(momentum: list | None, category_battle: list | None) ->
 
 
 def generate_market_overview(brand_insights_raw: dict, momentum: list | None = None,
-                             category_battle: list | None = None) -> str:
+                             category_battle: list | None = None,
+                             composite: list | None = None) -> str:
     """전 브랜드 데이터 종합 → 정량 근거 기반 시장 인사이트 + 셀퓨전씨 맞춤 조언 (gpt-4o).
 
     brand_insights_raw: {brand: {top_act, high_pct, articles:[{imp,act,title_ko,details,date}], ...}}
     momentum: compute_brand_momentum() 결과 — 급상승/식는 브랜드 속도(숫자).
     category_battle: get_category_battle() 결과 — 우리 카테고리별 경쟁 압박(숫자).
+    composite: get_brand_composite_score() 결과 — '지금 대응' 게이트(종합 상위만 선정).
     반환: ### 지금 대응해야 할 것 / ### 선점할 기회·해외 확장 / ### 확인·점검할 것
     """
     if not brand_insights_raw:
@@ -227,6 +229,14 @@ def generate_market_overview(brand_insights_raw: dict, momentum: list | None = N
     act_str = ", ".join(f"{_ACT_LABEL.get(k,k)} {v}건" for k, v in act_rank[:6])
     quant = _build_quant_context(momentum, category_battle)
     quant_block = f"\n[정량 시그널 — 인사이트에 반드시 이 숫자를 인용]\n{quant}\n" if quant else ""
+    comp_block = ""
+    comp_top = [c for c in (composite or []) if c.get("score") is not None][:6]
+    if comp_top:
+        comp_names = ", ".join(f"{c['brand']} {c['score']}점({'·'.join(c.get('drivers', []))})"
+                               for c in comp_top)
+        comp_block = ("\n[종합스코어 상위 — '지금 대응해야 할 것'은 반드시 이 브랜드 중에서만 선정."
+                      " 종합점수=모멘텀·실적·상표·수요·아마존·올영 통합, 높을수록 전방위로 위협적]\n"
+                      + comp_names)
 
     prompt = f"""당신은 씨엠에스랩의 수석 경쟁 전략 애널리스트입니다. 경영진이 이 인사이트만 보고 이번 주 우리 팀이 뭘 할지 판단합니다. 사업적으로 뾰족하게 쓰세요.
 
@@ -235,7 +245,7 @@ def generate_market_overview(brand_insights_raw: dict, momentum: list | None = N
 {chr(10).join(lines)}
 
 [활동유형 분포] {act_str}
-{quant_block}
+{quant_block}{comp_block}
 {CMS_PROFILE}
 
 당신의 임무: 위 경쟁 동향을 **셀퓨전씨(더마 선케어)의 눈으로** 걸러내고, 우리가 실제로 움직일 근거가 되는 인사이트만 뽑는다.
@@ -250,7 +260,7 @@ def generate_market_overview(brand_insights_raw: dict, momentum: list | None = N
 아래 3개 섹션으로:
 
 ### 지금 대응해야 할 것
-**최근 7일 내 새로 뜬 HIGH 움직임을 최우선으로** — 한 달째 이어진 추세가 아니라, 이번 주에 새로 생기거나 바뀐 위협을 먼저 잡아라(같은 브랜드가 지난주와 똑같이 반복되면 안 된다). 우리가 실제로 파는 제품(선케어·자외선차단·톤업·틴티드, 약산성 배리어·시카, PDRN/펩타이드 앰플, 잡티/브라이트닝 세럼)과 직접 겹치거나, 우리 주력시장(베트남·중국·일본·올영)의 점유·매대를 위협하는 것만. 각 줄 = [경쟁사가 무엇을 어디서 + **구체 사건·날짜**] → [우리 어떤 제품/시장이 위협받나 + 그 제품으로 어떻게 대응] [시급:높음/중간]. 진짜 위협 없으면 "- 현재 직접 위협 없음".
+**대상 브랜드는 위 [종합스코어 상위] 목록 안에서만 골라라** — 이 자리는 모멘텀뿐 아니라 실적·상표·아마존·올영까지 종합해 전방위로 위협적인 브랜드만 오르는 곳이다. 종합 상위가 아니면 아무리 뉴스가 떠도 올리지 마라. 그중에서 **최근 7일 내 새로 뜬 HIGH 움직임을 최우선으로** — 한 달째 이어진 추세가 아니라 이번 주에 새로 생기거나 바뀐 위협을 먼저(같은 브랜드가 지난주와 똑같이 반복되면 안 된다). 우리가 실제로 파는 제품(선케어·자외선차단·톤업·틴티드, 약산성 배리어·시카, PDRN/펩타이드 앰플, 잡티/브라이트닝 세럼)과 직접 겹치거나 우리 주력시장(베트남·중국·일본·올영)의 점유·매대를 위협하는 것만. 각 줄 = [경쟁사가 무엇을 어디서 + **구체 사건·날짜**] → [우리 어떤 제품/시장이 위협받나 + 그 제품으로 어떻게 대응] [시급:높음/중간]. 진짜 위협 없으면 "- 현재 직접 위협 없음".
 
 ### 선점할 기회·해외 확장
 두 종류를 담아라. (a) 우리 강점(임상 더마 선케어·자외선차단·PDRN·시카·배리어)으로 먼저 먹을 빈틈/트렌드. (b) **해외 확장 관점** — 경쟁사가 신시장에 진입한 방식(어느 나라·어느 채널: Watsons·Sephora·Nykaa·TikTok Shop 등)을 우리 진출 참고서로 뒤집어 읽기. 각 줄 = [트렌드·빈틈 또는 경쟁사 진입 경로(숫자)] → [우리 어떤 제품으로 + 어느 시장·채널에서 선점/진출].
