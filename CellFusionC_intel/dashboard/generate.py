@@ -708,6 +708,8 @@ def _render_financials_nice(fins: list) -> str:
             f'<td class="fin-num">{_eok(ad25)} <span class="fin-sub">({adr})</span></td></tr>'
         )
     return (
+        '<div class="fin-basis">📅 기준: 연 결산 · 매출 2023~2025 · 영업이익·광고비 2025년 기준 '
+        '<span class="fin-basis-src">(NICE BizLine · 단위 억원)</span></div>'
         '<div class="table-wrap"><table class="data-table fin-table">'
         '<thead><tr><th>브랜드</th><th>운영사</th>'
         '<th>매출 2023 → 2024 → 2025</th><th>매출 YoY</th>'
@@ -1076,7 +1078,8 @@ def _render_briefing_archive(briefings: list) -> str:
     return (
         '<div class="section" id="briefing-archive">'
         '<div class="section-title">📚 브리핑 아카이브'
-        '<span class="section-sub">지난 주간·일간 브리핑 (클릭하면 전문 펼침)</span>'
+        '<span class="section-sub">지난 주간·일간 브리핑 (클릭하면 전문 펼침) · '
+        '날짜=리포트 생성일 · 기간=뉴스 발행일 범위</span>'
         '</div>'
         f'<div class="bfa-list">{"".join(items)}</div>'
         '</div>'
@@ -2162,6 +2165,9 @@ a:hover { color: var(--gold); }
 .fin-sub { font-size: 13px; color: var(--lo); font-weight: 400; }
 .fin-rev { font-variant-numeric: tabular-nums; }
 .fin-note { font-size: 13.5px; color: var(--lo); line-height: 1.5; margin-top: 8px; }
+.fin-basis { font-size: 13px; font-weight: 700; color: var(--champ); margin-bottom: 10px;
+  padding: 7px 12px; background: rgba(139,149,255,.08); border-radius: 8px; display: inline-block; }
+.fin-basis-src { font-weight: 400; color: var(--lo); margin-left: 4px; }
 
 /* ── 글로벌 검색 급등(구글) ── */
 .sp-list { display: flex; flex-direction: column; gap: 6px; }
@@ -2185,6 +2191,15 @@ a:hover { color: var(--gold); }
 .tm-read { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; font-size: 13.5px; }
 .tm-read-brand { font-weight: 700; color: var(--hi); white-space: nowrap; min-width: 120px; }
 .tm-read-txt { color: var(--mid); }
+/* 접이식 섹션 (백단 근거자료 — 기본 접기, 클릭 펼침) */
+.collapse-sec > summary { list-style:none; cursor:pointer; display:flex; flex-direction:column; gap:3px;
+  padding:10px 14px; background:var(--elevated); border:1px solid var(--border); border-radius:10px; }
+.collapse-sec > summary::-webkit-details-marker { display:none; }
+.collapse-title { font-size: 17px; font-weight:800; color:var(--hi); }
+.collapse-title::before { content:"▸ "; color:var(--champ); font-weight:800; }
+.collapse-sec[open] > summary .collapse-title::before { content:"▾ "; }
+.collapse-sec > summary:hover { border-color:var(--champ); }
+.collapse-body { margin-top:12px; }
 .tm-list { display: flex; flex-direction: column; gap: 5px; }
 .tm-row { display: flex; align-items: baseline; gap: 10px; padding: 6px 10px;
   background: var(--elevated); border: 1px solid var(--border); border-radius: 3px; font-size: 13.5px; }
@@ -2365,8 +2380,8 @@ a:hover { color: var(--gold); }
 .insight-strat-h.watch { color: var(--gold); }
 .insight-strat-body { font-size: 14px; color: var(--hi); line-height: 1.6; }
 /* v2: 요약 클램프 + 더보기 */
-.insight-strategy.clamp { max-height: 92px; overflow: hidden; position: relative; }
-.insight-strategy.clamp::after { content:""; position:absolute; left:0; right:0; bottom:0; height:36px;
+.insight-strategy.clamp { max-height: 48px; overflow: hidden; position: relative; }
+.insight-strategy.clamp::after { content:""; position:absolute; left:0; right:0; bottom:0; height:28px;
   background:linear-gradient(transparent, var(--ink)); pointer-events:none; }
 .insight-strategy.expanded { max-height: none; }
 .insight-strategy.expanded::after { display:none; }
@@ -4084,12 +4099,15 @@ def _build_full_html(
       {growth_story_html}
     </div>
 
-    <!-- 브랜드 × 국가 분포 (시장 관점 — 어느 시장에 경쟁이 몰리나) -->
+    <!-- 브랜드 × 국가 분포 (근거자료 — 기본 접기, 근거 보기로 펼침) -->
     <div class="section">
-      <div class="section-title">
-        브랜드 × 국가 분포 <span class="section-sub">어느 시장에 경쟁이 집중되나 · 셀 클릭 시 HIGH/MED 기사 목록</span>
-      </div>
-      {heatmap_html}
+      <details class="collapse-sec">
+        <summary class="collapse-summary">
+          <span class="collapse-title">브랜드 × 국가 분포</span>
+          <span class="section-sub">어느 시장에 경쟁이 집중되나 · 근거자료라 접어둠 — 클릭해 펼치기(셀 클릭 시 기사 목록)</span>
+        </summary>
+        <div class="collapse-body">{heatmap_html}</div>
+      </details>
     </div>
 
     <!-- 화장품 수출 규모·성장 전체 랭킹 (스킨케어 330499) -->
