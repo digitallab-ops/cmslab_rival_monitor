@@ -55,6 +55,7 @@ from analytics.queries import (
     get_oliveyoung_movers,
     get_oliveyoung_category_rank,
     get_oliveyoung_review_landscape,
+    get_product_ingredient_intel,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -867,6 +868,32 @@ def _render_oliveyoung(flagship: dict, movers: list, reviews: list = None) -> st
     ) if rrows else ""
 
     return f'<div class="oy-wrap">{flag_html}{mv_html}</div>{rev_html}'
+
+
+def _render_ingredient_intel(items: list) -> str:
+    """제품 전성분 인텔 — 핵심성분·효능·우리 대응각. 실측(올영/아마존) 우선, 없으면 추정."""
+    if not items:
+        return ('<p class="no-data">전성분 인텔 연동 대기 — 스크래퍼 <b>get_ingredients</b> 툴 '
+                '추가 시 활성화 (지금은 전성분 소스 없음). docs/ingredient_scraper_contract.md</p>')
+    rows = []
+    for it in items[:8]:
+        src = ('<span class="pii-src est">추정</span>' if it.get("is_estimated")
+               else f'<span class="pii-src real">{"올영" if it.get("source")=="oliveyoung" else "아마존"} 실측</span>')
+        ings = "".join(f'<span class="pii-ing">{_esc(x.strip())}</span>'
+                       for x in (it.get("key_ingredients") or "").split(",") if x.strip())
+        prod = _clean_product_name(it.get("product_name", ""), it.get("brand", ""))
+        rows.append(
+            f'<div class="pii-card"><div class="pii-top">'
+            f'<span class="pii-brand">{_esc(it.get("brand",""))}</span>'
+            f'<span class="pii-prod">{_esc(prod)}</span>{src}</div>'
+            f'<div class="pii-ings">{ings}</div>'
+            + (f'<div class="pii-ben">💧 {_esc(it["benefits"])}'
+               + (f' · <span class="pii-skin">{_esc(it["skin_types"])}</span>' if it.get("skin_types") else "")
+               + '</div>' if it.get("benefits") else "")
+            + (f'<div class="pii-angle">→ {_esc(it["our_angle"])}</div>' if it.get("our_angle") else "")
+            + '</div>'
+        )
+    return f'<div class="pii-list">{"".join(rows)}</div>'
 
 
 def _render_ingredient_trends(trends: list) -> str:
@@ -2096,6 +2123,22 @@ a:hover { color: var(--gold); }
 .ing-bar { height:100%; background:linear-gradient(90deg,var(--cobalt),var(--teal)); border-radius:6px; }
 .ing-n { font-family:var(--mono); font-size: 13.5px; color:var(--mid); white-space:nowrap; }
 .ing-who { font-size: 13.5px; color:var(--lo); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* ── 제품 전성분 인텔 ── */
+.pii-list { display:grid; grid-template-columns:1fr 1fr; gap:11px; }
+@media (max-width:900px){ .pii-list { grid-template-columns:1fr; } }
+.pii-card { background:var(--deep); border:1px solid var(--border); border-radius:9px; padding:11px 13px; }
+.pii-top { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+.pii-brand { font-size:13.5px; font-weight:800; color:var(--hi); }
+.pii-prod { font-size:12px; color:var(--lo); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pii-src { font-size:10px; font-weight:800; padding:2px 7px; border-radius:4px; white-space:nowrap; }
+.pii-src.real { background:rgba(5,224,224,.14); color:var(--teal); }
+.pii-src.est { background:rgba(201,135,26,.16); color:var(--amber); }
+.pii-ings { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:7px; }
+.pii-ing { font-size:11.5px; font-weight:600; color:var(--champ); background:rgba(139,149,255,.12);
+  border-radius:5px; padding:2px 8px; }
+.pii-ben { font-size:12.5px; color:var(--mid); margin-bottom:5px; }
+.pii-skin { color:var(--champ2); }
+.pii-angle { font-size:12.5px; color:var(--teal); font-weight:600; }
 /* ── 경쟁사 악재 ── */
 .neg-list { display:flex; flex-direction:column; gap:9px; }
 .neg-row { padding:11px 13px; background:rgba(255,107,122,.06); border:1px solid rgba(255,107,122,.2);
@@ -3811,6 +3854,7 @@ def _build_full_html(
     growth_story: dict = None,
     nice_financials: list = None,
     ingredient_trends: list = None,
+    ingredient_intel: list = None,
     negative_signals: list = None,
     trademark_sig: dict = None,
     search_spikes: list = None,
@@ -3844,6 +3888,7 @@ def _build_full_html(
     growth_story_html  = _render_growth_story(growth_story or {})
     financials_nice_html = _render_financials_nice(nice_financials or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
+    ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
     negative_signals_html = _render_negative_signals(negative_signals or [])
     rank_trends_html  = _render_rank_trends(rank_trends or [])
     oliveyoung_html   = _render_oliveyoung(oliveyoung_flagship or {}, oliveyoung_movers or [], oliveyoung_reviews or [])
@@ -4062,6 +4107,14 @@ def _build_full_html(
         🧪 경쟁사 성분 지형 <span class="section-sub">경쟁 신제품에 뜨는 성분(PDRN·엑소좀 등) — 언급수·주도 브랜드. 최근 30일</span>
       </div>
       {ingredient_trends_html}
+    </div>
+
+    <!-- 제품 전성분 인텔 (전성분→효능→우리 대응각) -->
+    <div class="section">
+      <div class="section-title">
+        🧴 제품 전성분 인텔 <span class="section-sub">경쟁 핵심 제품의 전성분→핵심성분·효능·피부타입→셀퓨전씨 대응각. 올영/아마존 실측 우선(없으면 추정)</span>
+      </div>
+      {ingredient_intel_html}
     </div>
 
     <!-- 해외 상표 출원 (브랜드 선행신호 — 시장 탭에서 이동) -->
@@ -4809,6 +4862,10 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception:
             ingredient_trends = []
         try:
+            ingredient_intel = get_product_ingredient_intel(session, limit=8)
+        except Exception:
+            ingredient_intel = []
+        try:
             negative_signals = get_negative_signals(session, days=30, limit=10)
         except Exception:
             negative_signals = []
@@ -5047,6 +5104,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         growth_story=growth_story,
         nice_financials=nice_financials,
         ingredient_trends=ingredient_trends,
+        ingredient_intel=ingredient_intel,
         negative_signals=negative_signals,
         rank_trends=rank_trends,
         oliveyoung_movers=oliveyoung_movers,

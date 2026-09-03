@@ -1251,6 +1251,29 @@ def get_oliveyoung_category_rank(session: Session, category: str = "선케어",
     }
 
 
+def get_product_ingredient_intel(session: Session, limit: int = 10) -> list[dict]:
+    """제품 전성분 인텔 — 핵심성분·효능·피부타입·대응각. 실측(올영/아마존) 우선.
+
+    key_ingredients가 의미 있는 것만(추정 불가 제외). 반환 [{brand,product_name,category,
+    key_ingredients,benefits,skin_types,our_angle,source,is_estimated}].
+    """
+    try:
+        rows = session.execute(text(f"""
+            SELECT brand, product_name, category, key_ingredients, benefits,
+                   skin_types, our_angle, source, is_estimated
+            FROM {DB_SCHEMA}.product_ingredients
+            WHERE key_ingredients IS NOT NULL AND btrim(key_ingredients) NOT IN ('', '추정 불가')
+            ORDER BY is_estimated ASC, updated_at DESC
+            LIMIT :lim
+        """), {"lim": limit}).fetchall()
+    except Exception:
+        return []
+    return [{"brand": r[0], "product_name": r[1] or "", "category": r[2] or "",
+             "key_ingredients": r[3] or "", "benefits": r[4] or "", "skin_types": r[5] or "",
+             "our_angle": r[6] or "", "source": r[7] or "", "is_estimated": bool(r[8])}
+            for r in rows]
+
+
 def get_oliveyoung_review_landscape(session: Session, limit: int = 10) -> list[dict]:
     """올리브영 국내 리뷰 감성 — 경쟁사 제품별 평점·긍정/부정 키워드. '왜 잘나가나 / 약점=공략'.
 

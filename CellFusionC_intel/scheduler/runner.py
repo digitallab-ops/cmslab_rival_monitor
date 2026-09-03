@@ -350,6 +350,19 @@ def job_retail_ranking() -> None:
         logger.warning("리테일 랭킹 수집 스킵(네트워크/차단 확인): %s", e)
 
 
+def job_ingredient_intel() -> None:
+    """제품 전성분 인텔 — 전성분→효능→대응각 LLM 요약. 주1회(LLM 비용). 전성분 툴 없으면 추정."""
+    logger.info("=== [주간] 제품 전성분 인텔 시작 ===")
+    try:
+        from signals.ingredient_intel import run as run_ing
+        r = run_ing()
+        logger.info("전성분 인텔 완료: %d개(실측 %d·추정 %d)",
+                    r.get("enriched", 0), r.get("real", 0), r.get("estimated", 0))
+        ping_dashboard_refresh()
+    except Exception as e:
+        logger.warning("전성분 인텔 스킵: %s", e)
+
+
 def job_self_collection() -> None:
     """자사(셀퓨전씨) 뉴스 수집 — 경쟁사 대비 기준선(baseline). is_self=True로 분리 저장.
 
@@ -545,6 +558,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(hour=5, minute=30),
         id="self_collection",
         name="[매일] 자사(셀퓨전씨) 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매주 화요일 07:20 KST — 제품 전성분 인텔(전성분→효능→대응각). 올영 수집 후, LLM.
+    scheduler.add_job(
+        job_ingredient_intel,
+        trigger=CronTrigger(day_of_week="tue", hour=7, minute=20),
+        id="ingredient_intel",
+        name="[주간] 제품 전성분 인텔",
         max_instances=1,
         coalesce=True,
     )
