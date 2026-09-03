@@ -33,6 +33,8 @@ def _fetch_rows(session, hours: int) -> list:
         FROM {DB_SCHEMA}.news_articles
         WHERE collected_at >= :since
           AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+          AND is_self IS NOT TRUE                    -- 자사(셀퓨전씨)는 경쟁 브리핑서 제외
+          AND activity_type NOT IN ('실적_공시')     -- 실적·공시 store-only
           {_DUP_FILTER}
         ORDER BY COALESCE(strategic_score,0) DESC, importance DESC, collected_at DESC
     """), {"since": since}).fetchall()
@@ -52,14 +54,31 @@ def _stats(session, hours: int) -> dict:
 def _fmt_line(r, detail_len: int) -> str:
     # r: brand0 country1 activity2 importance3 details4 product5 url6 collected7 score8 channel9 evidence10
     ch = f" 채널:{r[9]}" if r[9] else ""
-    ev = f" 근거:{r[10]}" if r[10] else ""
     pr = f" 제품:{r[5]}" if r[5] else ""
-    return (f"[score {r[8]}][{str(r[3]).upper()}] {r[0]}/{r[1]} - {r[2]}{pr}{ch}{ev}: "
-            f"{(r[4] or '')[:detail_len]}")
+    url = f" URL:{r[6]}" if r[6] else ""
+    return (f"[score {r[8]}][{str(r[3]).upper()}] {r[0]}/{r[1]} - {r[2]}{pr}{ch}: "
+            f"{(r[4] or '')[:detail_len]}{url}")
+
+
+def _build_prompt_by_brand(rows, limit: int, detail_len: int) -> str:
+    """브랜드별로 묶은 데이터 프롬프트 (슬랙 일간 — 활동 있는 브랜드만, 스코어순)."""
+    if not rows:
+        return "수집된 기사가 없습니다."
+    buckets: dict = {}
+    for r in rows[:limit]:
+        buckets.setdefault(r[0] or "?", []).append(r)
+    # 브랜드 정렬: 그 브랜드 최고 스코어 desc
+    order = sorted(buckets, key=lambda b: -max((x[8] or 0) for x in buckets[b]))
+    lines = []
+    for b in order:
+        lines.append(f"\n=== {b} ===")
+        for r in buckets[b]:
+            lines.append(_fmt_line(r, detail_len))
+    return "\n".join(lines)
 
 
 def _build_prompt_by_region(rows, limit: int, detail_len: int) -> str:
-    """권역별로 묶은 데이터 프롬프트."""
+    """권역별로 묶은 데이터 프롬프트 (주간용)."""
     if not rows:
         return "수집된 기사가 없습니다."
     buckets: dict = {}
@@ -323,7 +342,8 @@ def generate_weekly_briefing() -> str:
 # ── 일간 브리핑 (간결) ────────────────────────────────────────────────────────
 
 def generate_daily_briefing() -> str:
-    """전날 수집분 요약 → Slack (gpt-4o-mini)."""
+    """전날 수집분 요약 → Slack (gpt-4o-mini). 브랜드별·제품명·원문링크·조언형."""
+    from analytics.summarizer import _TONE_GUIDE
     session = get_session()
     try:
         rows = _fetch_rows(session, hours=28)   # 전날 저녁 수집분 커버
@@ -337,18 +357,24 @@ def generate_daily_briefing() -> str:
         send_daily_briefing("어제 새로 잡힌 주목할 경쟁 활동이 없습니다." + (signal_digest or ""), stats)
         return ""
 
-    data_prompt = _build_prompt_by_region(rows, limit=45, detail_len=160)
+    data_prompt = _build_prompt_by_brand(rows, limit=45, detail_len=160)
     if signal_digest:
         data_prompt += "\n\n=== [정량 신호 요약] ===\n" + signal_digest
     system = (
-        "당신은 씨엠에스랩의 경쟁 인텔리전스 분석가입니다. 어제 수집된 경쟁사 활동을 아침 브리핑으로 "
-        "간결히 정리하세요.\n\n"
+        "당신은 씨엠에스랩의 경쟁 인텔리전스 분석가입니다. 어제 수집된 경쟁사 활동을 아침 슬랙 브리핑으로 "
+        "정리하세요. 대시보드보다 훨씬 압축된, 한눈에 읽히는 버전입니다.\n\n"
         f"{_cms_profile()}\n\n"
-        "마크다운 볼드(**) 쓰지 말 것. 아래 형식(머리말 '### '):\n\n"
-        "### 어제의 핵심 (3~5건)\n- 각 줄: 브랜드/국가 - 무엇을(채널·제품 포함) → 한줄 시사점. score 높은 순.\n\n"
-        "### 셀퓨전씨 관련\n- 우리 선케어·더마·주력시장과 겹치는 건이 있으면 1~2건 콕 집어 대응 포인트. 없으면 '특이사항 없음'.\n\n"
-        "위 '정량 신호'(신규 상표=진출 임박, 검색 급등, 종합 스코어)에서 눈에 띄는 게 있으면 '어제의 핵심'에 한 줄 반영.\n"
-        "한국어, 총 500자 내외. 데이터에 있는 사실만."
+        "규칙:\n"
+        "1) **브랜드별로 묶어서** 정리. 어제 의미 있는 활동이 있었던 브랜드만. 활동 없는 브랜드는 아예 언급 금지.\n"
+        "2) **핵심만 구체적으로** — '스킨케어 신제품' 식 뭉뚱그림 금지. 무슨 제품(제품명 명시)·무슨 내용인지 한 줄로.\n"
+        "3) **원문 링크**: 각 항목 끝에 제공된 URL을 슬랙 링크로 `<URL|원문 보기>` 형식으로 붙여라(URL을 지어내지 말고 데이터의 URL 그대로). URL이 없으면 생략.\n"
+        "4) 마크다운 볼드(**)·번호목록 금지. 형식(머리말 '### '):\n\n"
+        "### 어제의 핵심\n브랜드마다 한 블록. 형식:\n"
+        "브랜드 (국가)\n- 무엇을(제품명 포함) — 한 줄 시사점 <URL|원문 보기>\n\n"
+        "### 셀퓨전씨 관련\n- 우리 선케어·더마·주력시장과 겹치는 게 있으면 1~2건 대응 포인트. 없으면 '특이사항 없음'.\n\n"
+        "위 '정량 신호'(신규 상표=진출 임박, 검색 급등, 종합 스코어)에 눈에 띄는 게 있으면 한 줄 반영.\n"
+        "한국어. 데이터에 있는 사실만.\n\n"
+        f"{_TONE_GUIDE}"
     )
     try:
         text_out = _openai("gpt-4o-mini", system, data_prompt, max_tokens=900)
