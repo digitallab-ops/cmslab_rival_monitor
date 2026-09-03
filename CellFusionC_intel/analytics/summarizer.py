@@ -388,6 +388,50 @@ def generate_opportunity_actions(stories: list, oy_review_intel: str = "") -> di
         return {}
 
 
+def generate_trademark_reads(brand_marks: dict) -> dict:
+    """브랜드별 최근 해외 상표 출원명 목록 → '무슨 의미인지' 한 줄 유추 (1 LLM 콜).
+
+    피드백 8번: 상표를 나열만 하지 말고 조합이 뜻하는 방향을 유추.
+    brand_marks: {brand: [상표명, ...]}. 반환: {brand: "유추 한 줄"}. 실패 시 {}.
+    """
+    items = [(b, ms) for b, ms in brand_marks.items() if ms]
+    if not items:
+        return {}
+    lines = [f"[{i}] {b}: {', '.join(ms[:8])}" for i, (b, ms) in enumerate(items)]
+    prompt = f"""당신은 씨엠에스랩(더마 선케어 '셀퓨전씨')의 경쟁 인텔리전스 분석가입니다.
+아래는 경쟁 브랜드들이 최근 미국·일본에 낸 상표 출원명 목록입니다. 상표명은 신제품·신라인의
+선행신호입니다. 각 브랜드의 상표 조합이 **무슨 방향(신제품 카테고리·라인 확장·디바이스 등)을
+시사하는지** 한 줄로 유추하세요.
+
+{chr(10).join(lines)}
+
+- 예: "괄사(gua sha)+스킨케어 상표 동시 출원 → 뷰티툴·디바이스 라인 확장 가능성"
+- 상표명에서 읽히는 **제품군/성분/폼팩터**를 근거로. 억지 추측은 피하고 근거 약하면 '~일 수 있음' 정도로.
+- 각 30자 내외, 한국어.
+{_TONE_GUIDE}
+반드시 JSON만: {{"reads": [{{"i": 0, "read": "..."}}, ...]}} — 모든 인덱스 포함."""
+    try:
+        import json as _json
+        from openai import OpenAI
+        from config.settings import INSIGHT_MODEL_MARKET
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        resp = client.chat.completions.create(
+            model=INSIGHT_MODEL_MARKET, max_tokens=700, temperature=0.4,
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        data = _json.loads(resp.choices[0].message.content or "{}")
+        out = {}
+        for it in data.get("reads", []):
+            i = it.get("i"); rd = (it.get("read") or "").strip()
+            if isinstance(i, int) and 0 <= i < len(items) and rd:
+                out[items[i][0]] = rd
+        return out
+    except Exception as e:
+        logger.warning("상표 의미 유추 실패: %s", e)
+        return {}
+
+
 def _fallback_from_data(brand: str, articles: list) -> str:
     """AI 실패 시 실제 기사 내용 기반 fallback."""
     # HIGH 우선, 없으면 MEDIUM

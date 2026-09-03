@@ -57,7 +57,7 @@ from analytics.queries import (
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
-    generate_opportunity_actions,
+    generate_opportunity_actions, generate_trademark_reads,
 )
 from storage.models import get_session
 from config.brands import (ALL_BRANDS, BRAND_KO_NAMES, ACTIVITY_GROUPS,
@@ -932,6 +932,19 @@ def _render_trademark(sig: dict) -> str:
         )
     chips_html = f'<div class="tm-chips">{"".join(chips)}</div>' if chips else ""
 
+    # AI 의미 유추(판독) — 상표 조합이 시사하는 방향
+    reads = (sig or {}).get("reads") or {}
+    read_rows = []
+    for b in brands:
+        rd = reads.get(b["brand"])
+        if rd:
+            flag = COUNTRY_FLAGS.get(b["country"], "🌐")
+            read_rows.append(
+                f'<div class="tm-read"><span class="tm-read-brand">{flag} {_esc(b["brand"])}</span>'
+                f'<span class="tm-read-txt">{_esc(rd)}</span></div>')
+    reads_html = (f'<div class="tm-reads"><div class="tm-reads-h">🔮 상표 판독 — 조합이 시사하는 방향</div>'
+                  f'{"".join(read_rows)}</div>') if read_rows else ""
+
     # 최근 출원 피드
     rows = []
     for f in feed:
@@ -944,7 +957,7 @@ def _render_trademark(sig: dict) -> str:
             f'<span class="tm-mark">{_esc(f["mark"] or "")}</span>'
             f'</div>'
         )
-    return chips_html + '<div class="tm-list">' + "".join(rows) + '</div>'
+    return chips_html + reads_html + '<div class="tm-list">' + "".join(rows) + '</div>'
 
 
 def _yoy_badge_color(yoy) -> str:
@@ -2166,6 +2179,12 @@ a:hover { color: var(--gold); }
   color: var(--hi); border-radius: 20px; padding: 4px 11px; }
 .tm-chip-flag { font-size: 14.5px; }
 .tm-chip-n { color: var(--gold); font-weight: 700; font-variant-numeric: tabular-nums; }
+.tm-reads { margin: 4px 0 12px; padding: 11px 13px; background: rgba(139,149,255,.07);
+  border: 1px solid var(--border); border-left: 3px solid var(--champ); border-radius: 8px; }
+.tm-reads-h { font-size: 12.5px; font-weight: 800; color: var(--champ); margin-bottom: 8px; }
+.tm-read { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; font-size: 13.5px; }
+.tm-read-brand { font-weight: 700; color: var(--hi); white-space: nowrap; min-width: 120px; }
+.tm-read-txt { color: var(--mid); }
 .tm-list { display: flex; flex-direction: column; gap: 5px; }
 .tm-row { display: flex; align-items: baseline; gap: 10px; padding: 6px 10px;
   background: var(--elevated); border: 1px solid var(--border); border-radius: 3px; font-size: 13.5px; }
@@ -4940,6 +4959,25 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                 upsert_insight_cache(insight_session, "__DIGEST7__", _dg_from, _dg_to, {
                     "summary": dg_market, "top_act": None, "top_pct": 0, "high_pct": 0.0,
                 })
+        # 상표 의미 유추(하루 1회 캐시) — 상표 조합이 시사하는 방향
+        try:
+            _tm_cached = get_digest_cache(insight_session, "__TRADEMARK_READS__")
+            if _tm_cached:
+                trademark_sig["reads"] = json.loads(_tm_cached)
+            else:
+                _bm = {}
+                for _f in (trademark_sig.get("feed") or []):
+                    if _f.get("mark"):
+                        _bm.setdefault(_f["brand"], []).append(_f["mark"])
+                _reads = generate_trademark_reads(_bm)
+                trademark_sig["reads"] = _reads
+                if _reads:
+                    upsert_insight_cache(insight_session, "__TRADEMARK_READS__",
+                                         datetime.utcnow() - timedelta(days=1), datetime.utcnow(),
+                                         {"summary": json.dumps(_reads, ensure_ascii=False),
+                                          "top_act": None, "top_pct": 0, "high_pct": 0.0})
+        except Exception as _e:
+            logger.warning("상표 판독 생성 스킵: %s", _e)
         # 오래된 캐시행 정리(무한 증가 방지) — 리포트 생성 1회당 1 DELETE(경미).
         purge_old_insights(insight_session, keep_days=45)
     finally:
