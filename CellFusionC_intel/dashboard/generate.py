@@ -145,6 +145,7 @@ def _fmt_art_for_js(a: dict) -> dict:
         "country": a["country"],
         "date":    _fmt_date(a["published_date"]),
         "act":     ACTIVITY_LABELS.get(a["activity_type"], a["activity_type"]),
+        "grp":     ACTIVITY_GROUP_OF.get(a["activity_type"], "기타"),
         "imp":     a.get("importance", "high"),
         "title":   (a.get("title_ko") or a["title"] or (a.get("details") or "")[:120]),
         "details": a.get("details") or "",
@@ -202,6 +203,7 @@ def _render_high_table(articles: list) -> str:
     for i, art in enumerate(articles):
         flag = COUNTRY_FLAGS.get(art["country"], "🌐")
         act_label = ACTIVITY_LABELS.get(art["activity_type"], art["activity_type"])
+        act_grp = ACTIVITY_GROUP_OF.get(art["activity_type"], "기타")
         date_str = _fmt_date(art["published_date"])
         conf_str = f"{art['confidence']:.0%}" if art["confidence"] is not None else "?"
         imp = art.get("importance", "high")
@@ -245,7 +247,7 @@ def _render_high_table(articles: list) -> str:
         title_disp2 = title_display[:160] + ("…" if len(title_display) > 160 else "")
 
         rows.append(
-            f'<tr class="main-row" data-brand="{_esc(art["brand"])}" data-act="{_esc(act_label)}" onclick="toggleRow({i})">'
+            f'<tr class="main-row" data-brand="{_esc(art["brand"])}" data-act="{_esc(act_label)}" data-grp="{_esc(act_grp)}" onclick="toggleRow({i})">'
             f'<td class="date-cell">{_esc(date_str)}</td>'
             f'<td>{imp_badge} <span class="brand-tag">{_esc(art["brand"])}</span></td>'
             f'<td class="flag-cell">{flag} {_esc(art["country"])}</td>'
@@ -386,15 +388,15 @@ def _canvas_or_table_activity(distribution: list, has_chartjs: bool) -> str:
 
 
 def _render_filter_bar(brands: list, activity_types: list) -> str:
-    """브랜드 + 활동유형 필터 pill 바."""
+    """브랜드 + 활동유형(4대분류) 필터 pill 바. 실적·공시는 store-only라 필터에서 제외."""
     brand_pills = '<button class="filter-pill active" data-brand="all">전체</button>'
     for b in brands:
         brand_pills += f'<button class="filter-pill" data-brand="{_esc(b)}">{_esc(b)}</button>'
 
-    act_pills = '<button class="filter-pill active" data-act="all">전체</button>'
-    for a in activity_types:
-        label = ACTIVITY_LABELS.get(a, a)
-        act_pills += f'<button class="filter-pill" data-act="{_esc(label)}">{_esc(label)}</button>'
+    # 4대분류(제품·마케팅·채널·투자·BD)+기타 — data-grp로 그룹 필터
+    act_pills = '<button class="filter-pill active" data-grp="all">전체</button>'
+    for g in ACTIVITY_GROUP_ORDER:
+        act_pills += f'<button class="filter-pill" data-grp="{_esc(g)}">{_esc(g)}</button>'
 
     return (
         '<div class="filter-bar" id="filter-bar">'
@@ -4245,7 +4247,7 @@ function renderArticlesTable(arts) {{
       : '<span class="imp-badge imp-med">MED</span>';
     var urlCell = a.url ? '<a href="' + escH(a.url) + '" target="_blank" onclick="event.stopPropagation()">원문↗</a>' : '';
     var t = String(a.title||''); if(t.length > 160) t = t.substring(0,160)+'…';
-    rows += '<tr class="main-row" data-brand="' + escH(a.brand) + '" data-act="' + escH(a.act) + '" onclick="toggleRow(' + i + ')">'
+    rows += '<tr class="main-row" data-brand="' + escH(a.brand) + '" data-act="' + escH(a.act) + '" data-grp="' + escH(a.grp||'기타') + '" onclick="toggleRow(' + i + ')">'
       + '<td class="date-cell">' + escH(a.date) + '</td>'
       + '<td>' + impB + ' <span class="brand-tag">' + escH(a.brand) + '</span></td>'
       + '<td class="flag-cell">' + flag + ' ' + escH(a.country) + '</td>'
@@ -4345,7 +4347,7 @@ function setPeriod(days) {{
   }});
   document.querySelectorAll('#act-filters .filter-pill').forEach(function(p) {{
     p.classList.remove('active', 'act-active');
-    if (p.dataset.act === 'all') p.classList.add('active');
+    if (p.dataset.grp === 'all') p.classList.add('active');
   }});
 
   // World map
@@ -4617,7 +4619,7 @@ function applyFilter() {{
   if (!tbody) return;
   tbody.querySelectorAll('tr.main-row').forEach(function(tr) {{
     tr._filterVisible = (_fBrand === 'all' || tr.dataset.brand === _fBrand)
-                     && (_fAct   === 'all' || tr.dataset.act   === _fAct);
+                     && (_fAct   === 'all' || tr.dataset.grp   === _fAct);
   }});
   _applyCollapseAndFilter();
   document.querySelectorAll('.heatmap-table tbody tr').forEach(function(tr) {{
@@ -4651,8 +4653,8 @@ document.addEventListener('DOMContentLoaded', function() {{
     var pill = e.target.closest('.filter-pill');
     if (!pill) return;
     af.querySelectorAll('.filter-pill').forEach(function(p) {{ p.classList.remove('active', 'act-active'); }});
-    pill.classList.add(pill.dataset.act === 'all' ? 'active' : 'act-active');
-    _fAct = pill.dataset.act;
+    pill.classList.add(pill.dataset.grp === 'all' ? 'active' : 'act-active');
+    _fAct = pill.dataset.grp;
     applyFilter();
   }});
 }});

@@ -40,6 +40,7 @@ def get_category_battle(session: Session, days: int = 30) -> list[dict]:
         WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
           AND importance IN ('high','medium')
           AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+          AND activity_type NOT IN ('실적_공시')  -- 실적·공시 store-only
           AND published_date >= :cutoff
     """), {"cutoff": cutoff}).fetchall()
 
@@ -288,6 +289,7 @@ def get_high_articles(
                   OR brand_focus != 'incidental' -- 신기사: incidental 제외
                   OR importance = 'high'         -- HIGH는 incidental이어도 표시
               )
+              AND activity_type NOT IN ('실적_공시')  -- 실적·공시는 적재만(store-only), 미노출
               AND {date_filter}
               {where_extras}
             ORDER BY
@@ -1430,6 +1432,7 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
                 WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
                   AND importance IN ('high','medium')
                   AND (brand_focus IS NULL OR brand_focus != 'incidental')
+                  AND activity_type NOT IN ('실적_공시')  -- 실적·공시 store-only
                   AND country ~ '^[A-Z]{{2}}$'
             )
             SELECT brand, country, activity_type, importance, sc, title, details,
