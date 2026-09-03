@@ -629,6 +629,8 @@ def _render_export_growth(growth: list) -> str:
         yoy = g["yoy_pct"]
         if yoy is None:
             yoy_txt, yoy_col = "—", "var(--lo)"
+        elif prev < 5:   # 전년 베이스 $5M 미만 → 변동률 과대해석 위험, 회색 참고로
+            yoy_txt, yoy_col = f'{"+" if yoy >= 0 else ""}{yoy:.0f}%*', "var(--lo)"
         else:
             yoy_col = "var(--teal)" if yoy >= 15 else ("var(--coral)" if yoy <= -10 else "var(--mid)")
             yoy_txt = f'{"+" if yoy >= 0 else ""}{yoy:.0f}%'
@@ -646,9 +648,12 @@ def _render_export_growth(growth: list) -> str:
             f'</div>'
         )
     return (
-        '<div class="xg-help">최근 3개월 누적 수출액(USD) · '
+        '<div class="fin-basis">📊 출처: 관세청 수출통계(실측 통관액) · HS 330499 스킨케어·기초 · '
+        '최근 3개월 vs 전년 동기 · <span class="fin-basis-src">2024–2026 축적, 규모순 상위 12개국</span></div>'
+        '<div class="xg-help">'
         '<b style="color:var(--mid)">회색=전년</b> <b style="color:var(--teal)">틸=현재</b> (틸 초과분 = 성장) · '
-        'YoY <b style="color:var(--teal)">+15%↑</b> / <b style="color:var(--coral)">-10%↓</b></div>'
+        'YoY <b style="color:var(--teal)">+15%↑</b> / <b style="color:var(--coral)">-10%↓</b> · '
+        '<span style="color:var(--lo)">*전년 $5M 미만은 변동률 과대라 참고만</span></div>'
         '<div class="xg-list">' + "".join(rows) + '</div>'
     )
 
@@ -3698,29 +3703,25 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
     top3 = ", ".join(_esc(b["brand"]) for b in composite[:3]) if composite else ""
     top_mkt_name = _esc(_COUNTRY_KO_LBL.get(top_mkt["country_code"], top_mkt["country_name"])) if top_mkt else ""
 
+    # 수출(관세청) 수치는 기준이 애매하고(연·품목·국가 커버 불완전) 작은 베이스 변동률이
+    # 헤드라인으로 부풀려져 신빙성이 낮음 → 주간요약에선 제외. 수출은 시장 탭 랭킹에만.
     bits = []
-    if yoy is not None:
-        bits.append(f'주요국 화장품 수출 <b>{"+" if yoy>=0 else ""}{yoy:.0f}%</b>')
-    if top_mkt:
-        bits.append(f'최고 성장 <b>{top_mkt_name} +{top_mkt["yoy_pct"]:.0f}%</b>')
+    if high7:
+        bits.append(f'최근 7일 HIGH 신호 <b>{high7}건</b>')
     if top_brand:
         bits.append(f'종합 스코어 1위 <b>{_esc(top_brand["brand"])}</b>')
-    lead = " · ".join(bits) if bits else "최근 7일 경쟁 신호를 5축(뉴스·검색·수출·재무·상표)으로 교차검증했습니다."
+    lead = " · ".join(bits) if bits else "최근 7일 경쟁 신호를 뉴스·검색·재무·상표·리테일로 교차검증했습니다."
 
     sents = []
     if high7:
         sents.append(f'최근 7일 HIGH 신호 <b>{high7}건</b>이 포착됐습니다.')
-    if top_mkt and growers is not None:
-        sents.append(f'주요국 화장품 수출은 <b>{growers}개국</b>에서 늘었고, 그중 <b>{top_mkt_name}</b>가 전년 대비 <b>+{top_mkt["yoy_pct"]:.0f}%</b>로 가장 가팔랐습니다.')
     if top3:
-        sents.append(f'브랜드 종합 스코어는 <b>{top3}</b> 순으로 높습니다.')
-    para = " ".join(sents) or "관세청·DART·KIPRIS·검색 신호를 뉴스와 교차검증해 정리했습니다."
+        sents.append(f'브랜드 종합 스코어(모멘텀·실적·상표·수요·아마존·올영)는 <b>{top3}</b> 순으로 높습니다.')
+    para = " ".join(sents) or "뉴스·검색·재무·상표·리테일 신호를 교차검증해 정리했습니다."
 
     facts = []
     if high7:
         facts.append(f'<span class="sf"><i>HIGH</i>{high7}건</span>')
-    if growers is not None:
-        facts.append(f'<span class="sf"><i>수출 성장국</i>{growers}개</span>')
     if composite:
         facts.append(f'<span class="sf"><i>종합 스코어</i>{len(composite)}브랜드</span>')
     facts_html = f'<div class="synth-facts">{"".join(facts)}</div>' if facts else ""
