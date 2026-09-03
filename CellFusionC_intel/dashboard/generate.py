@@ -884,7 +884,9 @@ def _render_ingredient_trends(trends: list) -> str:
             f'<span class="ing-n">{t["mentions"]}건 · {t.get("brand_cnt",0)}개</span>'
             f'<span class="ing-who">{_esc(who)}</span></div>'
         )
-    return f'<div class="ing-list">{"".join(rows)}</div>'
+    return (f'<div class="ing-list">{"".join(rows)}</div>'
+            '<div class="insight-src" onclick="switchTab(\'feed\')">'
+            '성분 언급 원문 기사 · 기록 탭에서 보기 →</div>')
 
 
 def _render_negative_signals(negs: list) -> str:
