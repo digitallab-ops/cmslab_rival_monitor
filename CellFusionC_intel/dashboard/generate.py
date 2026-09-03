@@ -60,7 +60,8 @@ from analytics.summarizer import (
     generate_opportunity_actions,
 )
 from storage.models import get_session
-from config.brands import ALL_BRANDS, BRAND_KO_NAMES
+from config.brands import (ALL_BRANDS, BRAND_KO_NAMES, ACTIVITY_GROUPS,
+                            ACTIVITY_GROUP_ORDER, ACTIVITY_GROUP_OF, STORE_ONLY_ACTS)
 
 logger = logging.getLogger(__name__)
 
@@ -1075,19 +1076,25 @@ def _render_brand_activity_bar(brand_act: list) -> str:
 
 
 def _build_stacked_bar_script(brand_act: list) -> str:
-    """브랜드별 활동유형 스택바 Canvas 스크립트."""
+    """브랜드별 활동유형 스택바 Canvas 스크립트 — 4대분류(제품·마케팅·채널·투자BD)+기타.
+    실적_공시는 표시 제외(적재만)라 스택에서 빼 '기타' 과다 문제도 완화."""
     if not brand_act:
         return ""
-    act_keys = ["유통_채널", "신시장_진출", "신제품_런칭", "인플루언서_협업",
-                "투자_BD", "브랜드_마케팅", "실적_공시", "가격_프로모션", "기타"]
-    act_labels_list = [ACTIVITY_LABELS.get(k, k) for k in act_keys]
-    act_colors = ["#4a8fd4", "#9b7fe8", "#4ab884", "#8b95ff",
-                  "#e05353", "#e0894a", "#46b0b0", "#d64f8f", "#6f7aa0"]
+    groups = ACTIVITY_GROUP_ORDER            # [제품, 마케팅, 채널, 투자·BD, 기타]
+    group_colors = {"제품": "#4ab884", "마케팅": "#e0894a", "채널": "#4a8fd4",
+                    "투자·BD": "#9b7fe8", "기타": "#6f7aa0"}
+    act_labels_list = list(groups)
+    act_colors = [group_colors[g] for g in groups]
 
-    # [{brand, acts: [count...]}]
+    def _grp_total(activities: dict, g: str) -> int:
+        if g == "기타":
+            return activities.get("기타", {}).get("total", 0)   # 실적_공시는 미포함
+        return sum(activities.get(t, {}).get("total", 0) for t in ACTIVITY_GROUPS.get(g, []))
+
+    # [{brand, acts: [group counts...]}]
     rows_data = []
     for d in brand_act:
-        acts = [d["activities"].get(k, {}).get("total", 0) for k in act_keys]
+        acts = [_grp_total(d["activities"], g) for g in groups]
         rows_data.append({"brand": d["brand"], "acts": acts})
 
     data_json = json.dumps({
@@ -1343,8 +1350,8 @@ _DASHBOARD_CSS = """
   /* ── 간격·radius·타이포 토큰 (목업: 둥근 카드) ── */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
   --radius: 14px; --radius-sm: 9px; --pad-card: 18px; --badge-r: 8px;
-  --fs-hero: 25px; --fs-num: 29px; --fs-title: 17px; --fs-body: 15px;
-  --fs-small: 13.5px; --fs-label: 11.5px;
+  --fs-hero: 28px; --fs-num: 33px; --fs-title: 19.5px; --fs-body: 17px;
+  --fs-small: 15px; --fs-label: 12.5px;
   --fw-bold: 800; --fw-semi: 650; --fw-med: 600;
   --card: var(--ink); --card-bd: 1px solid var(--border);
 }
@@ -1372,8 +1379,8 @@ body {
     radial-gradient(1100px 700px at 12% 112%, rgba(70,130,150,.05), transparent 55%),
     var(--bg);
   color: var(--hi);
-  font-size: 14px;
-  line-height: 1.55;
+  font-size: 15.5px;
+  line-height: 1.6;
 }
 a { color: var(--blue); text-decoration: none; }
 a:hover { color: var(--gold); }
@@ -3222,9 +3229,18 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
 }})();""")
 
     if distribution:
-        labels = [ACTIVITY_LABELS.get(d["activity_type"], d["activity_type"]) for d in distribution]
-        totals = [d["total"] for d in distribution]
-        colors = ["#4a8fd4","#8b95ff","#9b7fe8","#4ab884","#e05353","#6f7aa0","#d4943a"][:len(distribution)]
+        # 4대분류로 집계 + 실적_공시 제외(적재만)
+        _grp_color = {"제품": "#4ab884", "마케팅": "#e0894a", "채널": "#4a8fd4",
+                      "투자·BD": "#9b7fe8", "기타": "#6f7aa0"}
+        _gt = {g: 0 for g in ACTIVITY_GROUP_ORDER}
+        for d in distribution:
+            at = d["activity_type"]
+            if at in STORE_ONLY_ACTS:
+                continue
+            _gt[ACTIVITY_GROUP_OF.get(at, "기타")] += d["total"]
+        labels = [g for g in ACTIVITY_GROUP_ORDER if _gt[g] > 0]
+        totals = [_gt[g] for g in labels]
+        colors = [_grp_color[g] for g in labels]
         data_json = json.dumps({"labels": labels, "data": totals, "colors": colors})
         scripts.append(f"""
 (function() {{

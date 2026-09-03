@@ -143,6 +143,25 @@ ACTIVITY_TYPES = [
     "기타",
 ]
 
+# 활동유형 4대분류 (전 탭 공통 — 브리핑·경쟁사·기록·슬랙 동일 적용).
+# 9개 나열형은 위계가 없어 '기타'로 몰려 보임 → 4개 대분류로 묶어 스캔성 개선.
+ACTIVITY_GROUPS = {
+    "제품":     ["신제품_런칭"],
+    "마케팅":   ["인플루언서_협업", "브랜드_마케팅", "가격_프로모션"],
+    "채널":     ["유통_채널", "신시장_진출"],
+    "투자·BD":  ["투자_BD"],
+}
+ACTIVITY_GROUP_ORDER = ["제품", "마케팅", "채널", "투자·BD", "기타"]
+ACTIVITY_GROUP_OF = {t: g for g, ts in ACTIVITY_GROUPS.items() for t in ts}
+# 실적_공시 = 분석·표시에서 제외(적재만). 그 외 미매핑 유형은 '기타'로.
+STORE_ONLY_ACTS = {"실적_공시"}
+
+
+def activity_group(activity_type: str) -> str:
+    """활동유형(세부 9종) → 4대분류. 실적_공시는 STORE_ONLY(표시 제외 판정은 호출측),
+    미매핑은 '기타'."""
+    return ACTIVITY_GROUP_OF.get(activity_type, "기타")
+
 # 브랜드별 검색 보조 키워드 (오탐 방지용)
 BRAND_CONTEXT_KEYWORDS = {
     "Anua": ["beauty", "skincare", "K-beauty", "Korean"],
