@@ -1267,9 +1267,9 @@ window._mdUrgency = function(t) {
   if (!m) return { text: t, badge: '' };
   var lv = m[1].toLowerCase();
   var map = {
-    '높음': ['insight-badge-high-hot','시급 높음'], 'high': ['insight-badge-high-hot','시급 높음'],
-    '중간': ['insight-badge-high-warm','시급 중간'], 'medium': ['insight-badge-high-warm','시급 중간'],
-    '낮음': ['insight-badge-high-low','시급 낮음'], 'low': ['insight-badge-high-low','시급 낮음']
+    '높음': ['insight-badge-high-hot','주목 높음'], 'high': ['insight-badge-high-hot','주목 높음'],
+    '중간': ['insight-badge-high-warm','주목 중간'], 'medium': ['insight-badge-high-warm','주목 중간'],
+    '낮음': ['insight-badge-high-low','주목 낮음'], 'low': ['insight-badge-high-low','주목 낮음']
   };
   var d = map[lv] || ['insight-badge-high-warm','시급'];
   var clean = (t || '').replace(/\\s*\\[?\\s*시급\\s*[:\\-]?\\s*(높음|중간|낮음|high|medium|low)\\s*\\]?\\s*/ig, '').replace(/[\\s·\\-—]+$/, '');
@@ -2348,8 +2348,8 @@ a:hover { color: var(--gold); }
   border-radius: 2px; white-space: nowrap; letter-spacing: 0.06em;
 }
 .insight-badge-act          { color: var(--bg); }
-.insight-badge-high-hot     { background: rgba(224,83,83,0.18); color: #e05353; }
-.insight-badge-high-warm    { background: rgba(212,148,58,0.18); color: #d4943a; }
+.insight-badge-high-hot     { background: rgba(201,135,26,0.18); color: #c9871a; }
+.insight-badge-high-warm    { background: rgba(139,149,255,0.18); color: var(--champ); }
 .insight-badge-high-low     { background: rgba(62,70,92,0.5); color: var(--mid); }
 .insight-strategy {
   font-size: 14px; color: var(--hi); line-height: 1.6; margin-bottom: 10px;
@@ -2563,11 +2563,11 @@ a:hover { color: var(--gold); }
 
 /* ── v2: 액션 배너 (최우선 정보, 크게) ── */
 .action-banner { display:flex; gap:16px; align-items:flex-start;
-  background:linear-gradient(100deg, rgba(255,106,86,.055), rgba(255,106,86,.01) 60%);
-  border:1px solid rgba(255,106,86,.15); border-left:4px solid var(--coral);
+  background:linear-gradient(100deg, rgba(61,80,252,.06), rgba(61,80,252,.01) 60%);
+  border:1px solid rgba(139,149,255,.22); border-left:4px solid var(--champ);
   border-radius:var(--radius); padding:16px 20px; margin-bottom:14px; }
 .action-banner .ab-label { font-family:var(--mono); font-size: 13.5px; font-weight:800; letter-spacing:.06em;
-  color:var(--coral); white-space:nowrap; padding-top:2px; min-width:150px; text-transform:uppercase; }
+  color:var(--champ); white-space:nowrap; padding-top:2px; min-width:150px; text-transform:uppercase; }
 .action-banner .ab-list { margin:0; padding:0; list-style:none; flex:1; display:flex; flex-direction:column; gap:10px; }
 .action-banner .ab-list li { font-size: 16px; font-weight:600; line-height:1.5; color:var(--hi); position:relative; padding-left:16px; }
 .action-banner .ab-list li::before { content:"›"; position:absolute; left:0; color:var(--coral); font-weight:800; }
@@ -2576,8 +2576,8 @@ a:hover { color: var(--gold); }
   letter-spacing:0; text-transform:none; margin-top:3px; }
 .action-banner .ab-list li { display:flex; gap:9px; align-items:baseline; padding-left:0; }
 .action-banner .ab-list li::before { content:none; }
-.ab-day { flex:0 0 auto; font-family:var(--mono); font-size: 12px; font-weight:800; color:var(--coral);
-  background:rgba(255,107,122,.12); border-radius:5px; padding:2px 7px; min-width:34px; text-align:center; }
+.ab-day { flex:0 0 auto; font-family:var(--mono); font-size: 12px; font-weight:800; color:var(--champ);
+  background:rgba(139,149,255,.14); border-radius:5px; padding:2px 7px; min-width:34px; text-align:center; }
 .ab-txt { flex:1; }
 @media (max-width:760px){ .action-banner{ flex-direction:column; gap:8px; } }
 /* ── 지금 대응 '근거 보기' ── */
@@ -3433,9 +3433,9 @@ def _urgency_badge(text: str) -> tuple:
         return text, ""
     lvl = m.group(1).lower()
     cls, lab = {
-        "높음": ("insight-badge-high-hot", "시급 높음"), "high": ("insight-badge-high-hot", "시급 높음"),
-        "중간": ("insight-badge-high-warm", "시급 중간"), "medium": ("insight-badge-high-warm", "시급 중간"),
-        "낮음": ("insight-badge-high-low", "시급 낮음"), "low": ("insight-badge-high-low", "시급 낮음"),
+        "높음": ("insight-badge-high-hot", "주목 높음"), "high": ("insight-badge-high-hot", "주목 높음"),
+        "중간": ("insight-badge-high-warm", "주목 중간"), "medium": ("insight-badge-high-warm", "주목 중간"),
+        "낮음": ("insight-badge-high-low", "주목 낮음"), "low": ("insight-badge-high-low", "주목 낮음"),
     }.get(lvl, ("insight-badge-high-warm", "시급"))
     clean = _re.sub(r"\s*\[?\s*시급\s*[:\-]?\s*(높음|중간|낮음|high|medium|low)\s*\]?\s*", "", text, flags=_re.I).strip(" ·-—")
     return clean, f'<span class="insight-badge {cls}">{lab}</span>'
@@ -3591,9 +3591,9 @@ def _action_evidence(brand: str, ctx: dict) -> tuple:
 
 
 _URGENCY_BADGE = {
-    "높음": ("insight-badge-high-hot", "시급 높음"),
-    "중간": ("insight-badge-high-warm", "시급 중간"),
-    "낮음": ("insight-badge-high-low", "시급 낮음"),
+    "높음": ("insight-badge-high-hot", "주목 높음"),
+    "중간": ("insight-badge-high-warm", "주목 중간"),
+    "낮음": ("insight-badge-high-low", "주목 낮음"),
 }
 
 
@@ -3665,7 +3665,7 @@ def _render_action_banner(market_text: str, ctx: dict = None, feed: list = None)
             lis += f'<li>{_esc(clean)}{badge}{ev}</li>'
     return (
         '<div class="action-banner">'
-        '<div class="ab-label">⚑ 지금 대응해야 할 것<span class="ab-sub">최근 7일 · 매일 갱신</span></div>'
+        '<div class="ab-label">💡 이번 주 주목 관점<span class="ab-sub">최근 7일 · 매일 갱신</span></div>'
         f'<ul class="ab-list">{lis}</ul>'
         '</div>'
     )
@@ -3964,8 +3964,8 @@ def _build_full_html(
 
   <!-- ===== 탭: 브리핑 (심플 종합 — 지금 대응→오늘→이번주→스토리) ===== -->
   <div class="tab-panel active" id="tab-overview">
-    <!-- 1) 지금 대응이 필요한 것 (최우선) -->
-    <div class="eyebrow"><span class="lab">지금 대응이 필요한 것</span><span class="rule"></span><span class="rt">이번 주 최우선</span></div>
+    <!-- 1) 이번 주 주목 관점 (최우선) -->
+    <div class="eyebrow"><span class="lab">이번 주 주목 관점</span><span class="rule"></span><span class="rt">최근 7일 · 매일 갱신</span></div>
     {action_banner_html}
 
     <!-- 2) 오늘 핵심 지표 -->
