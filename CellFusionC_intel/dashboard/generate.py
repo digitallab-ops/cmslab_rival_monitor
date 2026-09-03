@@ -39,6 +39,7 @@ from analytics.queries import (
     compute_brand_momentum,
     get_demand_triangulation,
     get_market_export_growth,
+    get_export_period_label,
     get_market_growth_story,
     get_trademark_signals,
     get_google_spikes,
@@ -610,11 +611,12 @@ def _render_expansion_playbook(playbook: list) -> str:
     )
 
 
-def _render_export_growth(growth: list) -> str:
+def _render_export_growth(growth: list, period_label: dict = None) -> str:
     """관세청 화장품 수출 성장 — 국가별 최근3M 수출액 + 전년 YoY (성과 신호)."""
     if not growth:
         return ('<p class="no-data">수출통계 데이터 없음 '
                 '(관세청 수집 전 · 매월 3일 갱신)</p>')
+    pl = period_label or {}
 
     # 수출 규모순 상위 12개국. 바 = 현재(틸) 위에 전년(회색) 오버레이 → 성장분이 틸로 드러남.
     rows = []
@@ -647,9 +649,15 @@ def _render_export_growth(growth: list) -> str:
             f'<span class="xg-yoy" style="color:{yoy_col}">{yoy_txt}</span>'
             f'</div>'
         )
+    if pl.get("cur_from"):
+        _period = (f'<b>{pl["cur_from"]}~{pl["cur_to"]}</b> vs 전년 <b>{pl["prev_from"]}~{pl["prev_to"]}</b> '
+                   f'(관세청 최신 확정월 {pl["latest"]} 기준)')
+    else:
+        _period = '최근 3개월 vs 전년 동기'
     return (
-        '<div class="fin-basis">📊 출처: 관세청 수출통계(실측 통관액) · HS 330499 스킨케어·기초 · '
-        '최근 3개월 vs 전년 동기 · <span class="fin-basis-src">2024–2026 축적, 규모순 상위 12개국</span></div>'
+        f'<div class="fin-basis">📊 {_period} 기준입니다 · '
+        f'<span class="fin-basis-src">출처 관세청 수출통계(실측 통관액) · HS 330499 스킨케어·기초 · '
+        f'규모순 상위 12개국 · 관세청은 익월 중순 갱신이라 1~2개월 지연</span></div>'
         '<div class="xg-help">'
         '<b style="color:var(--mid)">회색=전년</b> <b style="color:var(--teal)">틸=현재</b> (틸 초과분 = 성장) · '
         'YoY <b style="color:var(--teal)">+15%↑</b> / <b style="color:var(--coral)">-10%↓</b> · '
@@ -3797,6 +3805,7 @@ def _build_full_html(
     digest: dict = None,
     demand_tri: list = None,
     export_growth: list = None,
+    export_period: dict = None,
     growth_story: dict = None,
     nice_financials: list = None,
     ingredient_trends: list = None,
@@ -3829,7 +3838,7 @@ def _build_full_html(
     _dg = digest or {}
     radar_html        = _render_brand_radar(brand_radar or [])
     demand_html       = _render_demand_signal(demand_tri or [])
-    export_growth_html = _render_export_growth(export_growth or [])
+    export_growth_html = _render_export_growth(export_growth or [], export_period or {})
     growth_story_html  = _render_growth_story(growth_story or {})
     financials_nice_html = _render_financials_nice(nice_financials or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
@@ -4780,8 +4789,9 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         # 화장품 수출 성장(관세청, 스킨케어 330499) — export_stats 없으면 빈 리스트
         try:
             export_growth = get_market_export_growth(session, hs_like="330499", trailing=3)
+            export_period = get_export_period_label(session, trailing=3)
         except Exception:
-            export_growth = []
+            export_growth, export_period = [], {}
         # 시장 성장 스토리(수출 YoY x 그 시장 경쟁사 활동) — 삼각검증 통합 뷰
         try:
             growth_story = get_market_growth_story(session)
@@ -5031,6 +5041,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brand_radar=brand_radar,
         demand_tri=demand_tri,
         export_growth=export_growth,
+        export_period=export_period,
         growth_story=growth_story,
         nice_financials=nice_financials,
         ingredient_trends=ingredient_trends,

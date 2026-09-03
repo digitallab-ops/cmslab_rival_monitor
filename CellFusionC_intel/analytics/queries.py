@@ -1658,6 +1658,34 @@ def get_market_export_growth(session: Session, hs_like: str = "330499",
     return out
 
 
+def get_export_period_label(session: Session, trailing: int = 3) -> dict:
+    """수출 랭킹이 실제 커버하는 월 범위 — '최근 3개월'의 실제 기간을 라벨로 명시하기 위함.
+
+    관세청 데이터는 1~2개월 지연(익월 중순 공개)이라 '최근'≠현재월. 실제 최신 확정월
+    기준의 cur/prev 범위를 반환. 반환 {latest, cur_from, cur_to, prev_from, prev_to} (YYYY-MM).
+    """
+    try:
+        m = session.execute(text(
+            f"SELECT MAX(period) FROM {DB_SCHEMA}.export_stats")).scalar()
+        if not m:
+            return {}
+    except Exception:
+        return {}
+    from datetime import date
+    def _ym(y, mo):
+        return f"{y:04d}-{mo:02d}"
+    def _shift(y, mo, delta):
+        idx = (y * 12 + (mo - 1)) + delta
+        return idx // 12, idx % 12 + 1
+    ly, lm = m.year, m.month
+    cf_y, cf_m = _shift(ly, lm, -(trailing - 1))   # cur 시작월
+    pf_y, pf_m = _shift(ly, lm, -(trailing - 1) - 12)
+    pt_y, pt_m = _shift(ly, lm, -12)               # prev 종료월
+    return {"latest": _ym(ly, lm),
+            "cur_from": _ym(cf_y, cf_m), "cur_to": _ym(ly, lm),
+            "prev_from": _ym(pf_y, pf_m), "prev_to": _ym(pt_y, pt_m)}
+
+
 # 성장 '왜'를 설명하는 전략 활동 유형 (실적공시·기타 제외)
 _STORY_ACTS = ("신시장_진출", "유통_채널", "신제품_런칭", "브랜드_마케팅",
                "인플루언서_협업", "투자_BD", "가격_프로모션")
