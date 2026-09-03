@@ -35,6 +35,10 @@ TIER2_BRANDS = [
 
 ALL_BRANDS = TIER1_BRANDS + TIER2_BRANDS
 
+# 자사(씨엠에스랩 대표 브랜드) — 경쟁사 집계와 분리하는 기준선(baseline).
+# 경쟁사 목록(ALL_BRANDS)엔 넣지 않고, 전용 수집 잡 + is_self 플래그로 분리한다.
+SELF_BRANDS = ["CellFusionC"]
+
 # Tier 1 국가: 매일 수집 (K-뷰티 핵심 시장)
 # IN·PH 승격(2026-08): 영어권 대형 K-뷰티 시장인데 주간(1회)이라 수집량 과소 → 매일로.
 TIER1_COUNTRIES = ["US", "PL", "JP", "TH", "SG", "CN", "KR", "GB", "CA", "AU",
@@ -195,4 +199,5 @@ BRAND_KO_NAMES: dict[str, list[str]] = {
     "Zeroid":           ["제로이드"],
     "Beauty of Joseon": ["조선미녀"],
     "Celimax":          ["셀리맥스"],
+    "CellFusionC":      ["셀퓨전씨", "셀퓨전C", "셀퓨전시씨"],   # 자사
 }

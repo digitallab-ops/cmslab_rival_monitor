@@ -37,7 +37,7 @@ def get_category_battle(session: Session, days: int = 30) -> list[dict]:
                COALESCE(product_name,''), COALESCE(details,''),
                COALESCE(NULLIF(title_ko,''), title), source_url, channel
         FROM {DB_SCHEMA}.news_articles
-        WHERE (is_duplicate IS NOT TRUE)
+        WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
           AND importance IN ('high','medium')
           AND (brand_focus != 'incidental' OR brand_focus IS NULL)
           AND published_date >= :cutoff
@@ -87,7 +87,7 @@ def get_expansion_playbook(session: Session, days: int = 90) -> list[dict]:
                COALESCE(NULLIF(title_ko,''), title),
                source_url, published_date::date::text, importance
         FROM {DB_SCHEMA}.news_articles
-        WHERE (is_duplicate IS NOT TRUE)
+        WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
           AND activity_type IN ('신시장_진출','유통_채널')
           AND (brand_focus != 'incidental' OR brand_focus IS NULL)
           AND published_date >= :cutoff
@@ -179,7 +179,7 @@ def get_collection_stats(session: Session, days: int = 30) -> dict:
                 COUNT(DISTINCT brand)                                AS brands_active,
                 COUNT(DISTINCT country)                              AS countries_active
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
         """),
         {"cutoff": cutoff},
     ).fetchone()
@@ -194,7 +194,7 @@ def get_collection_stats(session: Session, days: int = 30) -> dict:
                 COUNT(DISTINCT brand)                           AS brands_active,
                 COUNT(DISTINCT country)                         AS countries_active
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE)
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
               AND published_date >= :prev_start AND published_date < :cutoff
         """),
         {"prev_start": prev_start, "cutoff": cutoff},
@@ -205,7 +205,7 @@ def get_collection_stats(session: Session, days: int = 30) -> dict:
         text(f"""
             SELECT published_date::date::text AS d, COUNT(*) AS n
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY published_date::date
             ORDER BY published_date::date
         """),
@@ -236,7 +236,7 @@ def get_collection_stats_range(session: Session, from_date: str, to_date: str) -
         SELECT COUNT(*), COUNT(*) FILTER (WHERE importance='high'),
                COUNT(DISTINCT brand), COUNT(DISTINCT country)
         FROM {DB_SCHEMA}.news_articles
-        WHERE (is_duplicate IS NOT TRUE)
+        WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
           AND published_date::date >= :fd AND published_date::date <= :td
     """), {"fd": from_date, "td": to_date}).fetchone()
     return {"total": row[0] or 0, "high": row[1] or 0,
@@ -282,7 +282,7 @@ def get_high_articles(
                    brand_focus, source_country,
                    COALESCE(strategic_score, 0), channel, city, price_info, evidence_level
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND importance IN ('high', 'medium')
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND importance IN ('high', 'medium')
               AND (
                   brand_focus IS NULL           -- 구기사: 필터 미적용
                   OR brand_focus != 'incidental' -- 신기사: incidental 제외
@@ -342,7 +342,7 @@ def get_brand_country_matrix(
         text(f"""
             SELECT brand, country, COUNT(*) AS cnt
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY brand, country
             ORDER BY brand, country
         """),
@@ -389,7 +389,7 @@ def get_weekly_trend(session: Session, weeks: int = 12) -> dict:
                 importance,
                 COUNT(*) AS cnt
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY week_label, importance
             ORDER BY week_label
         """),
@@ -424,7 +424,7 @@ def get_activity_distribution(session: Session, days: int = 30) -> list:
                 COUNT(*) FILTER (WHERE importance = 'medium')       AS medium,
                 COUNT(*) FILTER (WHERE importance = 'low')          AS low
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY activity_type
             ORDER BY total DESC
         """),
@@ -459,7 +459,7 @@ def get_brand_activity_matrix(session: Session, days: int = 30) -> list:
                 COUNT(*) FILTER (WHERE importance = 'medium')       AS medium,
                 COUNT(*) FILTER (WHERE importance = 'low')          AS low
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY brand, activity_type
             ORDER BY brand, total DESC
         """),
@@ -493,7 +493,7 @@ def get_brand_high_ratio(session: Session, days: int = 30) -> list:
                 COUNT(*)                                         AS total,
                 COUNT(*) FILTER (WHERE importance = 'high')     AS high
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY brand
             ORDER BY high DESC, total DESC
         """),
@@ -530,7 +530,7 @@ def get_brand_insights_raw(session: Session, days: int = 30) -> dict:
         text(f"""
             SELECT brand, activity_type, COUNT(*) AS cnt
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY brand, activity_type
             ORDER BY brand, cnt DESC
         """),
@@ -544,7 +544,7 @@ def get_brand_insights_raw(session: Session, days: int = 30) -> dict:
                    COUNT(*) AS total,
                    COUNT(*) FILTER (WHERE importance = 'high') AS high
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY brand
         """),
         {"cutoff": cutoff},
@@ -555,7 +555,7 @@ def get_brand_insights_raw(session: Session, days: int = 30) -> dict:
         text(f"""
             SELECT brand, country, COUNT(*) AS cnt
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
             GROUP BY brand, country
             ORDER BY brand, cnt DESC
         """),
@@ -570,7 +570,7 @@ def get_brand_insights_raw(session: Session, days: int = 30) -> dict:
                    source_url, published_date::date::text AS pub_date,
                    details, country, product_name
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND importance IN ('high', 'medium')
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND importance IN ('high', 'medium')
               AND published_date >= :cutoff
             ORDER BY brand,
                      CASE importance WHEN 'high' THEN 0 ELSE 1 END,
@@ -812,7 +812,8 @@ def purge_respond_feed(session: Session, keep_days: int = 21) -> None:
 def get_brand_insights_raw_by_range(session: Session, from_date: str, to_date: str) -> dict:
     """명시적 날짜 범위 기반 브랜드 인사이트 원자료 (API 엔드포인트용)."""
     params = {"from_date": from_date, "to_date": to_date}
-    date_filter = "published_date::date >= :from_date AND published_date::date <= :to_date"
+    date_filter = ("published_date::date >= :from_date AND published_date::date <= :to_date "
+                   "AND is_self IS NOT TRUE")
 
     act_rows = session.execute(
         text(f"""
@@ -852,7 +853,7 @@ def get_brand_insights_raw_by_range(session: Session, from_date: str, to_date: s
                    source_url, published_date::date::text AS pub_date, details,
                    country, product_name
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND importance IN ('high', 'medium')
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND importance IN ('high', 'medium')
               AND {date_filter}
             ORDER BY brand,
                      CASE importance WHEN 'high' THEN 0 ELSE 1 END,
@@ -959,7 +960,7 @@ def get_brand_country_articles(
                    COALESCE(NULLIF(title_ko,''), LEFT(NULLIF(details,''),70), title) AS title_ko,
                    published_date::date::text AS pub_date, details
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND importance IN ('high', 'medium')
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND importance IN ('high', 'medium')
               AND LOWER(brand) = :brand
               AND country = :country
               AND published_date::date >= :from_date
@@ -998,7 +999,7 @@ def get_country_signal_stats(session: Session, days: int = 30) -> dict:
                    COUNT(*) FILTER (WHERE importance = 'medium'
                        AND (brand_focus IS NULL OR brand_focus != 'incidental')) AS medium
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
               AND importance IN ('high', 'medium')
               AND country ~ '^[A-Z]{{2}}$'          -- null·global·LATAM 등 오분류 코드 제외
               AND (brand_focus IS NULL OR brand_focus != 'incidental' OR importance = 'high')
@@ -1028,7 +1029,7 @@ def get_ingredient_trends(session: Session, days: int = 30, limit: int = 15) -> 
                 SELECT brand,
                        btrim(unnest(string_to_array(key_ingredients, ','))) AS ingredient
                 FROM {DB_SCHEMA}.news_articles
-                WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+                WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
                   AND key_ingredients IS NOT NULL AND key_ingredients <> ''
                   AND (brand_focus IS NULL OR brand_focus != 'incidental')
             )
@@ -1064,7 +1065,7 @@ def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> l
                    COALESCE(NULLIF(title_ko,''), title) AS title,
                    details, source_url, published_date::date::text, importance
             FROM {DB_SCHEMA}.news_articles
-            WHERE (is_duplicate IS NOT TRUE) AND sentiment = 'negative'
+            WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND sentiment = 'negative'
               AND published_date >= :cutoff
               AND (brand_focus IS NULL OR brand_focus != 'incidental')
               AND importance IN ('high', 'medium')
@@ -1426,7 +1427,7 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
                        COUNT(*) OVER (PARTITION BY brand, country) AS n_arts,
                        BOOL_OR(sentiment='negative') OVER (PARTITION BY brand, country) AS has_neg
                 FROM {DB_SCHEMA}.news_articles
-                WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+                WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
                   AND importance IN ('high','medium')
                   AND (brand_focus IS NULL OR brand_focus != 'incidental')
                   AND country ~ '^[A-Z]{{2}}$'
@@ -1455,7 +1456,7 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
                       AND product_name<>'' AND lower(product_name) NOT IN ('null','none','n/a')),
                   string_agg(DISTINCT key_ingredients, ',') FILTER (WHERE key_ingredients IS NOT NULL AND key_ingredients<>'')
                 FROM {DB_SCHEMA}.news_articles
-                WHERE (is_duplicate IS NOT TRUE) AND published_date >= :cutoff
+                WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
                   AND brand=:b AND country=:c AND importance IN ('high','medium')
                   AND (brand_focus IS NULL OR brand_focus!='incidental')
             """), {"cutoff": cutoff, "b": b, "c": c}).fetchone()
@@ -1820,7 +1821,7 @@ def get_market_growth_story(session: Session, top_n: int = 6,
             FROM {DB_SCHEMA}.news_articles
             WHERE country = :cc
               AND published_date >= :cutoff
-              AND is_duplicate IS NOT TRUE
+              AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
               AND (brand_focus != 'incidental' OR brand_focus IS NULL)
               AND activity_type IN ({acts_ph})
             ORDER BY (importance = 'high') DESC,
@@ -1965,7 +1966,7 @@ def compute_brand_momentum(session: Session) -> list[dict]:
             COUNT(*)                                                               AS total
         FROM {DB_SCHEMA}.news_articles
         WHERE published_date >= :prev_start AND published_date < :now_cap
-          AND (is_duplicate IS NOT TRUE)
+          AND (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
           AND (brand_focus != 'incidental' OR brand_focus IS NULL)
         GROUP BY brand
         ORDER BY brand

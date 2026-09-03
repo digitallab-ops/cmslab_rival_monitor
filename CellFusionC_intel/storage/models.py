@@ -42,6 +42,9 @@ class NewsArticle(Base):
     evidence_level = Column(String(20))    # official / editorial / pr / rehash
     strategic_score = Column(Integer)      # 100점 전략 중요도 스코어
 
+    # 자사(셀퓨전씨) 여부 — 경쟁사 집계에서 제외하고 별도 자사 기준선으로 사용
+    is_self = Column(Boolean, default=False)
+
     # 의미 중복 병합 (semantic dedup)
     is_duplicate = Column(Boolean, default=False)   # 대표 아닌 중복 기사
     dup_of = Column(BigInteger)                     # 대표 기사 id
@@ -263,6 +266,7 @@ def migrate_tables():
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS evidence_level VARCHAR(20)",
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS strategic_score INTEGER",
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS is_duplicate BOOLEAN DEFAULT FALSE",
+        f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS is_self BOOLEAN DEFAULT FALSE",
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS dup_of BIGINT",
         f"ALTER TABLE {DB_SCHEMA}.news_articles ADD COLUMN IF NOT EXISTS embedding TEXT",
         # 성분·포뮬러 트렌드(①) + 감성·논란 탐지(②)

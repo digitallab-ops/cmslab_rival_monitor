@@ -350,6 +350,29 @@ def job_retail_ranking() -> None:
         logger.warning("리테일 랭킹 수집 스킵(네트워크/차단 확인): %s", e)
 
 
+def job_self_collection() -> None:
+    """자사(셀퓨전씨) 뉴스 수집 — 경쟁사 대비 기준선(baseline). is_self=True로 분리 저장.
+
+    경쟁사 집계 쿼리는 is_self 제외라 섞이지 않음. KR + 주요 수출시장에서 매일.
+    """
+    from config.brands import SELF_BRANDS
+    logger.info("=== [매일] 자사(셀퓨전씨) 수집 시작 ===")
+    self_countries = ["KR", "US", "JP", "VN", "TH", "SG"]
+    try:
+        saved = 0
+        for brand in SELF_BRANDS:
+            for country in self_countries:
+                try:
+                    st = run_pipeline(brand, country)
+                    saved += st.saved
+                except Exception as e:
+                    logger.warning("자사 수집 오류 [%s/%s]: %s", brand, country, e)
+        logger.info("자사 수집 완료: 신규 %d건", saved)
+        ping_dashboard_refresh()
+    except Exception as e:
+        logger.warning("자사 수집 스킵: %s", e)
+
+
 def job_oliveyoung_ranking() -> None:
     """올리브영 국내 랭킹 수집(국내 최대 H&B 채널·시계열). 원격 채널 MCP 프록시. 매일."""
     logger.info("=== [매일] 올리브영 국내 랭킹 수집 시작 ===")
@@ -512,6 +535,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(hour=6, minute=30),
         id="oliveyoung_ranking",
         name="[매일] 올리브영 국내 랭킹 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매일 05:30 KST — 자사(셀퓨전씨) 뉴스 수집(경쟁사 기준선). is_self로 분리 저장.
+    scheduler.add_job(
+        job_self_collection,
+        trigger=CronTrigger(hour=5, minute=30),
+        id="self_collection",
+        name="[매일] 자사(셀퓨전씨) 수집",
         max_instances=1,
         coalesce=True,
     )

@@ -22,6 +22,7 @@ from collectors.reddit_collector import RedditCollector
 from collectors.youtube import YouTubeCollector
 from collectors.body_fetcher import fetch_body
 from classifier.claude_classifier import classify_articles
+from config.brands import SELF_BRANDS
 from deduplication.url_hasher import url_hash, deduplicate_batch
 from storage.models import NewsArticle, CollectionRun, get_session
 from storage.repository import (
@@ -109,6 +110,7 @@ def _run_single(
                 brand=clf.brand,
                 country=clf.country,
                 source_country=country,      # 파이프라인 수집 국가 (크로스마켓 추적용)
+                is_self=(brand in SELF_BRANDS),   # 자사(셀퓨전씨)면 경쟁사 집계서 분리
                 activity_type=clf.activity_type,
                 details=clf.details,
                 product_name=clf.product_name,
