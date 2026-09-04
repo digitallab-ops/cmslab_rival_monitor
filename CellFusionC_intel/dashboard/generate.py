@@ -1311,7 +1311,11 @@ window._renderInsights = function(data) {{
   var grid = document.getElementById('insight-grid');
   if (!grid || !data) return;
   var html = '';
-  Object.keys(data).forEach(function(brand) {{
+  // 저활동 브랜드(기사 0~1건)는 하단으로 — 근거기사 수 desc 정렬(스크롤 낭비 방지)
+  var _bkeys = Object.keys(data).sort(function(a, b) {{
+    return (data[b].key_articles || []).length - (data[a].key_articles || []).length;
+  }});
+  _bkeys.forEach(function(brand) {{
     var ins = data[brand];
     var highCls = ins.high_pct >= 15 ? 'insight-badge-high-hot'
                 : ins.high_pct >= 8  ? 'insight-badge-high-warm'
@@ -4308,14 +4312,8 @@ def _build_full_html(
 
     {expansion_playbook_html}
 
-    <!-- 시장 종합 인사이트 + 셀퓨전씨 맞춤 조언 -->
-    <div class="section" id="market-section">
-      <div class="section-title">
-        🧭 시장 종합 인사이트 &amp; 셀퓨전씨 전략 제언
-        <span class="section-sub">전 경쟁사 종합 분석 → 우리(씨엠에스랩) 관점 조언</span>
-      </div>
-      <div class="market-body" id="market-body"></div>
-    </div>
+    <!-- (제거) 시장 종합 인사이트 — 브리핑 탭 주간종합/주목관점과 문장이 중복돼 삭제.
+         시장 탭은 뜨는시장·수출랭킹·아마존추세·국내올영 등 시장 고유 콘텐츠에 집중. -->
   </div>
 
   <!-- ===== 탭: 재무 (NICE BizLine · 연 단위 · 비상장 포함) ===== -->
