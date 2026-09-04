@@ -700,9 +700,11 @@ def _render_financials_nice(fins: list) -> str:
                   else '<span class="fin-tag fin-unlisted">비상장</span>')
         scope = ('<span class="fin-tag fin-single">단일브랜드</span>' if f["is_single_brand"]
                  else '<span class="fin-whole">회사전체</span>')
-        # 매출 3개년 + 최신 YoY
+        # 매출 3개년 + 최신 YoY + 추이 스파크라인
         rev = [yrs.get(y, {}).get("revenue") for y in YRS]
-        rev_cells = " → ".join(_eok(v) for v in rev)
+        _rv = [float(v) for v in rev if v is not None]
+        _spk = f'<span class="fin-spark">{_sparkline_svg(_rv, w=58, h=18)}</span>' if len(_rv) >= 2 else ""
+        rev_cells = " → ".join(_eok(v) for v in rev) + (" " + _spk if _spk else "")
         yoy_html = "—"
         if rev[2] and rev[1]:
             yoy = (rev[2] / rev[1] - 1) * 100
@@ -2306,6 +2308,10 @@ a:hover { color: var(--gold); }
 .fin-basis { font-size: 13px; font-weight: 700; color: var(--champ); margin-bottom: 10px;
   padding: 7px 12px; background: rgba(139,149,255,.08); border-radius: 8px; display: inline-block; }
 .fin-basis-src { font-weight: 400; color: var(--lo); margin-left: 4px; }
+.fin-spark { display: inline-block; vertical-align: middle; width: 58px; height: 18px; margin-left: 6px; }
+.fin-spark .spark { width: 58px; height: 18px; overflow: visible; }
+.fin-spark .spark path { stroke: var(--teal); } .fin-spark .spark .fill { fill: rgba(5,224,224,.12); stroke: none; }
+.fin-spark .spark .end { fill: var(--teal); }
 
 /* ── 글로벌 검색 급등(구글) ── */
 .sp-list { display: flex; flex-direction: column; gap: 6px; }
@@ -4358,6 +4364,8 @@ def _build_full_html(
       var r=await fetch('/api/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:q}})}});
       var d=await r.json();
       var ans=(d.answer||'답을 찾지 못했어요.').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\\n/g,'<br>');
+      // 출처 URL을 클릭 가능한 링크로(근거 표기)
+      ans=ans.replace(/(https?:\\/\\/[^\\s<]+)/g,'<a href="$1" target="_blank" rel="noopener" style="color:var(--teal);font-weight:600">원문↗</a>');
       document.getElementById(id).innerHTML=ans;
     }}catch(e){{ document.getElementById(id).innerHTML='오류: '+e; }}
   }}
