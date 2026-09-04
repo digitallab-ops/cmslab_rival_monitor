@@ -350,6 +350,18 @@ def job_retail_ranking() -> None:
         logger.warning("리테일 랭킹 수집 스킵(네트워크/차단 확인): %s", e)
 
 
+def job_self_oliveyoung() -> None:
+    """자사(셀퓨전씨) 올영 성과 수집 — 경쟁사 대비 위치 기준선. 매일."""
+    logger.info("=== [매일] 자사 올영 성과 수집 시작 ===")
+    try:
+        from signals.self_oliveyoung import run as run_self_oy
+        r = run_self_oy()
+        logger.info("자사 올영 성과: 제품 %d", r.get("products", 0))
+        ping_dashboard_refresh()
+    except Exception as e:
+        logger.warning("자사 올영 성과 수집 스킵: %s", e)
+
+
 def job_ingredient_intel() -> None:
     """제품 전성분 인텔 — 전성분→효능→대응각 LLM 요약. 주1회(LLM 비용). 전성분 툴 없으면 추정."""
     logger.info("=== [주간] 제품 전성분 인텔 시작 ===")
@@ -558,6 +570,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(hour=5, minute=30),
         id="self_collection",
         name="[매일] 자사(셀퓨전씨) 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매일 06:40 KST — 자사(셀퓨전씨) 올영 성과(경쟁사 대비 위치 기준선).
+    scheduler.add_job(
+        job_self_oliveyoung,
+        trigger=CronTrigger(hour=6, minute=40),
+        id="self_oliveyoung",
+        name="[매일] 자사 올영 성과 수집",
         max_instances=1,
         coalesce=True,
     )

@@ -1251,6 +1251,71 @@ def get_oliveyoung_category_rank(session: Session, category: str = "선케어",
     }
 
 
+def get_self_position(session: Session) -> dict:
+    """자사(셀퓨전씨) 위치 — 올영 제품 성과 + 리뷰 강약점 + 경쟁사 대비 벤치.
+
+    반환: {products:[top by review], pos:[], neg:[], self_avg, comp_avg,
+           self_news_30d, comp_median_news, oy_ranked}. 데이터 없으면 최소 dict.
+    """
+    import json as _json
+    out = {"products": [], "pos": [], "neg": [], "self_avg": None, "comp_avg": None,
+           "self_news_30d": 0, "comp_median_news": 0, "oy_ranked": 0}
+    try:
+        rows = session.execute(text(f"""
+            SELECT product_name, review_cnt, avg_score, repurchase_pct
+            FROM {DB_SCHEMA}.self_channel_products
+            WHERE review_cnt IS NOT NULL
+            ORDER BY review_cnt DESC LIMIT 6
+        """)).fetchall()
+        out["products"] = [{"product_name": r[0] or "", "review_cnt": r[1],
+                            "avg_score": r[2], "repurchase_pct": r[3]} for r in rows]
+        # 자사 평균 평점(리뷰수 가중)
+        wr = session.execute(text(f"""
+            SELECT SUM(avg_score*review_cnt)/NULLIF(SUM(review_cnt),0)
+            FROM {DB_SCHEMA}.self_channel_products WHERE avg_score IS NOT NULL AND review_cnt>0
+        """)).scalar()
+        out["self_avg"] = round(float(wr), 2) if wr is not None else None
+        meta = session.execute(text(
+            f"SELECT payload FROM {DB_SCHEMA}.self_channel_meta WHERE id=1")).scalar()
+        if meta:
+            d = _json.loads(meta)
+            out["pos"], out["neg"] = d.get("pos", [])[:6], d.get("neg", [])[:6]
+    except Exception:
+        pass
+    try:
+        # 경쟁사 올영 평균 평점(벤치)
+        ca = session.execute(text(f"""
+            SELECT AVG(avg_score) FROM {DB_SCHEMA}.oliveyoung_reviews
+            WHERE avg_score IS NOT NULL AND is_ours IS NOT TRUE
+              AND capture_date = (SELECT MAX(capture_date) FROM {DB_SCHEMA}.oliveyoung_reviews)
+        """)).scalar()
+        out["comp_avg"] = round(float(ca), 2) if ca is not None else None
+    except Exception:
+        pass
+    try:
+        # 노출 격차: 자사 뉴스 vs 경쟁사 중앙값(최근 30일)
+        out["self_news_30d"] = session.execute(text(f"""
+            SELECT COUNT(*) FROM {DB_SCHEMA}.news_articles
+            WHERE is_self IS TRUE AND published_date >= NOW()-interval '30 days'
+        """)).scalar() or 0
+        med = session.execute(text(f"""
+            SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY c) FROM (
+              SELECT brand, COUNT(*) c FROM {DB_SCHEMA}.news_articles
+              WHERE is_self IS NOT TRUE AND is_duplicate IS NOT TRUE
+                AND published_date >= NOW()-interval '30 days'
+                AND (brand_focus!='incidental' OR brand_focus IS NULL)
+              GROUP BY brand) t
+        """)).scalar()
+        out["comp_median_news"] = int(med) if med is not None else 0
+        out["oy_ranked"] = session.execute(text(f"""
+            SELECT COUNT(*) FROM {DB_SCHEMA}.oliveyoung_rankings WHERE is_ours IS TRUE
+              AND capture_date = (SELECT MAX(capture_date) FROM {DB_SCHEMA}.oliveyoung_rankings)
+        """)).scalar() or 0
+    except Exception:
+        pass
+    return out
+
+
 def get_product_ingredient_intel(session: Session, limit: int = 10) -> list[dict]:
     """제품 전성분 인텔 — 핵심성분·효능·피부타입·대응각. 실측(올영/아마존) 우선.
 

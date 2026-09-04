@@ -56,6 +56,7 @@ from analytics.queries import (
     get_oliveyoung_category_rank,
     get_oliveyoung_review_landscape,
     get_product_ingredient_intel,
+    get_self_position,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -868,6 +869,57 @@ def _render_oliveyoung(flagship: dict, movers: list, reviews: list = None) -> st
     ) if rrows else ""
 
     return f'<div class="oy-wrap">{flag_html}{mv_html}</div>{rev_html}'
+
+
+def _render_self_position(sp: dict) -> str:
+    """자사(셀퓨전씨) 위치 — 올영 성과·리뷰 강약점 + 경쟁사 대비 벤치. '우리 기준선'."""
+    sp = sp or {}
+    prods = sp.get("products") or []
+    if not prods and not sp.get("pos"):
+        return ('<p class="no-data">자사 위치 데이터 축적 중 (자사 올영 성과 수집 후 · '
+                'python -m signals.self_oliveyoung)</p>')
+    sa, ca = sp.get("self_avg"), sp.get("comp_avg")
+    sn, cm = sp.get("self_news_30d", 0), sp.get("comp_median_news", 0)
+    # 대비 카드 2종
+    score_tone = "var(--teal)" if (sa and ca and sa >= ca) else "var(--coral)"
+    news_tone = "var(--coral)" if (cm and sn < cm) else "var(--teal)"
+    cmp_html = (
+        '<div class="sp-cmp">'
+        f'<div class="sp-metric"><div class="sp-ml">올영 리뷰 만족도</div>'
+        f'<div class="sp-mv" style="color:{score_tone}">★{sa if sa is not None else "—"}</div>'
+        f'<div class="sp-mb">경쟁사 평균 ★{ca if ca is not None else "—"} '
+        f'{"↑ 우위" if (sa and ca and sa>=ca) else "↓ 열위"}</div></div>'
+        f'<div class="sp-metric"><div class="sp-ml">뉴스 노출(30일)</div>'
+        f'<div class="sp-mv" style="color:{news_tone}">{sn}건</div>'
+        f'<div class="sp-mb">경쟁사 중앙값 {cm}건 · 올영 랭킹진입 {sp.get("oy_ranked",0)}</div></div>'
+        '</div>'
+    )
+    # 판독 한 줄(규칙 기반)
+    read = ""
+    if sa and ca:
+        if sa >= ca and cm and sn < cm:
+            read = "리뷰 만족도는 경쟁사보다 높은데(제품력↑) 노출·랭킹은 열위 — <b>'좋은데 안 알려짐'</b>이 과제. 알리기(PR·랭킹 진입)에 기회."
+        elif sa < ca:
+            read = "리뷰 만족도가 경쟁사 평균보다 낮음 — 부정 키워드부터 점검할 필요가 있어 보임."
+    read_html = f'<div class="sp-read">🧭 {read}</div>' if read else ""
+    # 대표 제품
+    prow = []
+    for p in prods[:5]:
+        nm = _clean_product_name(p.get("product_name", ""), "셀퓨전씨")
+        rp = f' · 재구매 {p["repurchase_pct"]:.0f}%' if p.get("repurchase_pct") else ""
+        prow.append(
+            f'<div class="sp-prow"><span class="sp-star">★{p.get("avg_score","—")}</span>'
+            f'<span class="sp-pn">{_esc(nm)}</span>'
+            f'<span class="sp-rc">리뷰 {p.get("review_cnt",0):,}{rp}</span></div>')
+    prod_html = (f'<div class="sp-block"><div class="sp-bt">우리 대표 제품 (올영 리뷰순)</div>'
+                 f'{"".join(prow)}</div>') if prow else ""
+    # 강약점 키워드
+    pos = "".join(f'<span class="sp-kw pos">{_esc(w)}</span>' for w in (sp.get("pos") or [])[:6])
+    neg = "".join(f'<span class="sp-kw neg">{_esc(w)}</span>' for w in (sp.get("neg") or [])[:6])
+    kw_html = (f'<div class="sp-block"><div class="sp-bt">우리 리뷰 강점·약점 키워드</div>'
+               f'<div class="sp-kws"><span class="sp-kl">강점</span>{pos}</div>'
+               f'<div class="sp-kws"><span class="sp-kl">약점</span>{neg}</div></div>') if (pos or neg) else ""
+    return f'{cmp_html}{read_html}<div class="sp-grid">{prod_html}{kw_html}</div>'
 
 
 def _render_ingredient_intel(items: list) -> str:
@@ -2139,6 +2191,30 @@ a:hover { color: var(--gold); }
 .pii-ben { font-size:12.5px; color:var(--mid); margin-bottom:5px; }
 .pii-skin { color:var(--champ2); }
 .pii-angle { font-size:12.5px; color:var(--teal); font-weight:600; }
+/* ── 자사(셀퓨전씨) 위치 ── */
+.sp-cmp { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+@media (max-width:700px){ .sp-cmp { grid-template-columns:1fr; } }
+.sp-metric { background:var(--elevated); border:1px solid var(--border); border-radius:10px; padding:13px 16px; }
+.sp-ml { font-size:12px; font-weight:700; color:var(--lo); margin-bottom:4px; }
+.sp-mv { font-size:28px; font-weight:800; font-family:var(--mono); line-height:1.1; }
+.sp-mb { font-size:12px; color:var(--mid); margin-top:4px; }
+.sp-read { font-size:14px; color:var(--hi); background:rgba(139,149,255,.08); border-left:3px solid var(--champ);
+  border-radius:8px; padding:10px 13px; margin-bottom:14px; line-height:1.55; }
+.sp-read b { color:var(--champ2); }
+.sp-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media (max-width:900px){ .sp-grid { grid-template-columns:1fr; } }
+.sp-block { background:var(--deep); border:1px solid var(--border); border-radius:9px; padding:12px 14px; }
+.sp-bt { font-size:13px; font-weight:800; color:var(--hi); margin-bottom:9px; }
+.sp-prow { display:flex; align-items:baseline; gap:9px; padding:5px 0; border-bottom:1px solid rgba(58,70,130,.3); }
+.sp-prow:last-child { border-bottom:none; }
+.sp-star { font-family:var(--mono); font-size:13px; font-weight:800; color:var(--teal); white-space:nowrap; }
+.sp-pn { flex:1; font-size:12.5px; color:var(--mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sp-rc { font-size:11.5px; color:var(--lo); white-space:nowrap; }
+.sp-kws { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin-bottom:7px; }
+.sp-kl { font-size:11px; font-weight:800; color:var(--lo); margin-right:3px; }
+.sp-kw { font-size:11.5px; font-weight:600; padding:2px 8px; border-radius:5px; }
+.sp-kw.pos { background:rgba(5,224,224,.12); color:var(--teal); }
+.sp-kw.neg { background:rgba(255,107,122,.13); color:var(--coral); }
 /* ── 경쟁사 악재 ── */
 .neg-list { display:flex; flex-direction:column; gap:9px; }
 .neg-row { padding:11px 13px; background:rgba(255,107,122,.06); border:1px solid rgba(255,107,122,.2);
@@ -3855,6 +3931,7 @@ def _build_full_html(
     nice_financials: list = None,
     ingredient_trends: list = None,
     ingredient_intel: list = None,
+    self_position: dict = None,
     negative_signals: list = None,
     trademark_sig: dict = None,
     search_spikes: list = None,
@@ -3889,6 +3966,7 @@ def _build_full_html(
     financials_nice_html = _render_financials_nice(nice_financials or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
+    self_position_html = _render_self_position(self_position or {})
     negative_signals_html = _render_negative_signals(negative_signals or [])
     rank_trends_html  = _render_rank_trends(rank_trends or [])
     oliveyoung_html   = _render_oliveyoung(oliveyoung_flagship or {}, oliveyoung_movers or [], oliveyoung_reviews or [])
@@ -4042,6 +4120,10 @@ def _build_full_html(
 
     <!-- 2) 오늘 핵심 지표 -->
     {metric_rail_html}
+
+    <!-- 2b) 우리(셀퓨전씨) 위치 — 경쟁사 대비 기준선 -->
+    <div class="eyebrow"><span class="lab">🪞 우리(셀퓨전씨) 위치</span><span class="rule"></span><span class="rt">경쟁사 대비 기준선</span></div>
+    {self_position_html}
 
     <!-- 3) 이번 주 동향 — 가장 활발한 시장 | 핵심 무브 -->
     <div class="eyebrow"><span class="lab">이번 주 동향</span><span class="rule"></span><span class="rt jump" onclick="switchTab('strategy')">시장 탭 전체 →</span></div>
@@ -4866,6 +4948,10 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception:
             ingredient_intel = []
         try:
+            self_position = get_self_position(session)
+        except Exception:
+            self_position = {}
+        try:
             negative_signals = get_negative_signals(session, days=30, limit=10)
         except Exception:
             negative_signals = []
@@ -5105,6 +5191,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         nice_financials=nice_financials,
         ingredient_trends=ingredient_trends,
         ingredient_intel=ingredient_intel,
+        self_position=self_position,
         negative_signals=negative_signals,
         rank_trends=rank_trends,
         oliveyoung_movers=oliveyoung_movers,
