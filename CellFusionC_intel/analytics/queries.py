@@ -1830,8 +1830,8 @@ def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -
             FROM {DB_SCHEMA}.trademark_filings
             WHERE is_own AND is_cosmetic AND app_date IS NOT NULL
               AND app_date >= (CURRENT_DATE - make_interval(months => :m))
-            ORDER BY app_date DESC LIMIT :lim
-        """), {"m": months, "lim": limit}).fetchall()
+            ORDER BY app_date DESC LIMIT :lim2
+        """), {"m": months, "lim2": limit * 3}).fetchall()
         brand_rows = session.execute(text(f"""
             SELECT brand, country,
                    COUNT(*) FILTER (WHERE app_date >= (CURRENT_DATE - make_interval(months => :m))) recent,
@@ -1845,8 +1845,26 @@ def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -
     except Exception:
         return {"feed": [], "brands": []}
 
-    feed = [{"brand": r[0], "country": r[1], "mark": r[2], "date": str(r[3])}
-            for r in feed_rows]
+    # 디듑 — 같은 브랜드에서 동일/오타변형 마크(REBOOST/REBOOT, 반복단어) 제거
+    import re as _re
+    from difflib import SequenceMatcher as _SM
+    def _norm_mk(s):
+        toks = _re.sub(r"[^A-Za-z0-9가-힣 ]", "", (s or "").upper()).split()
+        # 반복 단어 축약(TORRIDEN TORRIDEN TORRIDEN → TORRIDEN ...)
+        dedup_toks = []
+        for t in toks:
+            if not dedup_toks or dedup_toks[-1] != t:
+                dedup_toks.append(t)
+        return " ".join(dedup_toks)
+    feed, kept = [], []          # kept: [(brand, norm_mark)]
+    for r in feed_rows:
+        nm = _norm_mk(r[2])
+        if any(b == r[0] and _SM(None, km, nm).ratio() >= 0.85 for b, km in kept):
+            continue
+        kept.append((r[0], nm))
+        feed.append({"brand": r[0], "country": r[1], "mark": r[2], "date": str(r[3])})
+        if len(feed) >= limit:
+            break
     brands = [{"brand": r[0], "country": r[1], "recent": r[2] or 0,
                "total": r[3] or 0, "latest": str(r[4]) if r[4] else None}
               for r in brand_rows]
@@ -1927,11 +1945,13 @@ def get_market_growth_story(session: Session, top_n: int = 6,
     # 성장 시장 선별: 규모 하한(월 $3M↑=3M누적 $9M↑)으로 미세시장 노이즈 제거 후 YoY순
     sizable = [g for g in growth if g["exp_usd_3m"] >= 9_000_000 and g["yoy_pct"] is not None]
     sizable.sort(key=lambda g: g["yoy_pct"], reverse=True)
-    picked = sizable[:top_n]
+    # 후보를 넓게(top_n*2) 잡아 무브 조회 → 활동 있는 시장을 우선 노출(우즈벡처럼 수출만
+    # 늘고 경쟁사 활동 기사 없는 국가가 상위 슬롯 차지하는 것 방지).
+    picked = sizable[:top_n * 2]
 
     cutoff = _cutoff_iso(window_days)
     acts_ph = ", ".join(f"'{a}'" for a in _STORY_ACTS)
-    markets = []
+    _cand = []
     for g in picked:
         cc = g["country_code"]
         rows = session.execute(text(f"""
@@ -1955,13 +1975,16 @@ def get_market_growth_story(session: Session, top_n: int = 6,
             "date": str(r[5])[:10] if r[5] else "",
             "importance": r[6],
         } for r in rows]
-        markets.append({
+        _cand.append({
             "country_code": cc, "country_name": g["country_name"],
             "exp_musd": round(g["exp_usd_3m"] / 1e6, 1),
             "yoy_pct": g["yoy_pct"],
             "delta_musd": round((g["exp_usd_3m"] - g["prev_usd_3m"]) / 1e6, 1),
             "moves": moves,
         })
+    # 활동(무브) 있는 시장 우선 → YoY순. 상위 top_n만.
+    _cand.sort(key=lambda m: (len(m["moves"]) == 0, -(m["yoy_pct"] or 0)))
+    markets = _cand[:top_n]
     return {"overall": overall, "markets": markets}
 
 

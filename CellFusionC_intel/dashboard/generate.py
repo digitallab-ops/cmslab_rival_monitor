@@ -925,8 +925,8 @@ def _render_self_position(sp: dict) -> str:
 def _render_ingredient_intel(items: list) -> str:
     """제품 전성분 인텔 — 핵심성분·효능·우리 대응각. 실측(올영/아마존) 우선, 없으면 추정."""
     if not items:
-        return ('<p class="no-data">전성분 인텔 연동 대기 — 스크래퍼 <b>get_ingredients</b> 툴 '
-                '추가 시 활성화 (지금은 전성분 소스 없음). docs/ingredient_scraper_contract.md</p>')
+        return ('<p class="no-data">전성분 데이터 수집 중 — 순차 적재되며 곧 표시됩니다 '
+                '(올영 전성분 스크래퍼 연동 완료).</p>')
     rows = []
     for it in items[:8]:
         src = ('<span class="pii-src est">추정</span>' if it.get("is_estimated")
@@ -3502,8 +3502,10 @@ def _render_metric_rail(stats: dict, growth_story: dict, spikes: list, days: int
 def _render_move_stream(high_articles: list, demand_tri: list) -> str:
     """핵심 무브 스트림 — HIGH 중복제거(브랜드·국가·활동) + 수요 verdict 라벨."""
     verdict_by_brand = {t["brand"]: t.get("verdict") for t in (demand_tri or [])}
+    # 실제 판별된 것만 배지(실질/PR우세/숨은수요). stable·미판별은 배지 없음(대부분
+    # stable이라 '안정'이 전부 붙어 무의미했음).
     _VB = {"real": ("실질", "vb-real"), "pr": ("PR우세", "vb-pr"),
-           "latent": ("숨은수요", "vb-latent"), "stable": ("안정", "vb-latent")}
+           "latent": ("숨은수요", "vb-latent")}
     seen, rows = set(), []
     for a in sorted(high_articles or [], key=lambda x: -(x.get("score") or 0)):
         k = (a.get("brand"), a.get("country"), a.get("activity_type"))
