@@ -921,7 +921,9 @@ def _render_self_position(sp: dict) -> str:
     kw_html = (f'<div class="sp-block"><div class="sp-bt">우리 리뷰 강점·약점 키워드</div>'
                f'<div class="sp-kws"><span class="sp-kl">강점</span>{pos}</div>'
                f'<div class="sp-kws"><span class="sp-kl">약점</span>{neg}</div></div>') if (pos or neg) else ""
-    return f'{cmp_html}{read_html}<div class="sp-grid">{prod_html}{kw_html}</div>'
+    sp_basis = ('<div class="section-basis" style="margin:2px 0 8px">'
+                '📅 올영 성과·리뷰=최신 수집 스냅샷 · 뉴스 노출=최근 30일 기준</div>')
+    return f'{sp_basis}{cmp_html}{read_html}<div class="sp-grid">{prod_html}{kw_html}</div>'
 
 
 def _render_ingredient_intel(items: list) -> str:
@@ -1591,6 +1593,19 @@ a:hover { color: var(--gold); }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.section-basis {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--teal);
+  background: rgba(43,169,178,0.10);
+  border: 1px solid rgba(43,169,178,0.28);
+  border-radius: 3px;
+  padding: 1px 7px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  margin-left: 6px;
 }
 .collapse-btn {
   flex-shrink: 0;
@@ -3855,6 +3870,17 @@ def _render_action_banner(market_text: str, ctx: dict = None, feed: list = None)
     )
 
 
+def _josa_iga(word: str) -> str:
+    """한글 받침 유무로 주격조사 이/가 선택(비한글은 '가')."""
+    w = (word or "").strip()
+    if not w:
+        return "가"
+    ch = w[-1]
+    if "가" <= ch <= "힣":
+        return "이" if (ord(ch) - 0xAC00) % 28 else "가"
+    return "가"
+
+
 def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite: list) -> str:
     """AI 종합 인사이트 — 데이터 리드 + 합성문단 + 기회/점검(대응은 상단 배너로 분리)."""
     o = (growth_story or {}).get("overall") or {}
@@ -3867,13 +3893,17 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
     top3 = ", ".join(_esc(b["brand"]) for b in composite[:3]) if composite else ""
     top_mkt_name = _esc(_COUNTRY_KO_LBL.get(top_mkt["country_code"], top_mkt["country_name"])) if top_mkt else ""
 
-    # 수출(관세청) 수치는 기준이 애매하고(연·품목·국가 커버 불완전) 작은 베이스 변동률이
-    # 헤드라인으로 부풀려져 신빙성이 낮음 → 주간요약에선 제외. 수출은 시장 탭 랭킹에만.
+    # 수출(관세청)은 신빙성 있는 지표라 유지하되, 헤드라인 과대강조 대신 기준(실제 월범위)을
+    # 붙여 표기. 작은 베이스(우즈벡류)는 get_market_growth_story에서 무브 우선순위로 걸러짐.
+    _pl = (growth_story or {}).get("period") or {}
+    _exp_basis = (f'{_pl["cur_from"]}~{_pl["cur_to"]} 기준' if _pl.get("cur_from") else '최근 3개월')
     bits = []
     if high7:
         bits.append(f'최근 7일 HIGH 신호 <b>{high7}건</b>')
     if top_brand:
         bits.append(f'종합 스코어 1위 <b>{_esc(top_brand["brand"])}</b>')
+    if yoy is not None:
+        bits.append(f'주요국 수출 <b>{"+" if yoy>=0 else ""}{yoy:.0f}%</b>')
     lead = " · ".join(bits) if bits else "최근 7일 경쟁 신호를 뉴스·검색·재무·상표·리테일로 교차검증했습니다."
 
     sents = []
@@ -3881,6 +3911,9 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
         sents.append(f'최근 7일 HIGH 신호 <b>{high7}건</b>이 포착됐습니다.')
     if top3:
         sents.append(f'브랜드 종합 스코어(모멘텀·실적·상표·수요·아마존·올영)는 <b>{top3}</b> 순으로 높습니다.')
+    if yoy is not None and growers is not None:
+        _topm = f'그중 <b>{top_mkt_name}</b>{_josa_iga(top_mkt_name)} 가장 가팔랐습니다' if top_mkt_name else '증가했습니다'
+        sents.append(f'관세청 스킨케어 수출(<b>{_exp_basis}</b>·전년동기 대비)은 <b>{growers}개국</b>에서 늘었고, {_topm}.')
     para = " ".join(sents) or "뉴스·검색·재무·상표·리테일 신호를 교차검증해 정리했습니다."
 
     facts = []
@@ -3888,6 +3921,8 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
         facts.append(f'<span class="sf"><i>HIGH</i>{high7}건</span>')
     if composite:
         facts.append(f'<span class="sf"><i>종합 스코어</i>{len(composite)}브랜드</span>')
+    if growers is not None:
+        facts.append(f'<span class="sf"><i>수출 성장국</i>{growers}개</span>')
     facts_html = f'<div class="synth-facts">{"".join(facts)}</div>' if facts else ""
 
     sec = _parse_market_sections(market_text)
@@ -3981,6 +4016,23 @@ def _build_full_html(
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
     generated_str = generated.strftime("%Y-%m-%d %H:%M KST")
+
+    # ── 데이터 기준일 표기(모든 섹션 '언제~언제') ── 생성 시점(KST)에서 절대 날짜 산출.
+    #    상대 창(최근 N일)이라도 실제 날짜를 박아 신빙성을 준다.
+    _g = generated.date()
+    def _bden(n):   # n일 전 → YYYY-MM-DD
+        return (_g - timedelta(days=n)).strftime("%Y-%m-%d")
+    _bt = _g.strftime("%Y-%m-%d")                       # 오늘(수집 최신)
+    def _basis(days_back, tail=""):                     # 공통 기준칩 라벨
+        return f'📅 {_bden(days_back)} ~ {_bt} 기준{(" · " + tail) if tail else ""}'
+    b_kpi     = _basis(days)                            # KPI·기사·지도·브랜드요약 = 기간토글
+    b_radar   = f'📅 최근 4주({_bden(28)}~{_bt}) vs 직전 4주({_bden(56)}~{_bden(28)})'
+    b_demand  = f'📅 최근 7일({_bden(7)}~{_bt}) 보도·검색 대조'
+    b_spike   = f'📅 최근 7일({_bden(7)}~{_bt}) vs 직전 28일({_bden(35)}~{_bden(7)})'
+    b_neg     = _basis(days)                            # 악재도 기간토글 창
+    b_ingr    = _basis(30)                              # 성분 지형 최근 30일
+    b_amazon  = _basis(15)                              # 아마존 스냅샷 최근 15일
+    b_high    = _basis(days)                            # HIGH 신호 기간토글
 
     kpi_html          = _render_kpi_cards(stats)
     brands_list       = matrix.get("brands", [])
@@ -4172,7 +4224,7 @@ def _build_full_html(
     <div id="synth-wrap">{synth_html}</div>
     <div class="section">
       <div class="section-title">브랜드 신호 요약
-        <span class="section-sub">각 브랜드가 왜 강한지 — 기사·검색·매출·상표·리테일 실수치로 (클릭 시 상세)</span>
+        <span class="section-sub">각 브랜드가 왜 강한지 — 기사·검색·매출·상표·리테일 실수치로 (클릭 시 상세)</span><span class="section-basis">{b_kpi}</span>
       </div>
       {brand_signals_html}
     </div>
@@ -4189,7 +4241,7 @@ def _build_full_html(
     <div class="section">
       <div class="section-title">
         Brand Radar
-        <span class="section-sub">최근 4주 vs 직전 4주 기사량 비율 · ▲Rising / ▶Stable / ▼Cooling</span>
+        <span class="section-sub">최근 4주 vs 직전 4주 기사량 비율 · ▲Rising / ▶Stable / ▼Cooling</span><span class="section-basis">{b_radar}</span>
       </div>
       {radar_html}
     </div>
@@ -4197,7 +4249,7 @@ def _build_full_html(
     <!-- 수요 검증 — 뉴스(공급/PR) vs 네이버 검색(수요) 삼각검증 -->
     <div class="section">
       <div class="section-title">
-        📡 수요 검증 <span class="section-sub">보도량(공급) vs 네이버 검색량(수요) 대조 — "진짜 무브인가, PR 노이즈인가"</span>
+        📡 수요 검증 <span class="section-sub">보도량(공급) vs 네이버 검색량(수요) 대조 — "진짜 무브인가, PR 노이즈인가"</span><span class="section-basis">{b_demand}</span>
       </div>
       {demand_html}
     </div>
@@ -4205,7 +4257,7 @@ def _build_full_html(
     <!-- 글로벌 검색 급등 (구글 트렌드) — 네이버(국내) 보완 -->
     <div class="section">
       <div class="section-title">
-        🔺 글로벌 검색 급등 <span class="section-sub">구글 트렌드 글로벌·미국·일본 — 최근7일 vs 직전28일 급증(네이버=국내 보완, 해외 수요 조기신호)</span>
+        🔺 글로벌 검색 급등 <span class="section-sub">구글 트렌드 글로벌·미국·일본 — 최근7일 vs 직전28일 급증(네이버=국내 보완, 해외 수요 조기신호)</span><span class="section-basis">{b_spike}</span>
       </div>
       {search_spikes_html}
     </div>
@@ -4213,7 +4265,7 @@ def _build_full_html(
     <!-- 경쟁사 악재 = 우리 기회 신호 -->
     <div class="section">
       <div class="section-title">
-        ⚠️ 경쟁사 악재 <span class="section-sub">리콜·품질이슈·논란·규제·실적악화 — 경쟁사 리스크 = 우리 반사 기회</span>
+        ⚠️ 경쟁사 악재 <span class="section-sub">리콜·품질이슈·논란·규제·실적악화 — 경쟁사 리스크 = 우리 반사 기회</span><span class="section-basis">{b_neg}</span>
       </div>
       {negative_signals_html}
     </div>
@@ -4221,7 +4273,7 @@ def _build_full_html(
     <!-- 경쟁사 성분 지형 (제조사 R&D 인텔) -->
     <div class="section">
       <div class="section-title">
-        🧪 경쟁사 성분 지형 <span class="section-sub">경쟁 신제품에 뜨는 성분(PDRN·엑소좀 등) — 언급수·주도 브랜드. 최근 30일</span>
+        🧪 경쟁사 성분 지형 <span class="section-sub">경쟁 신제품에 뜨는 성분(PDRN·엑소좀 등) — 언급수·주도 브랜드. 최근 30일</span><span class="section-basis">{b_ingr}</span>
       </div>
       {ingredient_trends_html}
     </div>
@@ -4237,7 +4289,7 @@ def _build_full_html(
     <!-- 해외 상표 출원 (브랜드 선행신호 — 시장 탭에서 이동) -->
     <div class="section">
       <div class="section-title">
-        🪧 해외 상표 출원 = 진출 선행신호 <span class="section-sub">경쟁사가 미국·일본에 낸 상표(자기출원·화장품류) — 뉴스보다 먼저 잡히는 진출·신제품 조짐</span>
+        🪧 해외 상표 출원 = 진출 선행신호 <span class="section-sub">경쟁사가 미국·일본에 낸 상표(자기출원·화장품류) — 뉴스보다 먼저 잡히는 진출·신제품 조짐</span><span class="section-basis">📅 최근 18개월({_bden(547)}~{_bt}) 출원분 기준</span>
       </div>
       {trademark_html}
     </div>
@@ -4303,7 +4355,7 @@ def _build_full_html(
     <!-- 아마존 리테일 순위 추세 — 실판매 채널 성과(누가 뜨고 지나) -->
     <div class="section">
       <div class="section-title">
-        🛒 아마존 리테일 순위 추세 <span class="section-sub">아마존 베스트셀러 실순위(공식 BSR) 일별 스냅샷 — 첫날 대비 순위 변동으로 실판매에서 누가 뜨고 지는지 · 최근 15일</span>
+        🛒 아마존 리테일 순위 추세 <span class="section-sub">아마존 베스트셀러 실순위(공식 BSR) 일별 스냅샷 — 첫날 대비 순위 변동으로 실판매에서 누가 뜨고 지는지 · 최근 15일</span><span class="section-basis">{b_amazon}</span>
       </div>
       {rank_trends_html}
     </div>
@@ -4311,7 +4363,7 @@ def _build_full_html(
     <!-- 국내 올리브영 (국내 최대 H&B 채널 — 아마존 해외와 대조) -->
     <div class="section">
       <div class="section-title">
-        🇰🇷 국내 올리브영 <span class="section-sub">국내 최대 H&amp;B 채널 — 선케어(간판) 국내 랭킹 + 급변동 + 경쟁사 리뷰 감성(평점·긍정/부정 키워드). 아마존(해외)↔올영(국내) 대조</span>
+        🇰🇷 국내 올리브영 <span class="section-sub">국내 최대 H&amp;B 채널 — 선케어(간판) 국내 랭킹 + 급변동 + 경쟁사 리뷰 감성(평점·긍정/부정 키워드). 아마존(해외)↔올영(국내) 대조</span><span class="section-basis">📅 {_bt} 최신 스냅샷 기준 · 리뷰 감성은 누적 반영</span>
       </div>
       {oliveyoung_html}
     </div>
@@ -4399,7 +4451,7 @@ def _build_full_html(
     <div class="section">
       <div class="section-title">
         HIGH/MED 기사 목록
-        <span class="section-sub" id="high-count-label">{len(high_articles)}건</span>
+        <span class="section-sub" id="high-count-label">{len(high_articles)}건</span><span class="section-basis">{b_high}</span>
         <button class="collapse-btn" id="articles-toggle" onclick="toggleArticlesSection()">▲ 접기</button>
       </div>
       <div id="articles-content">
@@ -4963,6 +5015,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         # 시장 성장 스토리(수출 YoY x 그 시장 경쟁사 활동) — 삼각검증 통합 뷰
         try:
             growth_story = get_market_growth_story(session)
+            growth_story["period"] = export_period    # 주간요약 수출 기준 표기용
         except Exception:
             growth_story = {"overall": None, "markets": []}
         # NICE BizLine 재무(비상장 포함, 연 단위) — 재무 탭
