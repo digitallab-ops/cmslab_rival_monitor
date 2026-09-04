@@ -293,9 +293,9 @@ def get_high_articles(
               AND {date_filter}
               {where_extras}
             ORDER BY
+                published_date DESC,          -- 기록은 최신순(날짜 뒤죽박죽 방지)
                 CASE importance WHEN 'high' THEN 0 ELSE 1 END,
-                COALESCE(strategic_score, 0) DESC,
-                published_date DESC
+                COALESCE(strategic_score, 0) DESC
             LIMIT :lim
         """),
         params,
@@ -763,15 +763,30 @@ def get_respond_feed(session: Session, days: int = 7) -> list[dict]:
     return [{"date": r[0], "brand": r[1], "text": r[2], "urgency": r[3]} for r in rows]
 
 
+_RESP_STOP = {"우리", "및", "통해", "전략", "등", "강화", "대응", "고려", "검토", "할", "것",
+              "수", "있다", "보인다", "시장", "제품", "라인", "진출", "확대", "선점", "맞대응",
+              "점검", "필요", "소구", "셀퓨전씨", "선케어", "더마", "관련", "위해", "있는",
+              "9월", "8월", "7월", "월", "일", "그리고", "하며", "하고", "했다", "한다"}
+
+
+def _resp_tokens(text: str) -> set:
+    import re as _re
+    return {t for t in _re.findall(r"[가-힣A-Za-z0-9]{2,}", text or "")
+            if t not in _RESP_STOP and not t.isdigit()}
+
+
 def record_respond_items(session: Session, items: list) -> int:
-    """오늘의 대응항목을 피드에 적재. 최근 7일 피드와 브랜드+문장유사도(≥0.6) 중복은
-    스킵(같은 사건 재등록 방지) → 하루 여러 번 재생성돼도 안전. 반환: 신규 적재 수."""
+    """오늘의 대응항목을 피드에 적재. 최근 7일 피드와 같은 브랜드+같은 사건(문장유사도
+    또는 내용토큰 3+ 겹침)이면 스킵 — 리워딩된 같은 이슈가 하루 여러 번/이틀 연속으로
+    중복 게시되던 문제 해결. 반환: 신규 적재 수."""
     from difflib import SequenceMatcher
     if not items:
         return 0
     try:
         _ensure_respond_feed(session)
         recent = get_respond_feed(session, days=7)   # 오늘 것 포함 → 재실행 시 재적재 방지
+        for e in recent:
+            e["_tok"] = _resp_tokens(e.get("text", ""))
         import datetime as _dtm
         today = _dtm.date.today().isoformat()
         added = 0
@@ -780,19 +795,24 @@ def record_respond_items(session: Session, items: list) -> int:
             txt = (it.get("text") or "").strip()
             if not txt:
                 continue
-            # 같은 브랜드(널 아님)가 오늘 이미 있으면 스킵(문장 리워딩으로 유사도 dedup을
-            # 빠져나가는 같은날 중복 방지) + 최근 7일 내 브랜드·문장유사도(≥0.6) 중복 스킵.
-            dup = any(
-                (b and e.get("brand") == b and e.get("date") == today)
-                or (e.get("brand") == b and SequenceMatcher(None, e.get("text", ""), txt).ratio() >= 0.6)
-                for e in recent)
+            tok = _resp_tokens(txt)
+            # 같은 브랜드 + 같은 사건 판정: 같은날 재등록 / 문장유사도≥0.55 / 내용토큰 3+ 겹침
+            def _same_event(e):
+                if e.get("brand") != b:
+                    return False
+                if b and e.get("date") == today:
+                    return True
+                if SequenceMatcher(None, e.get("text", ""), txt).ratio() >= 0.55:
+                    return True
+                return len(tok & e.get("_tok", set())) >= 3
+            dup = any(_same_event(e) for e in recent)
             if dup:
                 continue
             session.execute(text(f"""
                 INSERT INTO {DB_SCHEMA}.respond_feed (item_date, brand, text, urgency)
                 VALUES (CURRENT_DATE, :b, :t, :u)
             """), {"b": b, "t": txt, "u": it.get("urgency")})
-            recent.append({"brand": b, "text": txt, "date": today})  # 배치 내 중복도 방지
+            recent.append({"brand": b, "text": txt, "date": today, "_tok": tok})  # 배치 내 중복도 방지
             added += 1
         session.commit()
         return added

@@ -3710,8 +3710,22 @@ def _detect_bullet_brand(text: str) -> "str | None":
     return best
 
 
-def _action_evidence(brand: str, ctx: dict) -> tuple:
-    """브랜드의 '지금 대응' 근거 = 신호 칩 목록 + 근거 기사(HIGH 우선 top3)."""
+_EV_STOP = {"우리", "및", "통해", "전략", "등", "강화", "대응", "고려", "검토", "할", "것",
+            "수", "있다", "보인다", "시장", "제품", "라인", "진출", "확대", "선점", "맞대응",
+            "점검", "필요", "소구", "셀퓨전씨", "선케어", "더마", "관련", "위해", "있는", "통한",
+            "높음", "중간", "시급", "주목", "우세", "실질"}
+
+
+def _claim_tokens(text: str) -> set:
+    """주장/기사에서 매칭용 내용 토큰(2자+, 불용어·자사어 제외)."""
+    import re as _re
+    toks = _re.findall(r"[가-힣A-Za-z0-9]{2,}", text or "")
+    return {t for t in toks if t not in _EV_STOP and not t.isdigit()}
+
+
+def _action_evidence(brand: str, ctx: dict, claim: str = "") -> tuple:
+    """브랜드의 '지금 대응' 근거 = 신호 칩 + 근거 기사. 기사는 주장(claim) 키워드와
+    겹치는 것 우선 — 브랜드 top 기사만 뽑아 본문과 무관한 기사가 붙던 문제 해결."""
     signals = []
     m = next((x for x in (ctx.get("momentum") or []) if x.get("brand") == brand), None)
     if m and m.get("momentum"):
@@ -3737,6 +3751,15 @@ def _action_evidence(brand: str, ctx: dict) -> tuple:
     if sp and sp.get("spike_ratio"):
         signals.append(f'🔺 검색 {_esc(sp.get("geo",""))} <b>{sp["spike_ratio"]}x</b>')
     arts = [a for a in (ctx.get("high_articles") or []) if a.get("brand") == brand]
+    ct = _claim_tokens(claim)
+    if ct:
+        def _ov(a):
+            hay = f'{a.get("title_ko","")} {a.get("title","")} {a.get("details","") or ""}'
+            return len(ct & _claim_tokens(hay))
+        matched = sorted([a for a in arts if _ov(a) >= 1], key=lambda a: -_ov(a))
+        if matched:
+            return signals, matched[:3]   # 주장과 겹치는 기사만
+    # 폴백(주장 토큰 없거나 매칭 0): 브랜드 HIGH·스코어순
     arts.sort(key=lambda a: (a.get("importance") != "high", -(a.get("score") or 0)))
     return signals, arts[:3]
 
@@ -3748,11 +3771,11 @@ _URGENCY_BADGE = {
 }
 
 
-def _ev_details(brand: str, ctx: dict) -> str:
+def _ev_details(brand: str, ctx: dict, claim: str = "") -> str:
     """브랜드 '근거 보기' 펼침(신호 칩 + 근거 기사 + 전체 드릴다운). 없으면 빈 문자열."""
     if not brand:
         return ""
-    signals, arts = _action_evidence(brand, ctx)
+    signals, arts = _action_evidence(brand, ctx, claim)
     if not (signals or arts):
         return ""
     sig_html = "".join(f'<span class="ev-chip">{s}</span>' for s in signals) if signals else ""
@@ -3803,7 +3826,7 @@ def _render_action_banner(market_text: str, ctx: dict = None, feed: list = None)
             badge = f'<span class="insight-badge {cls}">{lab}</span>' if cls else ""
             d = it.get("date", "")
             dlabel = "오늘" if d == _today else _mmdd(d)
-            ev = _ev_details(it.get("brand"), ctx)
+            ev = _ev_details(it.get("brand"), ctx, it.get("text", ""))
             lis += (f'<li><span class="ab-day">{_esc(dlabel)}</span>'
                     f'<span class="ab-txt">{_esc(it.get("text",""))}{badge}{ev}</span></li>')
     else:
@@ -3812,7 +3835,7 @@ def _render_action_banner(market_text: str, ctx: dict = None, feed: list = None)
             return ""
         for b in resp:
             clean, badge = _urgency_badge(b)
-            ev = _ev_details(_detect_bullet_brand(clean), ctx)
+            ev = _ev_details(_detect_bullet_brand(clean), ctx, clean)
             lis += f'<li>{_esc(clean)}{badge}{ev}</li>'
     return (
         '<div class="action-banner">'
