@@ -4053,8 +4053,8 @@ _CX_STYLE = """<style>
 #cxtab .cx-axes{display:flex;flex-direction:column;gap:7px}
 #cxtab .cx-axis{display:grid;grid-template-columns:60px 1fr 92px;align-items:center;gap:9px;font-size:11.5px}
 #cxtab .cx-an{color:var(--cxmut);white-space:nowrap}
-#cxtab .cx-abar{height:9px;border-radius:5px;background:#0c1424;overflow:hidden}
-#cxtab .cx-afill{height:100%;border-radius:5px}
+#cxtab .cx-abar{display:block;height:9px;border-radius:5px;background:#0c1424;overflow:hidden}
+#cxtab .cx-afill{display:block;height:9px;border-radius:5px;min-width:2px}
 #cxtab .cx-av{text-align:right;color:var(--cxdim)}
 #cxtab .cx-av b{color:var(--cxink);font-weight:700}
 #cxtab .cx-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 15px}
@@ -4117,6 +4117,7 @@ _CX_SHELL = """<div id="cxtab">
     <span class="cx-lg-i"><i style="background:#93a0bd"></i>조용함=변화 적음</span>
   </div>
   <div class="cx-basis">\U0001F4C5 __BASIS__</div>
+  <div class="cx-basis">\U0001F504 __CADENCE__</div>
   <div id="cx-detail"><div class="cx-empty">브랜드 행을 클릭하면 “왜 이 점수·이 순위인지” 상세가 열립니다.</div></div>
 </div>"""
 
@@ -4220,9 +4221,9 @@ _CX_SCRIPT = r"""<script>
         +(b.neg?'<div class="cx-chip"><span class="cx-k">악재</span><span class="cx-v" style="color:#e8654e">있음</span></div>':'')
       +'</div>'
       +'<div class="cx-dmoves"><div class="cx-t">최근 움직임 — 무엇을 했고, 무슨 의미인가</div><ul>'+movesHTML+'</ul></div>'
-      +(b.angle?'<div class="cx-angle"><div class="cx-angle-t">→ 우리(셀퓨전씨)에게 주는 시사점</div><div class="cx-angle-b">'+esc(b.angle).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")+'</div></div>':"")
+      +(b.angle?'<div class="cx-angle"><div class="cx-angle-t">→ 시사점 · 대응 제언</div><div class="cx-angle-b">'+esc(b.angle).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")+'</div></div>':"")
       +evHTML
-      +'<div class="cx-dbasis">📅 <b>최근 4주</b> 기준 · 기사·네이버검색·구글검색·아마존·올리브영·매출·상표 <b>7가지 데이터</b>를 합쳐 자동으로 만든 요약입니다.</div>'
+      +'<div class="cx-dbasis">📅 <b>'+(window.CX_BASIS||"최근 4주")+'</b> 기준 · 기사·네이버검색·구글검색·아마존·올리브영·매출·상표 <b>7가지 데이터</b>를 합쳐 자동으로 만든 요약입니다.</div>'
       +'</div>';
     render();
     try{document.getElementById("cx-detail").scrollIntoView({behavior:"smooth",block:"nearest"});}catch(e){}
@@ -4341,15 +4342,19 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
     return json.dumps(out, ensure_ascii=False)
 
 
-def _render_competitor_tab(dossier_json: str, basis_text: str) -> str:
+def _render_competitor_tab(dossier_json: str, basis_text: str,
+                           detail_basis: str, cadence_text: str) -> str:
     """경쟁사 탭 본문 — 리더보드 + 드릴인 상세(JS). 근거자료 접이식은 호출측 f-string에서 붙임."""
     ax_js = ",".join(
         "{k:'%s',n:'%s',sp:'%s',c:'%s',w:%d}" % (k, n, sp, c, w)
         for (k, n, sp, c, w) in _CX_AX)
     return (_CX_STYLE
             + _CX_SHELL.replace("__BASIS__", html_lib.escape(basis_text))
+                       .replace("__CADENCE__", html_lib.escape(cadence_text))
             + "<script>window.CX_DATA=" + dossier_json
-            + ";window.CX_AX=[" + ax_js + "];</script>"
+            + ";window.CX_AX=[" + ax_js + "]"
+            + ";window.CX_BASIS=" + json.dumps(detail_basis, ensure_ascii=False)
+            + ";</script>"
             + _CX_SCRIPT)
 
 
@@ -4475,7 +4480,9 @@ def _build_full_html(
     competitor_tab_html = _render_competitor_tab(
         competitor_json,
         f"{_bden(28)} ~ {_bt} (최근 4주) 기준 · 기사·네이버검색·구글검색·아마존·올리브영·매출·상표 "
-        f"7가지 데이터 통합 · 순위 변동은 지난주 대비")
+        f"7가지 데이터 통합 · 순위 변동은 지난주 대비",
+        f"{_bden(28)} ~ {_bt} (최근 4주)",
+        "데이터는 매일 자동 수집·갱신 — 뉴스·리테일·올리브영 매일 · 상표 주기적 · 재무(NICE) 월 1회")
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
     activity_html     = _canvas_or_table_activity(distribution, has_chartjs)
