@@ -52,11 +52,11 @@ _ACT_LABEL = {
 def generate_brand_strategy_summary(brand: str, articles: list) -> str:
     """HIGH+MEDIUM 기사 → 분석적 전략 인사이트 (2섹션, 한국어).
 
-    ### 전략 요약 / ### 관전 포인트 형식. 프론트가 '### 라벨'로 분할 렌더.
+    ### 한줄 요약 / ### 최근 움직임 / ### 관전 포인트 형식. 프론트가 '### 라벨'로 분할 렌더.
     articles: [{imp, act, title_ko, details, date}, ...]
     """
     if not articles:
-        return f"### 전략 요약\n{brand}의 최근 주목할 만한 활동이 없습니다."
+        return f"### 한줄 요약\n{brand}의 최근 주목할 만한 활동이 없습니다."
 
     article_lines = "\n".join(
         f"- [{a['imp'].upper()}] {a.get('title_ko','')} / {a.get('details','')[:140]} ({a.get('act','')}, {a.get('date','')})"
@@ -74,10 +74,14 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
 {CMS_PROFILE}
 
 이 브랜드의 움직임을 **날카롭게** 분석하세요. 뭉툭한 서술("~하고 있다", "경쟁력을 강화 중") 절대 금지.
-반드시 아래 2개 섹션 형식으로 (머리말은 `### `로 시작):
+어려운 내부 용어(모멘텀·PR우세 등) 대신 쉬운 말로. 반드시 아래 3개 섹션 형식으로 (머리말은 `### `로 시작):
 
-### 전략 요약
-{brand}의 핵심 전략을 관통하는 **한 문장 결론 + 근거 1문장**. 구체 사실(채널명·국가·파트너·수치)로 못박을 것. 여러 활동이면 그 밑에 깔린 하나의 의도로 꿰어라.
+### 한줄 요약
+{brand}가 지금 왜 주목되는지 **한 문장**으로. 결론부터, 핵심 사실(성장세·채널·국가·수치)을 굵게(**...**).
+
+### 최근 움직임
+가장 중요한 활동 2~3개를 각각 "무엇을 했다 — 그래서 무슨 의미다" 형식의 불릿으로.
+한 줄 안에 구체 사실(제품·채널·국가·파트너)과 그 의도/영향을 함께 담아라. 띡 한 줄로 끝내지 말 것.
 
 ### 관전 포인트
 셀퓨전씨 입장에서의 시사점 1~2문장. 다음 중 최소 하나를 담되:
@@ -93,7 +97,7 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            max_tokens=450,
+            max_tokens=600,
             temperature=0.4,
             messages=[{"role": "user", "content": prompt}],
         )

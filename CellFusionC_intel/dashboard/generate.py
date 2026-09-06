@@ -62,6 +62,7 @@ from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
     generate_opportunity_actions, generate_trademark_reads,
 )
+from analytics.history import get_score_trend
 from storage.models import get_session
 from config.brands import (ALL_BRANDS, BRAND_KO_NAMES, ACTIVITY_GROUPS,
                             ACTIVITY_GROUP_ORDER, ACTIVITY_GROUP_OF, STORE_ONLY_ACTS)
@@ -3973,6 +3974,385 @@ def _render_legend() -> str:
 # HTML 조립
 # ---------------------------------------------------------------------------
 
+# ── 경쟁사 탭: 근거형 리더보드 + 드릴인 ─────────────────────────────
+# 축 메타(내부키·화면라벨·강점표현·색·가중치%). 가중치는 get_brand_composite_score의 W와 일치.
+_CX_AX = [
+    ("momentum",   "성장세",   "성장 빠름",     "#8a7ff0", 22),
+    ("retail",     "해외판매", "해외 판매 좋음", "#4a80f0", 20),
+    ("google",     "해외검색", "해외 검색 급증", "#38bdf8", 16),
+    ("financial",  "매출",     "매출 탄탄",     "#2ba9b2", 14),
+    ("demand",     "국내검색", "국내 관심 많음", "#d9a441", 10),
+    ("oliveyoung", "올리브영", "올영 판매 좋음", "#e8654e",  8),
+    ("trademark",  "진출준비", "해외 진출 준비", "#5bbf8a", 10),
+]
+_CX_GEO = {"": "글로벌", "GLOBAL": "글로벌", "WORLD": "글로벌",
+           "US": "미국", "USA": "미국", "JP": "일본", "KR": "한국"}
+
+_CX_STYLE = """<style>
+#cxtab{--cxink:#e7ecf7;--cxmut:#93a0bd;--cxdim:#6b769a;--cxline:#26314e;--cxline2:#333f60;
+  --cxpanel:#141d33;--cxpanel2:#1b263f;--cxcobalt:#4a80f0;--cxteal:#2ba9b2;--cxgold:#d9a441;
+  color:var(--cxink);font-variant-numeric:tabular-nums}
+#cxtab .cx-crit{background:var(--cxpanel);border:1px solid var(--cxline);border-radius:12px;padding:15px 17px;margin:0 0 14px}
+#cxtab .cx-crit-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:11px}
+#cxtab .cx-crit-t{font-size:14px;font-weight:700}
+#cxtab .cx-q{font-size:11px;color:var(--cxcobalt);border:1px solid rgba(74,128,240,.35);border-radius:20px;padding:2px 8px;cursor:help}
+#cxtab .cx-weights{display:flex;flex-wrap:wrap;gap:6px}
+#cxtab .cx-wchip{font-size:11px;padding:3px 8px;border-radius:6px;font-weight:600;background:var(--cxpanel2);border:1px solid var(--cxline)}
+#cxtab .cx-wchip i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+#cxtab .cx-method{font-size:12px;color:var(--cxmut);line-height:1.6;margin-top:11px;padding-top:11px;border-top:1px dashed var(--cxline);display:none}
+#cxtab .cx-method.show{display:block}
+#cxtab .cx-method b{color:var(--cxink)}
+#cxtab .cx-sortbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+#cxtab .cx-lbl{font-size:12px;color:var(--cxdim)}
+#cxtab .cx-sbtn{font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:20px;cursor:pointer;background:var(--cxpanel);border:1px solid var(--cxline);color:var(--cxmut)}
+#cxtab .cx-sbtn.on{background:rgba(74,128,240,.16);border-color:var(--cxcobalt);color:#cfe0ff}
+#cxtab .cx-board{background:var(--cxpanel);border:1px solid var(--cxline);border-radius:12px;overflow:hidden}
+#cxtab .cx-bhead,#cxtab .cx-lrow{display:grid;grid-template-columns:54px 130px 1fr 78px 66px 66px 16px;align-items:center;gap:12px}
+#cxtab .cx-bhead{padding:10px 16px;border-bottom:1px solid var(--cxline);font-size:11px;color:var(--cxdim);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+#cxtab .cx-bhead .cx-r{text-align:right}
+#cxtab .cx-lrow{padding:12px 16px;cursor:pointer;border-bottom:1px solid rgba(38,49,78,.55)}
+#cxtab .cx-lrow:last-child{border-bottom:none}
+#cxtab .cx-lrow:hover{background:var(--cxpanel2)}
+#cxtab .cx-lrow.sel{background:linear-gradient(90deg,rgba(74,128,240,.13),transparent);box-shadow:inset 3px 0 0 var(--cxcobalt)}
+#cxtab .cx-rank{display:flex;align-items:center;gap:6px}
+#cxtab .cx-rnum{font-size:19px;font-weight:750;width:22px;text-align:center}
+#cxtab .cx-rnum.top{color:var(--cxgold)}
+#cxtab .cx-rdelta{font-size:10.5px;font-weight:700}
+#cxtab .cx-up{color:var(--cxteal)} #cxtab .cx-flat{color:var(--cxmut)} #cxtab .cx-dn{color:#e8654e}
+#cxtab .cx-bname{font-weight:650;font-size:15px}
+#cxtab .cx-btier{font-size:10px;color:var(--cxgold);margin-left:4px}
+#cxtab .cx-scorewrap{display:flex;flex-direction:column;gap:5px}
+#cxtab .cx-scoretop{display:flex;align-items:baseline;gap:8px}
+#cxtab .cx-scoreval{font-size:17px;font-weight:750}
+#cxtab .cx-scorewhy{font-size:11px;color:var(--cxdim)}
+#cxtab .cx-stack{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#0c1424}
+#cxtab .cx-seg{height:100%}
+#cxtab .cx-mo{font-weight:700;font-size:13.5px;text-align:right}
+#cxtab .cx-spark{display:block}
+#cxtab .cx-verd{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;text-align:center;white-space:nowrap}
+#cxtab .cx-chev{color:var(--cxdim);text-align:center}
+#cxtab .cx-legend{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin:11px 2px 0;font-size:11.5px;color:var(--cxmut)}
+#cxtab .cx-lg-t{font-weight:700;color:var(--cxink)}
+#cxtab .cx-lg-d{color:var(--cxdim)}
+#cxtab .cx-lg-i i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+#cxtab .cx-basis{font-size:11.5px;color:var(--cxdim);margin:8px 2px 0}
+#cxtab #cx-detail{background:linear-gradient(180deg,#16213a,#131c30);border:1px solid var(--cxcobalt);border-radius:12px;margin:22px 0 0;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+#cxtab .cx-empty{padding:32px 18px;text-align:center;color:var(--cxdim);font-size:13.5px}
+#cxtab .cx-dhead{display:flex;align-items:center;gap:10px;padding:15px 18px 12px;border-bottom:1px solid var(--cxline)}
+#cxtab .cx-dpin{font-size:11px;font-weight:700;color:var(--cxcobalt);background:rgba(74,128,240,.14);border:1px solid rgba(74,128,240,.3);padding:2px 8px;border-radius:5px}
+#cxtab .cx-dname{font-size:19px;font-weight:750}
+#cxtab .cx-dtier{font-size:11px;color:var(--cxgold);border:1px solid rgba(217,164,65,.4);border-radius:4px;padding:1px 6px}
+#cxtab .cx-dbody{padding:15px 18px 17px}
+#cxtab .cx-dlead{font-size:15.5px;line-height:1.55;margin:0 0 15px;color:#eef2fb}
+#cxtab .cx-dlead b{color:#fff}
+#cxtab .cx-why{background:rgba(74,128,240,.06);border:1px solid var(--cxline);border-radius:10px;padding:13px 14px;margin:0 0 15px}
+#cxtab .cx-why-h{display:flex;align-items:baseline;gap:8px;margin-bottom:11px}
+#cxtab .cx-why-h .cx-lab{font-size:12px;color:var(--cxmut);font-weight:600}
+#cxtab .cx-why-h .cx-sc{font-size:22px;font-weight:800}
+#cxtab .cx-why-h .cx-rk{font-size:12px;color:var(--cxdim)}
+#cxtab .cx-axes{display:flex;flex-direction:column;gap:7px}
+#cxtab .cx-axis{display:grid;grid-template-columns:60px 1fr 92px;align-items:center;gap:9px;font-size:11.5px}
+#cxtab .cx-an{color:var(--cxmut);white-space:nowrap}
+#cxtab .cx-abar{height:9px;border-radius:5px;background:#0c1424;overflow:hidden}
+#cxtab .cx-afill{height:100%;border-radius:5px}
+#cxtab .cx-av{text-align:right;color:var(--cxdim)}
+#cxtab .cx-av b{color:var(--cxink);font-weight:700}
+#cxtab .cx-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 15px}
+#cxtab .cx-chip{background:var(--cxpanel2);border:1px solid var(--cxline);border-radius:7px;padding:6px 10px;font-size:12px}
+#cxtab .cx-chip .cx-k{color:var(--cxdim);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;display:block}
+#cxtab .cx-chip .cx-v{font-weight:700;font-size:14px}
+#cxtab .cx-dmoves{margin:0 0 14px}
+#cxtab .cx-dmoves .cx-t{font-size:12px;color:var(--cxmut);margin:0 0 6px;font-weight:600}
+#cxtab .cx-dmoves ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
+#cxtab .cx-dmoves li{font-size:13px;padding-left:16px;position:relative;color:#d3dcf0}
+#cxtab .cx-dmoves li::before{content:"▸";position:absolute;left:0;color:var(--cxcobalt)}
+#cxtab .cx-angle{background:linear-gradient(90deg,rgba(43,169,178,.12),rgba(74,128,240,.06));border:1px solid rgba(43,169,178,.35);border-left:3px solid var(--cxteal);border-radius:9px;padding:12px 14px;margin:0 0 6px}
+#cxtab .cx-angle-t{font-size:12.5px;font-weight:700;color:var(--cxteal);margin-bottom:6px}
+#cxtab .cx-angle-b{font-size:13.5px;line-height:1.6;color:#e4ebf8}
+#cxtab .cx-ev{border-top:1px solid var(--cxline);margin-top:12px}
+#cxtab .cx-ev summary{cursor:pointer;padding:11px 0 2px;font-size:12.5px;color:var(--cxmut);font-weight:600;list-style:none}
+#cxtab .cx-ev summary::-webkit-details-marker{display:none}
+#cxtab .cx-ev summary::before{content:"▸ ";color:var(--cxdim)}
+#cxtab .cx-ev[open] summary::before{content:"▾ "}
+#cxtab .cx-evtext{font-size:13px;color:#c3cde3;line-height:1.65;padding:8px 0 4px}
+#cxtab .cx-evtext .cx-h{color:var(--cxteal);font-weight:700;display:block;margin-top:9px}
+#cxtab .cx-dbasis{margin-top:13px;padding-top:11px;border-top:1px dashed var(--cxline);font-size:11.5px;color:var(--cxdim)}
+#cxtab .cx-dbasis b{color:var(--cxmut);font-weight:600}
+@media(max-width:720px){
+  #cxtab .cx-bhead,#cxtab .cx-lrow{grid-template-columns:44px 1fr 96px 56px 16px}
+  #cxtab .cx-c-spark,#cxtab .cx-c-verd{display:none}
+}
+.evidence-fold{margin-top:22px;border:1px solid #26314e;border-radius:12px;background:rgba(20,29,51,.4);padding:0 16px}
+.evidence-fold>summary{cursor:pointer;padding:14px 2px;font-size:13.5px;font-weight:600;color:#93a0bd;list-style:none}
+.evidence-fold>summary::-webkit-details-marker{display:none}
+.evidence-fold>summary::before{content:"▸ ";color:#6b769a}
+.evidence-fold[open]>summary::before{content:"▾ "}
+.evidence-fold .section:first-of-type{margin-top:4px}
+</style>"""
+
+_CX_SHELL = """<div id="cxtab">
+  <div class="cx-crit">
+    <div class="cx-crit-top"><span class="cx-crit-t">\U0001F4CA 종합 점수 = 7가지를 합친 값 · 해외 비중 큼</span>
+      <span class="cx-q" onclick="cxToggleMethod()">ⓘ 자세히</span></div>
+    <div class="cx-weights" id="cx-weights"></div>
+    <div class="cx-method" id="cx-method"><b>왜 이렇게 정했나:</b> 기사량 하나로 순위를 매기면 “홍보 많이 한 브랜드”가 1등이 되는 착시가 생깁니다. 그래서 성장 속도·해외 판매·해외 검색·매출·국내 검색·올리브영·진출 준비(상표) 7가지를 각각 0~100점으로 맞춰 합쳤습니다. 이 대시보드는 <b>해외 공략용</b>이라 해외판매·해외검색을 특히 무겁게(20·16%), 국내는 중요하지만 낮게(국내검색10·올리브영8%) 뒀습니다. 없는 값은 빼고 남은 항목으로 다시 계산합니다. 위 정렬 버튼을 바꾸면 “당신 기준의 1등”을 볼 수 있습니다.</div>
+  </div>
+  <div class="cx-sortbar"><span class="cx-lbl">이 기준으로 순위 보기</span>
+    <button class="cx-sbtn on" data-k="score">종합</button>
+    <button class="cx-sbtn" data-k="mo">성장세</button>
+    <button class="cx-sbtn" data-k="retail">해외판매</button>
+    <button class="cx-sbtn" data-k="google">해외검색</button>
+    <button class="cx-sbtn" data-k="demand">국내검색</button>
+    <button class="cx-sbtn" data-k="financial">매출</button>
+  </div>
+  <div class="cx-board">
+    <div class="cx-bhead"><span>순위</span><span>브랜드</span><span>종합점수 · 무엇이 높나</span><span class="cx-c-spark">4주 흐름</span><span class="cx-r">성장세</span><span class="cx-c-verd">국내 반응</span><span></span></div>
+    <div id="cx-rows"></div>
+  </div>
+  <div class="cx-legend">
+    <span class="cx-lg-t">국내 반응</span><span class="cx-lg-d">기사(홍보) vs 네이버 검색(관심) 비교 —</span>
+    <span class="cx-lg-i"><i style="background:#2ba9b2"></i>실제 수요=둘 다 늚</span>
+    <span class="cx-lg-i"><i style="background:#d9a441"></i>숨은 수요=검색이 먼저</span>
+    <span class="cx-lg-i"><i style="background:#e8654e"></i>홍보 위주=기사만</span>
+    <span class="cx-lg-i"><i style="background:#93a0bd"></i>조용함=변화 적음</span>
+  </div>
+  <div class="cx-basis">\U0001F4C5 __BASIS__</div>
+  <div id="cx-detail"><div class="cx-empty">브랜드 행을 클릭하면 “왜 이 점수·이 순위인지” 상세가 열립니다.</div></div>
+</div>"""
+
+_CX_SCRIPT = r"""<script>
+(function(){
+  var AX=window.CX_AX, DATA=window.CX_DATA||{};
+  var B=Object.keys(DATA).map(function(k){return DATA[k];});
+  var VERD={real:{lab:"실제 수요",c:"#2ba9b2",bg:"rgba(43,169,178,.16)",desc:"기사도 늘고 검색도 늚"},
+    latent:{lab:"숨은 수요",c:"#d9a441",bg:"rgba(217,164,65,.16)",desc:"검색이 기사보다 먼저 늚"},
+    pr:{lab:"홍보 위주",c:"#e8654e",bg:"rgba(232,101,78,.16)",desc:"기사만 늘고 검색은 그대로"},
+    stable:{lab:"조용함",c:"#93a0bd",bg:"rgba(147,160,189,.14)",desc:"큰 변화 없음"}};
+  var curSort="score", sel=null;
+  function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function moClass(m){return m>=1.15?"cx-up":(m<=0.9?"cx-dn":"cx-flat");}
+  function moArrow(m){return m>=1.15?"▲":(m<=0.9?"▼":"▶");}
+  function vinfo(v){return VERD[v]||VERD.stable;}
+  function sparkSVG(a,w,h,color){
+    if(!a||a.length<2) return "";
+    var mn=Math.min.apply(null,a),mx=Math.max.apply(null,a),rng=(mx-mn)||1;
+    var pts=a.map(function(v,i){return (i/(a.length-1)*(w-2)+1).toFixed(1)+","+(h-1-((v-mn)/rng)*(h-2)).toFixed(1);}).join(" ");
+    var lx=w-1,ly=h-1-((a[a.length-1]-mn)/rng)*(h-2);
+    return '<svg class="cx-spark" width="'+w+'" height="'+h+'"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.6" stroke-linejoin="round"/><circle cx="'+lx+'" cy="'+ly.toFixed(1)+'" r="2" fill="'+color+'"/></svg>';
+  }
+  function topSp(b){
+    return AX.map(function(a){return {sp:a.sp,c:a.w*(b.subs[a.k]||0)};}).sort(function(x,y){return y.c-x.c;}).slice(0,2).map(function(x){return x.sp;}).join(" · ");
+  }
+  function stack(b){
+    var tot=0; AX.forEach(function(a){var s=b.subs[a.k]; if(s!=null) tot+=a.w*s;});
+    if(tot<=0) return '<div class="cx-stack"></div>';
+    var segs=AX.map(function(a){var s=b.subs[a.k]; if(s==null) return "";
+      var wpct=(a.w*s/tot)*(b.score||0); return '<div class="cx-seg" style="width:'+wpct.toFixed(1)+'%;background:'+a.c+'"></div>';}).join("");
+    return '<div class="cx-stack">'+segs+'</div>';
+  }
+  function keyOf(b,k){
+    if(k==="mo")return b.mult; if(k==="score")return b.score;
+    return (b.subs&&b.subs[k]!=null)?b.subs[k]:-1;
+  }
+  function ruleHead(b){
+    var p=[];
+    if(b.mult>=1.3)p.push("<b>성장세 가파름</b>(4주 "+b.mult.toFixed(1)+"배)");
+    else if(b.mult<=0.8)p.push("<b>성장세 둔화</b>");
+    if(b.gt)p.push("해외("+esc(b.gt.geo)+") 검색 급등");
+    if(b.verdict)p.push(vinfo(b.verdict).lab);
+    return p.join(" · ")||(esc(b.n)+"의 최근 신호 요약");
+  }
+  function render(){
+    var arr=B.slice().sort(function(a,b){return keyOf(b,curSort)-keyOf(a,curSort);});
+    document.getElementById("cx-rows").innerHTML=arr.map(function(b,i){
+      var rank=i+1, v=vinfo(b.verdict);
+      var dr=(curSort==="score"&&b.prevRank)?(b.prevRank-rank):null;
+      var delta=(dr==null)?"":(dr>0?'<span class="cx-rdelta cx-up">▲'+dr+'</span>':(dr<0?'<span class="cx-rdelta cx-dn">▼'+(-dr)+'</span>':'<span class="cx-rdelta cx-flat">–</span>'));
+      return '<div class="cx-lrow" data-n="'+esc(b.n)+'">'
+        +'<div class="cx-rank"><span class="cx-rnum '+(rank===1?"top":"")+'">'+rank+'</span>'+delta+'</div>'
+        +'<div><span class="cx-bname">'+esc(b.n)+'</span>'+(b.tier===1?'<span class="cx-btier">★1군</span>':'')+'</div>'
+        +'<div class="cx-scorewrap"><div class="cx-scoretop"><span class="cx-scoreval">'+(b.score||0)+'</span><span class="cx-scorewhy">강점 · '+esc(topSp(b))+'</span></div>'+stack(b)+'</div>'
+        +'<div class="cx-c-spark">'+sparkSVG(b.spark,68,20,v.c)+'</div>'
+        +'<div class="cx-mo '+moClass(b.mult)+'">'+moArrow(b.mult)+' '+b.mult.toFixed(1)+'배</div>'
+        +'<div class="cx-c-verd"><span class="cx-verd" style="color:'+v.c+';background:'+v.bg+'">'+v.lab+'</span></div>'
+        +'<div class="cx-chev">›</div></div>';
+    }).join("");
+    var rows=document.querySelectorAll("#cxtab .cx-lrow");
+    Array.prototype.forEach.call(rows,function(r){
+      r.addEventListener("click",function(){pick(r.getAttribute("data-n"));});
+      if(r.getAttribute("data-n")===sel)r.classList.add("sel");
+    });
+  }
+  function pick(name){
+    sel=name;
+    var b=null; for(var i=0;i<B.length;i++){if(B[i].n===name){b=B[i];break;}}
+    if(!b)return;
+    var arr=B.slice().sort(function(a,c){return keyOf(c,curSort)-keyOf(a,curSort);});
+    var rank=0; for(var j=0;j<arr.length;j++){if(arr[j].n===name){rank=j+1;break;}}
+    var v=vinfo(b.verdict);
+    var axesHTML=AX.map(function(a){
+      var val=b.subs[a.k], has=(val!=null);
+      return '<div class="cx-axis"><span class="cx-an">'+a.n+'</span>'
+        +'<span class="cx-abar"><span class="cx-afill" style="width:'+(has?val:0)+'%;background:'+a.c+'"></span></span>'
+        +'<span class="cx-av">'+(has?('<b>'+val+'</b>/100 ×'+a.w+'%'):'<span style="opacity:.5">데이터 없음</span>')+'</span></div>';
+    }).join("");
+    var movesArr=(b.moves&&b.moves.length)?b.moves:(b.arts||[]);
+    var movesHTML=movesArr.length
+      ? movesArr.map(function(m){return "<li>"+esc(m)+"</li>";}).join("")
+      : '<li style="opacity:.6">최근 뚜렷한 활동 기사가 부족합니다</li>';
+    var evParts=[];
+    if(b.arts&&b.arts.length) evParts.push('<span class="cx-h">핵심 기사</span>'+b.arts.map(function(a){return "· "+esc(a);}).join("<br>"));
+    if(b.tm>0) evParts.push('<span class="cx-h">해외 상표</span>'+b.tm+'건 출원 — 진출 준비 정황');
+    if(b.neg) evParts.push('<span class="cx-h">악재</span>'+esc(b.neg));
+    var evHTML=evParts.length?('<details class="cx-ev"><summary>근거 자세히 (핵심 기사·상표·악재)</summary><div class="cx-evtext">'+evParts.join("")+'</div></details>'):"";
+    document.getElementById("cx-detail").innerHTML=
+      '<div class="cx-dhead"><span class="cx-dpin">📌 선택 브랜드</span><span class="cx-dname">'+esc(b.n)+'</span>'+(b.tier===1?'<span class="cx-dtier">1군</span>':'')+'</div>'
+      +'<div class="cx-dbody">'
+      +'<p class="cx-dlead">'+(b.headline?esc(b.headline).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>"):ruleHead(b))+'</p>'
+      +'<div class="cx-why"><div class="cx-why-h"><span class="cx-lab">종합 점수</span><span class="cx-sc">'+(b.score||0)+'</span><span class="cx-rk">/ 100 · 현재 정렬 기준 '+rank+'위</span></div><div class="cx-axes">'+axesHTML+'</div></div>'
+      +'<div class="cx-chips">'
+        +'<div class="cx-chip"><span class="cx-k">성장세(4주)</span><span class="cx-v '+moClass(b.mult)+'">'+moArrow(b.mult)+' '+b.mult.toFixed(1)+'배</span></div>'
+        +'<div class="cx-chip"><span class="cx-k">국내 반응</span><span class="cx-v" style="color:'+v.c+'">'+v.lab+'</span></div>'
+        +(b.gt?'<div class="cx-chip"><span class="cx-k">해외 검색 '+esc(b.gt.geo)+'</span><span class="cx-v cx-up">▲'+b.gt.mult.toFixed(1)+'배</span></div>':'<div class="cx-chip"><span class="cx-k">해외 검색</span><span class="cx-v" style="color:#6b769a">잠잠</span></div>')
+        +'<div class="cx-chip"><span class="cx-k">주요 뉴스</span><span class="cx-v">'+b.high+'건</span></div>'
+        +'<div class="cx-chip"><span class="cx-k">기사량(4주)</span><span class="cx-v">'+b.recent4w+'</span></div>'
+        +(b.tm>0?'<div class="cx-chip"><span class="cx-k">해외 상표</span><span class="cx-v" style="color:#5bbf8a">냈음</span></div>':'')
+        +(b.neg?'<div class="cx-chip"><span class="cx-k">악재</span><span class="cx-v" style="color:#e8654e">있음</span></div>':'')
+      +'</div>'
+      +'<div class="cx-dmoves"><div class="cx-t">최근 움직임 — 무엇을 했고, 무슨 의미인가</div><ul>'+movesHTML+'</ul></div>'
+      +(b.angle?'<div class="cx-angle"><div class="cx-angle-t">→ 우리(셀퓨전씨)에게 주는 시사점</div><div class="cx-angle-b">'+esc(b.angle).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")+'</div></div>':"")
+      +evHTML
+      +'<div class="cx-dbasis">📅 <b>최근 4주</b> 기준 · 기사·네이버검색·구글검색·아마존·올리브영·매출·상표 <b>7가지 데이터</b>를 합쳐 자동으로 만든 요약입니다.</div>'
+      +'</div>';
+    render();
+    try{document.getElementById("cx-detail").scrollIntoView({behavior:"smooth",block:"nearest"});}catch(e){}
+  }
+  window.cxToggleMethod=function(){document.getElementById("cx-method").classList.toggle("show");};
+  function init(){
+    if(!document.getElementById("cxtab"))return;
+    document.getElementById("cx-weights").innerHTML=AX.slice().sort(function(a,b){return b.w-a.w;}).map(function(a){
+      return '<span class="cx-wchip"><i style="background:'+a.c+'"></i>'+a.n+' '+a.w+'%</span>';}).join("");
+    var btns=document.querySelectorAll("#cxtab .cx-sbtn");
+    Array.prototype.forEach.call(btns,function(btn){
+      btn.addEventListener("click",function(){
+        Array.prototype.forEach.call(btns,function(x){x.classList.remove("on");});
+        btn.classList.add("on"); curSort=btn.getAttribute("data-k"); render();
+      });
+    });
+    render();
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);
+  else init();
+})();
+</script>"""
+
+
+def _parse_insight_sections(strategy: str):
+    """LLM 전략 텍스트(### 한줄 요약/### 최근 움직임/### 관전 포인트) → (headline, moves[], angle)."""
+    secs, cur = {}, None
+    for line in (strategy or "").splitlines():
+        if line.startswith("### "):
+            cur = line[4:].strip()
+            secs[cur] = []
+        elif cur is not None:
+            secs[cur].append(line)
+
+    def grab(*names):
+        for want in names:
+            for k, v in secs.items():
+                if want in k:
+                    return "\n".join(v).strip()
+        return ""
+
+    headline = grab("한줄 요약", "전략 요약")
+    angle = grab("관전 포인트", "시사점")
+    moves = []
+    for ln in grab("최근 움직임").splitlines():
+        t = ln.strip().lstrip("-•*·∙◦ ").strip()
+        if t:
+            moves.append(t)
+    if not headline and not moves and not angle:          # 섹션 없는 폴백 텍스트
+        headline = (strategy or "").strip().split("\n")[0][:200]
+    return headline, moves[:4], angle
+
+
+def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
+                              negative_signals, trademark_sig, brand_insights, score_trend):
+    """경쟁사 드릴인용 — 브랜드별 신호를 하나로 병합해 JSON 문자열로. (데이터 로직 변경 없음)"""
+    radar = {r["brand"]: r for r in (brand_radar or [])}
+    demand = {d["brand"]: d for d in (demand_tri or [])}
+    gspk: dict = {}
+    for s in (search_spikes or []):
+        b = s.get("brand")
+        if not b:
+            continue
+        if b not in gspk or (s.get("spike_ratio", 0) > gspk[b]["mult"]):
+            gspk[b] = {"mult": round(s.get("spike_ratio", 0), 1),
+                       "geo": _CX_GEO.get((s.get("geo") or "").upper(), s.get("geo") or "해외")}
+    neg: dict = {}
+    for n in (negative_signals or []):
+        b = n.get("brand")
+        if b and b not in neg:
+            neg[b] = ((n.get("title") or "").strip()[:120]) or "리스크 신호 포착"
+    tmb: dict = {}
+    for tb in (trademark_sig or {}).get("brands", []):
+        tmb[tb["brand"]] = tmb.get(tb["brand"], 0) + (tb.get("recent") or 0)
+    # 지난 스냅샷 순위(순위 변동용)
+    prev_scores = {b: o["scores"][-2] for b, o in (score_trend or {}).items()
+                   if o.get("scores") and len(o["scores"]) >= 2}
+    prev_rank = {b: i for i, b in
+                 enumerate(sorted(prev_scores, key=lambda x: prev_scores[x], reverse=True), 1)}
+
+    out: dict = {}
+    for c in (composite or []):
+        b = c["brand"]
+        subs = c.get("subs") or {}
+        r = radar.get(b, {})
+        d = demand.get(b, {})
+        ins = (brand_insights or {}).get(b, {})
+        headline, moves, angle = _parse_insight_sections(ins.get("strategy", ""))
+        arts = [((a.get("title_ko") or a.get("title") or "").strip())
+                for a in (ins.get("key_articles") or [])]
+        arts = [a for a in arts if a][:3]
+        st = (score_trend or {}).get(b, {})
+        _ko = BRAND_KO_NAMES.get(b)
+        _name = (_ko[0] if isinstance(_ko, list) and _ko else (_ko or b))
+        out[b] = {
+            "n": _name,
+            "tier": c.get("tier", 2),
+            "score": c.get("score") or 0,
+            "rank": c.get("rank"),
+            "prevRank": prev_rank.get(b),
+            "subs": {k: (round(v * 100) if v is not None else None) for k, v in subs.items()},
+            "present": c.get("present") or {},
+            "mult": round(float(r.get("momentum") or 1.0), 2),
+            "recent4w": r.get("recent_4w", 0),
+            "high": r.get("recent_high", 0),
+            "verdict": c.get("verdict") or d.get("verdict"),
+            "gt": gspk.get(b),
+            "neg": neg.get(b),
+            "tm": tmb.get(b, 0),
+            "spark": list(st.get("scores") or [])[-8:],
+            "headline": headline,
+            "moves": moves,
+            "angle": angle,
+            "arts": arts,
+        }
+    return json.dumps(out, ensure_ascii=False)
+
+
+def _render_competitor_tab(dossier_json: str, basis_text: str) -> str:
+    """경쟁사 탭 본문 — 리더보드 + 드릴인 상세(JS). 근거자료 접이식은 호출측 f-string에서 붙임."""
+    ax_js = ",".join(
+        "{k:'%s',n:'%s',sp:'%s',c:'%s',w:%d}" % (k, n, sp, c, w)
+        for (k, n, sp, c, w) in _CX_AX)
+    return (_CX_STYLE
+            + _CX_SHELL.replace("__BASIS__", html_lib.escape(basis_text))
+            + "<script>window.CX_DATA=" + dossier_json
+            + ";window.CX_AX=[" + ax_js + "];</script>"
+            + _CX_SCRIPT)
+
+
 def _build_full_html(
     stats: dict,
     high_articles: list,
@@ -4006,6 +4386,7 @@ def _build_full_html(
     trademark_sig: dict = None,
     search_spikes: list = None,
     composite: list = None,
+    score_trend: dict = None,
     brand_signals: list = None,
     stories: list = None,
     rank_trends: list = None,
@@ -4033,6 +4414,7 @@ def _build_full_html(
     b_ingr    = _basis(30)                              # 성분 지형 최근 30일
     b_amazon  = _basis(15)                              # 아마존 스냅샷 최근 15일
     b_high    = _basis(days)                            # HIGH 신호 기간토글
+    b_7d      = f"{_bden(7)}~{_bt}"                     # 최근 7일 절대 날짜(인라인용)
 
     kpi_html          = _render_kpi_cards(stats)
     brands_list       = matrix.get("brands", [])
@@ -4086,6 +4468,14 @@ def _build_full_html(
         for m in _mk[:7]
     ) or '<div class="mk-row"><div class="why" style="padding:10px">수출 데이터 축적 중 (관세청 수집 후)</div></div>'
     insights_script   = _build_insights_script(brand_insights)
+    # 경쟁사 탭 — 근거형 리더보드 + 드릴인(브랜드 신호 병합 JSON)
+    competitor_json     = _build_competitor_dossier(
+        composite, brand_radar, demand_tri, search_spikes,
+        negative_signals, trademark_sig, brand_insights, score_trend)
+    competitor_tab_html = _render_competitor_tab(
+        competitor_json,
+        f"{_bden(28)} ~ {_bt} (최근 4주) 기준 · 기사·네이버검색·구글검색·아마존·올리브영·매출·상표 "
+        f"7가지 데이터 통합 · 순위 변동은 지난주 대비")
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
     activity_html     = _canvas_or_table_activity(distribution, has_chartjs)
@@ -4202,7 +4592,7 @@ def _build_full_html(
   <!-- ===== 탭: 브리핑 (심플 종합 — 지금 대응→오늘→이번주→스토리) ===== -->
   <div class="tab-panel active" id="tab-overview">
     <!-- 1) 이번 주 주목 관점 (최우선) -->
-    <div class="eyebrow"><span class="lab">이번 주 주목 관점</span><span class="rule"></span><span class="rt">최근 7일 · 매일 갱신</span></div>
+    <div class="eyebrow"><span class="lab">이번 주 주목 관점</span><span class="rule"></span><span class="rt">📅 {b_7d} · 매일 갱신</span></div>
     {action_banner_html}
 
     <!-- 2) 오늘 핵심 지표 -->
@@ -4220,7 +4610,7 @@ def _build_full_html(
     </div>
 
     <!-- 4) 주간 AI 종합 + 브랜드 신호 강도 -->
-    <div class="eyebrow"><span class="lab">주간 종합</span><span class="rule"></span><span class="rt">최근 7일 AI 인사이트</span></div>
+    <div class="eyebrow"><span class="lab">주간 종합</span><span class="rule"></span><span class="rt">📅 {b_7d} AI 인사이트</span></div>
     <div id="synth-wrap">{synth_html}</div>
     <div class="section">
       <div class="section-title">브랜드 신호 요약
@@ -4237,85 +4627,47 @@ def _build_full_html(
 
   <!-- ===== 탭: 경쟁사 ===== -->
   <div class="tab-panel" id="tab-brands">
-    <!-- Brand Radar — 모멘텀 기반 티어 신호 -->
-    <div class="section">
-      <div class="section-title">
-        Brand Radar
-        <span class="section-sub">최근 4주 vs 직전 4주 기사량 비율 · ▲Rising / ▶Stable / ▼Cooling</span><span class="section-basis">{b_radar}</span>
-      </div>
-      {radar_html}
-    </div>
+    {competitor_tab_html}
 
-    <!-- 수요 검증 — 뉴스(공급/PR) vs 네이버 검색(수요) 삼각검증 -->
-    <div class="section">
-      <div class="section-title">
-        📡 수요 검증 <span class="section-sub">보도량(공급) vs 네이버 검색량(수요) 대조 — "진짜 무브인가, PR 노이즈인가"</span><span class="section-basis">{b_demand}</span>
-      </div>
-      {demand_html}
-    </div>
+    <!-- 근거 자료: cross-brand 원자료 상세표(기본 접힘) -->
+    <details class="evidence-fold">
+      <summary>📂 근거 자료 — 원자료 상세표 (수요검증·검색급등·악재·성분·상표·활동유형). 필요할 때 펼치기</summary>
 
-    <!-- 글로벌 검색 급등 (구글 트렌드) — 네이버(국내) 보완 -->
-    <div class="section">
-      <div class="section-title">
-        🔺 글로벌 검색 급등 <span class="section-sub">구글 트렌드 글로벌·미국·일본 — 최근7일 vs 직전28일 급증(네이버=국내 보완, 해외 수요 조기신호)</span><span class="section-basis">{b_spike}</span>
+      <div class="section">
+        <div class="section-title">📡 수요 검증 <span class="section-sub">보도량(공급) vs 네이버 검색량(수요) 대조</span><span class="section-basis">{b_demand}</span></div>
+        {demand_html}
       </div>
-      {search_spikes_html}
-    </div>
-
-    <!-- 경쟁사 악재 = 우리 기회 신호 -->
-    <div class="section">
-      <div class="section-title">
-        ⚠️ 경쟁사 악재 <span class="section-sub">리콜·품질이슈·논란·규제·실적악화 — 경쟁사 리스크 = 우리 반사 기회</span><span class="section-basis">{b_neg}</span>
+      <div class="section">
+        <div class="section-title">🔺 글로벌 검색 급등 <span class="section-sub">구글 트렌드 글로벌·미국·일본 급증</span><span class="section-basis">{b_spike}</span></div>
+        {search_spikes_html}
       </div>
-      {negative_signals_html}
-    </div>
-
-    <!-- 경쟁사 성분 지형 (제조사 R&D 인텔) -->
-    <div class="section">
-      <div class="section-title">
-        🧪 경쟁사 성분 지형 <span class="section-sub">경쟁 신제품에 뜨는 성분(PDRN·엑소좀 등) — 언급수·주도 브랜드. 최근 30일</span><span class="section-basis">{b_ingr}</span>
+      <div class="section">
+        <div class="section-title">⚠️ 경쟁사 악재 <span class="section-sub">리콜·품질이슈·논란·규제 — 우리 반사 기회</span><span class="section-basis">{b_neg}</span></div>
+        {negative_signals_html}
       </div>
-      {ingredient_trends_html}
-    </div>
-
-    <!-- 제품 전성분 인텔 (전성분→효능→우리 대응각) -->
-    <div class="section">
-      <div class="section-title">
-        🧴 제품 전성분 인텔 <span class="section-sub">경쟁 핵심 제품의 전성분→핵심성분·효능·피부타입→셀퓨전씨 대응각. 올영/아마존 실측 우선(없으면 추정)</span>
+      <div class="section">
+        <div class="section-title">🧪 경쟁사 성분 지형 <span class="section-sub">경쟁 신제품에 뜨는 성분·주도 브랜드</span><span class="section-basis">{b_ingr}</span></div>
+        {ingredient_trends_html}
       </div>
-      {ingredient_intel_html}
-    </div>
-
-    <!-- 해외 상표 출원 (브랜드 선행신호 — 시장 탭에서 이동) -->
-    <div class="section">
-      <div class="section-title">
-        🪧 해외 상표 출원 = 진출 선행신호 <span class="section-sub">경쟁사가 미국·일본에 낸 상표(자기출원·화장품류) — 뉴스보다 먼저 잡히는 진출·신제품 조짐</span><span class="section-basis">📅 최근 18개월({_bden(547)}~{_bt}) 출원분 기준</span>
+      <div class="section">
+        <div class="section-title">🧴 제품 전성분 인텔 <span class="section-sub">전성분→핵심성분·효능→셀퓨전씨 대응각</span></div>
+        {ingredient_intel_html}
       </div>
-      {trademark_html}
-    </div>
-
-    <div class="section">
-      <div class="section-title">브랜드별 HIGH 비중</div>
-      {brand_high_html}
-    </div>
-
-    <div class="section">
-      <div class="section-title">
-        브랜드별 활동 유형 구성
-        <span class="section-sub">전략 포지셔닝 비교</span>
+      <div class="section">
+        <div class="section-title">🪧 해외 상표 출원 <span class="section-sub">미국·일본 출원 — 진출 선행신호</span><span class="section-basis">📅 최근 18개월({_bden(547)}~{_bt}) 출원분</span></div>
+        {trademark_html}
       </div>
-      {brand_act_html}
-      <div class="legend-row" id="stacked-legend"></div>
-    </div>
-
-    <!-- Brand Insight Cards (Claude API 자동생성) -->
-    <div class="section" id="insight-section">
-      <div class="section-title">
-        브랜드별 전략 인사이트
-        <span class="section-sub">스택바 클릭 시 해당 브랜드로 이동</span>
+      <div class="section">
+        <div class="section-title">브랜드별 HIGH 비중</div>
+        {brand_high_html}
       </div>
-      <div class="insight-grid" id="insight-grid"></div>
-    </div>
+      <div class="section">
+        <div class="section-title">브랜드별 활동 유형 구성 <span class="section-sub">전략 포지셔닝 비교</span></div>
+        {brand_act_html}
+        <div class="legend-row" id="stacked-legend"></div>
+      </div>
+      <div id="insight-grid" style="display:none"></div>
+    </details>
   </div>
 
   <!-- ===== 탭: 우리 관점 ===== -->
@@ -5061,11 +5413,16 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             search_spikes = get_google_spikes(session)
         except Exception:
             search_spikes = []
-        # 브랜드 종합 스코어(모멘텀·재무·상표·수요 통합) — 실패 시 빈 리스트
+        # 브랜드 종합 스코어(7축 통합, 해외 중심) — 실패 시 빈 리스트
         try:
             composite = get_brand_composite_score(session)
         except Exception:
             composite = []
+        # 브랜드별 종합점수 주간 추세(스파크라인·순위변동용) — 히스토리 없으면 {}
+        try:
+            score_trend = get_score_trend(session, weeks=12)
+        except Exception:
+            score_trend = {}
         # 브랜드 신호 요약(직관형 — 실수치 라벨) : #2 재설계
         try:
             brand_signals = get_brand_signal_summary(session, limit=12)
@@ -5284,6 +5641,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         trademark_sig=trademark_sig,
         search_spikes=search_spikes,
         composite=composite,
+        score_trend=score_trend,
         brand_signals=brand_signals,
         stories=stories,
         category_battle=category_battle,

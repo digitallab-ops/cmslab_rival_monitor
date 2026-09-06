@@ -2047,6 +2047,39 @@ def get_search_momentum(session: Session) -> dict:
     return out
 
 
+def get_google_demand(session: Session) -> dict:
+    """
+    구글 트렌드(해외 검색 수요) — 브랜드별 최근 검색지수를 0~1로. 종합점수 '해외검색' 축.
+
+    google_trends(term/brand/geo/period/ratio)에서 브랜드×geo별 최근 4포인트 평균 ratio를
+    구해 geo 중 최고값을 채택(어느 해외 시장에서든 뜨면 반영). /100 정규화.
+    테이블 없거나 비면 {} 반환(비파괴 → 종합점수는 커버리지 재정규화로 처리).
+    반환: {brand: 0~1}
+    """
+    try:
+        rows = session.execute(text(f"""
+            WITH ranked AS (
+                SELECT brand, geo, ratio,
+                       ROW_NUMBER() OVER (PARTITION BY brand, geo ORDER BY period DESC) rn
+                FROM {DB_SCHEMA}.google_trends
+                WHERE brand IS NOT NULL
+            )
+            SELECT brand, AVG(ratio) FILTER (WHERE rn <= 4) AS recent
+            FROM ranked GROUP BY brand, geo
+        """)).fetchall()
+    except Exception:
+        return {}
+
+    best: dict = {}
+    for brand, recent in rows:
+        if recent is None:
+            continue
+        v = min(float(recent) / 100.0, 1.0)
+        if v > best.get(brand, 0.0):
+            best[brand] = round(v, 3)
+    return best
+
+
 def get_demand_triangulation(session: Session) -> list[dict]:
     """
     뉴스(공급/PR) vs 검색(수요) 삼각검증. 브랜드별로 두 모멘텀을 대조해 라벨링:
@@ -2241,19 +2274,20 @@ def get_brand_radar(session: Session) -> list[dict]:
 
 
 # 서브신호 → 한국어 라벨
-_COMPOSITE_DRV = {"momentum": "모멘텀", "financial": "실적", "trademark": "상표",
-                  "demand": "수요", "retail": "아마존", "oliveyoung": "올영"}
+_COMPOSITE_DRV = {"momentum": "성장세", "financial": "매출", "trademark": "진출준비",
+                  "demand": "국내검색", "retail": "해외판매", "oliveyoung": "올리브영",
+                  "google": "해외검색"}
 _VERDICT_DEMAND = {"real": 1.0, "latent": 0.7, "stable": 0.4, "pr": 0.2}
 
 
 def get_brand_composite_score(session: Session) -> list[dict]:
     """
-    브랜드 종합 스코어 — 모멘텀·재무·상표·수요·아마존·올영 6축을 0~100으로 통합.
+    브랜드 종합 스코어 — 성장세·해외판매·해외검색·매출·국내검색·올영·상표 7축을 0~100으로 통합.
 
-    기존 쿼리 조합(새 SQL 없음). 각 서브신호 0~1 정규화 후, 결측은 제외하고
-    존재하는 축의 가중치로 재정규화 + 커버리지 계수(여러 축이 높아야 고득점).
-    실판매(아마존·올영) 축을 포함해 '조용한 실판매 강자'도 반영. 전체 실패 시 [].
-    반환: [{brand,tier,score,rank,subs{6:0~1|None},present{6:bool},verdict,drivers[상위2]}]
+    이 대시보드는 해외 공략용 → 해외 신호(해외판매·해외검색) 가중치를 크게. 각 서브신호
+    0~1 정규화 후, 결측은 제외하고 존재하는 축의 가중치로 재정규화 + 커버리지 계수(여러 축이
+    높아야 고득점). 실판매(아마존·올영)+해외검색(구글) 축으로 '조용한 실판매 강자'도 반영. 실패 시 [].
+    반환: [{brand,tier,score,rank,subs{7:0~1|None},present{7:bool},verdict,drivers[상위2]}]
     """
     try:
         mo_list = compute_brand_momentum(session)
@@ -2267,9 +2301,7 @@ def get_brand_composite_score(session: Session) -> list[dict]:
         for b in get_trademark_signals(session).get("brands", []):
             tm_sum[b["brand"]] = tm_sum.get(b["brand"], 0) + (b.get("recent") or 0)
         demand = {d["brand"]: d for d in get_demand_triangulation(session)}
-        spikes: dict = {}
-        for s in get_google_spikes(session):
-            spikes[s["brand"]] = max(spikes.get(s["brand"], 0), s["spike_ratio"])
+        gdem = get_google_demand(session)          # 해외검색(구글) 축 — {brand: 0~1}
         # 실판매 축 — 아마존(해외) 최고순위 + 올영(국내) 최고순위
         retail_perf = get_retail_performance(session)          # {brand: {rank(최고), ...}}
         oy_best: dict = {}
@@ -2291,9 +2323,9 @@ def get_brand_composite_score(session: Session) -> list[dict]:
     recent_vals = sorted(m["recent_4w"] for m in mo_list) or [1]
     p90 = recent_vals[max(0, int(len(recent_vals) * 0.9) - 1)] or 1  # 볼륨 정규화 분모
     tm_max = max(tm_sum.values()) if tm_sum else 0
-    # 모멘텀 비중을 낮추고 실판매(아마존·올영) 축을 추가 — 뉴스 편중 완화, 실성과 반영.
-    W = {"momentum": 0.28, "financial": 0.18, "demand": 0.14,
-         "trademark": 0.10, "retail": 0.18, "oliveyoung": 0.12}
+    # 해외 공략용 → 해외 신호(해외판매·해외검색) 최우선. 성장세는 유지, 국내는 낮게.
+    W = {"momentum": 0.22, "retail": 0.20, "google": 0.16, "financial": 0.14,
+         "demand": 0.10, "oliveyoung": 0.08, "trademark": 0.10}
 
     out = []
     for brand, tier in active:
@@ -2327,18 +2359,24 @@ def get_brand_composite_score(session: Session) -> list[dict]:
             subs["trademark"] = None
             present["trademark"] = False
 
-        # 수요 — verdict + 검색 급등 보너스
+        # 국내검색(네이버) 수요 — verdict 기반. 해외 검색은 별도 google 축으로 분리(이중계산 방지).
         d = demand.get(brand)
-        sp = spikes.get(brand)
         verdict = (d or {}).get("verdict")
-        if verdict or sp:
-            base = _VERDICT_DEMAND.get(verdict, 0.4) if verdict else 0.4
-            bonus = min(0.2 * ((sp or 1.0) - 1.0), 0.2) if sp else 0.0
-            subs["demand"] = round(min(base + bonus, 1.0), 3)
+        if verdict:
+            subs["demand"] = round(_VERDICT_DEMAND.get(verdict, 0.4), 3)
             present["demand"] = True
         else:
             subs["demand"] = None
             present["demand"] = False
+
+        # 해외검색(구글 트렌드) — 해외 시장 조기 수요. 데이터 있을 때만.
+        g = gdem.get(brand)
+        if g is not None:
+            subs["google"] = g
+            present["google"] = True
+        else:
+            subs["google"] = None
+            present["google"] = False
 
         # 아마존(해외) 실판매 — 최고순위 낮을수록 高. 1위=1.0, 50위+=0.
         rp = retail_perf.get(brand)
