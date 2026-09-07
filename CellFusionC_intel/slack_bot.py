@@ -171,33 +171,77 @@ app = AsyncApp(token=SLACK_BOT_TOKEN)
 _BOT_MENTION = re.compile(r"<@[A-Z0-9]+>")
 
 
-def _brand_command(text: str):
-    """신흥 브랜드 후보 명령. 명령이면 응답 문자열, 아니면 None(→ 일반 Q&A로)."""
+_APPROVE_VERBS = ("추가", "승인", "등록")
+_REJECT_VERBS = ("제외", "거절", "무시")
+# 브랜드 등록/제외(쓰기) 허용 사용자 — 슬랙 user ID 콤마구분. 비면 아무도 못 함(조회는 누구나).
+_BRAND_ADMINS = {x.strip() for x in os.getenv("SLACK_BRAND_ADMINS", "").split(",") if x.strip()}
+
+
+def _pending_candidates():
+    s = get_session()
+    try:
+        return s.execute(_sqltext(
+            f"SELECT name, ko_name, mention_count FROM {DB_SCHEMA}.brand_candidates "
+            f"WHERE status='pending' ORDER BY mention_count DESC, proposed_at DESC LIMIT 20")).fetchall()
+    finally:
+        s.close()
+
+
+def _brand_command(text: str, user_id: str = ""):
+    """신흥 브랜드 후보 명령. 명령이면 응답 문자열, 아니면 None(→ 일반 Q&A로).
+    조회(후보)는 누구나, 등록/제외(쓰기)는 SLACK_BRAND_ADMINS만."""
     t = (text or "").strip()
+    if t in ("내 아이디", "내아이디", "myid", "my id"):
+        return f"당신의 Slack ID: `{user_id}`  (브랜드 승인 권한이 필요하면 이 ID를 SLACK_BRAND_ADMINS에 추가)"
+
+    def _can_write():
+        return bool(_BRAND_ADMINS) and user_id in _BRAND_ADMINS
+
+    def _denied():
+        if not _BRAND_ADMINS:
+            return ("🔒 브랜드 등록 권한자가 아직 설정되지 않았어요. 서버 환경변수 "
+                    "`SLACK_BRAND_ADMINS`에 관리자 Slack ID를 넣어주세요. "
+                    f"(당신 ID: `{user_id}` — `내 아이디`로도 확인)")
+        return f"🔒 브랜드 등록/제외는 관리자만 가능해요. (당신 ID: `{user_id}`)"
+
     if t in ("후보", "브랜드 후보", "후보 목록"):
-        s = get_session()
         try:
-            rows = s.execute(_sqltext(
-                f"SELECT name, ko_name, mention_count FROM {DB_SCHEMA}.brand_candidates "
-                f"WHERE status='pending' ORDER BY mention_count DESC, proposed_at DESC LIMIT 20")).fetchall()
+            rows = _pending_candidates()
         except Exception as e:
             return f"⚠️ 후보 조회 실패: {e}"
-        finally:
-            s.close()
         if not rows:
             return "대기 중인 신흥 브랜드 후보가 없어요."
-        out = ["*신흥 브랜드 후보(대기)* — `추가 <브랜드>`로 등록 · `제외 <브랜드>`로 무시"]
+        out = ["*신흥 브랜드 후보(대기)* — `승인 <브랜드>`로 등록 · `제외 <브랜드>`로 무시"]
         for n, ko, c in rows:
             lbl = n + (f" ({ko})" if ko and ko != n else "")
             out.append(f"• {lbl} — 언급 {c}건")
         return "\n".join(out)
-    for verb, kind in (("추가", "approve"), ("제외", "reject")):
+    # "승인 <브랜드>" / "제외 <브랜드>" (브랜드 접두어도 허용)
+    verbs = [(v, "approve") for v in _APPROVE_VERBS] + [(v, "reject") for v in _REJECT_VERBS]
+    for verb, kind in verbs:
         for pfx in (verb + " ", "브랜드 " + verb + " "):
             if t.startswith(pfx):
                 name = t[len(pfx):].strip()
-                if not name:
-                    return f"어떤 브랜드를 {verb}할까요? 예) `{verb} 브랜드명`"
-                return _apply_brand(name, kind)
+                if name:
+                    if not _can_write():
+                        return _denied()
+                    return _apply_brand(name, kind)
+    # 브랜드명 없는 단독 명령("승인"·"추가"·"제외"…) → 대기 후보가 딱 1개면 그걸로 처리
+    bare = t.replace("브랜드", "").strip()
+    kind = "approve" if bare in _APPROVE_VERBS else ("reject" if bare in _REJECT_VERBS else None)
+    if kind:
+        if not _can_write():
+            return _denied()
+        try:
+            pend = _pending_candidates()
+        except Exception as e:
+            return f"⚠️ 후보 조회 실패: {e}"
+        if not pend:
+            return "대기 중인 후보가 없어요."
+        if len(pend) == 1:
+            return _apply_brand(pend[0][0], kind)
+        names = ", ".join(p[0] for p in pend)
+        return f"후보가 여러 개예요 — 브랜드명을 붙여주세요. 예) `{bare} {pend[0][0]}`\n대기: {names}"
     return None
 
 
@@ -245,7 +289,7 @@ async def _handle(event: dict, client, in_thread: bool):
                                       text="무엇을 물어볼까요? 예) `아누아 최근 미국 동향`, `베트남 시장 경쟁 상황`, `앰플 카테고리 압박`\n브랜드 관리: `후보` · `추가 <브랜드>` · `제외 <브랜드>`")
         return
 
-    _cmd = _brand_command(text)
+    _cmd = _brand_command(text, user)
     if _cmd is not None:
         await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=_cmd)
         return

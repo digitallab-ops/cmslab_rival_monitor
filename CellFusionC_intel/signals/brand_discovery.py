@@ -214,7 +214,8 @@ def _notify_slack(cands: list[dict]) -> None:
         logger.warning("슬랙 모듈 로드 실패: %s", e)
         return
     lines = [f"*🆕 신흥 브랜드 후보 {len(cands)}건* — 레이더에 없던 브랜드가 최근 뉴스에 떴어요",
-             "_승인: 봇에게 `추가 <브랜드>` · 목록: `후보` · 무시: `제외 <브랜드>`_", ""]
+             "_봇에게(@멘션): `승인 <브랜드>` 등록 · `후보` 목록 · `제외 <브랜드>` 무시_",
+             "_※ 등록/제외는 관리자만(SLACK_BRAND_ADMINS). 내 ID는 `내 아이디`_", ""]
     for c in cands[:15]:
         label = c["name"] + (f" ({c['ko']})" if c.get("ko") and c["ko"] != c["name"] else "")
         lines.append(f"• *{label}* — 언급 {c['count']}건")
