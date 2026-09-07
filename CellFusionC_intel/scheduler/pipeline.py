@@ -11,6 +11,7 @@
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from collectors.base_collector import BaseCollector
 from collectors.google_rss import GoogleRSSCollector
@@ -29,10 +30,24 @@ from storage.repository import (
     article_exists, save_article, get_recent_titles, save_collection_run,
     high_alert_is_duplicate, record_high_alert,
 )
-from config.settings import CLASSIFIER_MODEL_DETAIL, HIGH_ALERT_MIN_SCORE
+from config.settings import (CLASSIFIER_MODEL_DETAIL, HIGH_ALERT_MIN_SCORE,
+                             ALERT_MAX_AGE_DAYS, HIGH_ALERT_DEDUP_HOURS)
 from notifications.slack import notify_high_importance, notify_negative_signal
 
 logger = logging.getLogger(__name__)
+
+
+def _alert_fresh(article) -> bool:
+    """발행일이 ALERT_MAX_AGE_DAYS 이내여야 '속보' 발송. 옛뉴스 뒤늦은 재수집 차단."""
+    pd = getattr(article, "published_date", None)
+    if not pd:
+        return True                      # 날짜 없으면 과억제 방지 위해 통과
+    try:
+        if getattr(pd, "tzinfo", None) is not None:
+            pd = pd.replace(tzinfo=None)
+        return (datetime.utcnow() - pd) <= timedelta(days=ALERT_MAX_AGE_DAYS)
+    except Exception:
+        return True
 
 # 싱글턴 컬렉터 (피드 캐시 재사용)
 _google = GoogleRSSCollector()
@@ -145,10 +160,10 @@ def _run_single(
             if clf.importance == "high":
                 stats.high += 1
                 _score = getattr(clf, "strategic_score", 0) or 0
-                if _score >= HIGH_ALERT_MIN_SCORE and _focus != "incidental":
+                if _score >= HIGH_ALERT_MIN_SCORE and _focus != "incidental" and _alert_fresh(article):
                     try:
                         # 같은 사건 중복 속보 억제(발송 로그 대조) — 첫 건만 발송
-                        if high_alert_is_duplicate(session, article):
+                        if high_alert_is_duplicate(session, article, window_hours=HIGH_ALERT_DEDUP_HOURS):
                             logger.info("HIGH 속보 중복 억제: %s/%s %s",
                                         article.brand, article.country,
                                         (getattr(article, "title_ko", "") or "")[:40])
@@ -159,9 +174,9 @@ def _run_single(
                         pass
 
             # 경쟁사 악재(negative) → '기회 신호' 알림. HIGH로 이미 발송된 건은 중복 억제로 스킵.
-            if _sent == "negative" and _focus != "incidental" and clf.importance in ("high", "medium"):
+            if _sent == "negative" and _focus != "incidental" and clf.importance in ("high", "medium") and _alert_fresh(article):
                 try:
-                    if not high_alert_is_duplicate(session, article):
+                    if not high_alert_is_duplicate(session, article, window_hours=HIGH_ALERT_DEDUP_HOURS):
                         notify_negative_signal(article)
                         record_high_alert(session, article)
                 except Exception:

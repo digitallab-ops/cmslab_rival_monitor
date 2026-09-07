@@ -39,6 +39,11 @@ INSIGHT_MODEL_BRAND  = os.getenv("INSIGHT_MODEL_BRAND", "gpt-4o-mini")
 # HIGH 속보 Slack 즉시알림 문턱 — 이 strategic_score 이상만 발송('완전 하이'만).
 # 나머지 HIGH는 일간 브리핑으로 요약됨. (실측: 85↑ 하루 ~5건, 88↑ 하루 <1건)
 HIGH_ALERT_MIN_SCORE = int(os.getenv("HIGH_ALERT_MIN_SCORE", "85"))
+# 속보 발행 최신성 게이트 — 발행일이 이보다 오래된 기사는 '속보'로 안 보냄(뒤늦게 수집된 옛뉴스 차단).
+# 예: 6월 발탁 기사가 9월에 재수집돼도 속보 X. (브리핑·대시보드에는 정상 반영)
+ALERT_MAX_AGE_DAYS = int(os.getenv("ALERT_MAX_AGE_DAYS", "10"))
+# 같은 사건 속보 중복억제 창(시간). 72h → 168h(7일): 몇 주 걸쳐 찔끔 수집되는 같은 캠페인 반복 차단.
+HIGH_ALERT_DEDUP_HOURS = int(os.getenv("HIGH_ALERT_DEDUP_HOURS", "168"))
 
 # 의미 중복 병합
 EMBED_MODEL = "text-embedding-3-small"
