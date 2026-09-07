@@ -13,7 +13,8 @@ from openai import OpenAI
 
 from config.settings import OPENAI_API_KEY, DB_SCHEMA
 from config.brands import REGION_MAP
-from notifications.slack import send_weekly_briefing, send_daily_briefing
+from notifications.slack import (send_weekly_briefing, send_daily_briefing,
+                                 send_afternoon_digest)
 from storage.models import get_session, save_briefing
 from sqlalchemy import text
 
@@ -357,27 +358,28 @@ def generate_daily_briefing() -> str:
         send_daily_briefing("어제 새로 잡힌 주목할 경쟁 활동이 없습니다." + (signal_digest or ""), stats)
         return ""
 
-    data_prompt = _build_prompt_by_brand(rows, limit=45, detail_len=160)
+    data_prompt = _build_prompt_by_brand(rows, limit=60, detail_len=220)
     if signal_digest:
         data_prompt += "\n\n=== [정량 신호 요약] ===\n" + signal_digest
     system = (
-        "당신은 씨엠에스랩의 경쟁 인텔리전스 분석가입니다. 어제 수집된 경쟁사 활동을 아침 슬랙 브리핑으로 "
-        "정리하세요. 대시보드보다 훨씬 압축된, 한눈에 읽히는 버전입니다.\n\n"
+        "당신은 씨엠에스랩의 경쟁 인텔리전스 분석가입니다. 어제 수집된 경쟁사 활동을 출근길에 하나만 봐도 "
+        "'무슨 일이 있었고 우리가 뭘 할지'가 잡히는 아침 브리핑으로 정리하세요. 대시보드의 압축판입니다.\n\n"
         f"{_cms_profile()}\n\n"
         "규칙:\n"
-        "1) **브랜드별로 묶어서** 정리. 어제 의미 있는 활동이 있었던 브랜드만. 활동 없는 브랜드는 아예 언급 금지.\n"
-        "2) **핵심만 구체적으로** — '스킨케어 신제품' 식 뭉뚱그림 금지. 무슨 제품(제품명 명시)·무슨 내용인지 한 줄로.\n"
-        "3) **원문 링크**: 각 항목 끝에 제공된 URL을 슬랙 링크로 `<URL|원문 보기>` 형식으로 붙여라(URL을 지어내지 말고 데이터의 URL 그대로). URL이 없으면 생략.\n"
-        "4) 마크다운 볼드(**)·번호목록 금지. 형식(머리말 '### '):\n\n"
-        "### 어제의 핵심\n브랜드마다 한 블록. 형식:\n"
-        "브랜드 (국가)\n- 무엇을(제품명 포함) — 한 줄 시사점 <URL|원문 보기>\n\n"
-        "### 셀퓨전씨 관련\n- 우리 선케어·더마·주력시장과 겹치는 게 있으면 1~2건 대응 포인트. 없으면 '특이사항 없음'.\n\n"
-        "위 '정량 신호'(신규 상표=진출 임박, 검색 급등, 종합 스코어)에 눈에 띄는 게 있으면 한 줄 반영.\n"
-        "한국어. 데이터에 있는 사실만.\n\n"
+        "1) **한눈 종합 먼저** — 어제~오늘 경쟁 상황을 관통하는 흐름 2~3줄. 어느 브랜드가 어디서 무엇으로 움직이는지 + 우리에게 무슨 의미인지.\n"
+        "2) **브랜드별로 묶어서** — 의미 있는 활동이 있었던 브랜드만. 활동 없는 브랜드는 언급 금지. 뭉뚱그림('스킨케어 신제품') 금지, 제품명·채널·국가·수치로 구체.\n"
+        "3) **확실성** — 데이터에 있는 사실만. 추측·과장 금지. 애매하면 넣지 마라.\n"
+        "4) **원문 링크** — 각 항목 끝에 제공된 URL을 `<URL|원문 보기>`로(지어내지 말 것, 없으면 생략).\n"
+        "5) 마크다운 볼드(**)·번호목록 금지. 강조는 *별표 하나*. 머리말은 '### '. 형식:\n\n"
+        "### 한눈 종합\n- 관통 흐름 2~3줄(브랜드·시장·의미).\n\n"
+        "### 브랜드별 핵심\n브랜드 (국가)\n- 무엇을(제품명 포함) — 왜 중요/무슨 의미 <URL|원문 보기>\n\n"
+        "### 셀퓨전씨 액션\n- 우리 선케어·더마·주력시장(올영·베트남·중국·일본·미국) 관점의 실행 포인트 1~3개(구체). 없으면 '특이사항 없음'.\n\n"
+        "위 '정량 신호'(신규 상표=진출 임박, 검색 급등, 종합 스코어)에 눈에 띄는 게 있으면 종합·액션에 녹여라.\n"
+        "한국어.\n\n"
         f"{_TONE_GUIDE}"
     )
     try:
-        text_out = _openai("gpt-4o-mini", system, data_prompt, max_tokens=900)
+        text_out = _openai("gpt-4o", system, data_prompt, max_tokens=1600)
     except Exception as e:
         logger.error("일간 브리핑 GPT 오류: %s", e)
         text_out = f"브리핑 생성 오류: {e}"
@@ -385,7 +387,46 @@ def generate_daily_briefing() -> str:
     if signal_digest and not text_out.startswith("브리핑 생성 오류"):
         text_out += signal_digest
 
-    logger.info("일간 브리핑 생성 완료 (%d자)", len(text_out))
-    _save(kind="daily", content=text_out, stats=stats, hours=28, model="gpt-4o-mini")
+    logger.info("아침 브리핑 생성 완료 (%d자)", len(text_out))
+    _save(kind="daily", content=text_out, stats=stats, hours=28, model="gpt-4o")
     send_daily_briefing(text_out, stats)
+    return text_out
+
+
+# ── 오후 다이제스트 (오전 신규 HIGH 있을 때만) ────────────────────────────────
+
+def generate_afternoon_digest() -> str:
+    """오전에 새로 수집된 HIGH만 짧게 → Slack. 없으면 발송 안 함(소음 최소)."""
+    from analytics.summarizer import _TONE_GUIDE
+    session = get_session()
+    try:
+        rows = _fetch_rows(session, hours=6)     # 오늘 오전 수집분
+        stats = _stats(session, hours=6)
+    finally:
+        session.close()
+
+    high = [r for r in rows if str(r[3]).lower() == "high"]
+    if not high:
+        logger.info("오후 다이제스트: 새 HIGH 없음 — 발송 스킵")
+        return ""
+
+    data_prompt = "\n".join(_fmt_line(r, 180) for r in high[:12])
+    system = (
+        "당신은 씨엠에스랩 경쟁 인텔리전스 분석가입니다. 오늘 오전 새로 잡힌 '중요(HIGH)' 활동만 "
+        "점심 후 훑어볼 수 있게 아주 짧게 정리하세요.\n\n"
+        f"{_cms_profile()}\n\n"
+        "규칙: 3~6줄, 각 줄 '- *브랜드* (국가): 무엇을 — 우리 접점 한 줄'. 제품명·채널 구체. "
+        "뭉뚱그림·추측 금지, 데이터 사실만. 마크다운 볼드(**)·번호목록 금지, 강조는 *별표 하나*, 머리말 '### '.\n\n"
+        "### 오후 업데이트 · 오전 신규 HIGH\n- ...\n\n"
+        f"{_TONE_GUIDE}"
+    )
+    try:
+        text_out = _openai("gpt-4o-mini", system, data_prompt, max_tokens=700)
+    except Exception as e:
+        logger.error("오후 다이제스트 GPT 오류: %s", e)
+        return ""
+
+    logger.info("오후 다이제스트 생성 (%d자, HIGH %d건)", len(text_out), len(high))
+    _save(kind="afternoon", content=text_out, stats=stats, hours=6, model="gpt-4o-mini")
+    send_afternoon_digest(text_out, stats)
     return text_out

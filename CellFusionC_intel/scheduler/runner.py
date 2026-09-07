@@ -19,7 +19,8 @@ from apscheduler.triggers.cron import CronTrigger
 from config.brands import TIER1_BRANDS, ALL_BRANDS, TIER1_COUNTRIES, COUNTRIES
 from config.settings import TITLE_SIMILARITY_THRESHOLD
 from scheduler.pipeline import run_pipeline, reset_jangup_cache
-from scheduler.briefing import generate_weekly_briefing, generate_daily_briefing
+from scheduler.briefing import (generate_weekly_briefing, generate_daily_briefing,
+                                generate_afternoon_digest)
 from storage.models import get_session
 from storage.repository import save_dedup_candidate, get_recent_titles
 from deduplication.url_hasher import title_similarity
@@ -270,8 +271,8 @@ def job_google_trends() -> None:
 
 
 def _notify_search_spikes(spikes: list) -> None:
-    """글로벌 검색 급등 Slack 알림(webhook 없으면 스킵)."""
-    url = os.getenv("SLACK_WEBHOOK_URL_2") or os.getenv("SLACK_WEBHOOK_URL", "")
+    """글로벌 검색 급등 Slack 알림 — 개인·수집 채널만(팀 채널 조용히). webhook 없으면 스킵."""
+    url = os.getenv("SLACK_WEBHOOK_URL", "")
     if not url:
         return
     lines = [f"• *{s['brand']}* ({s['geo']}) 검색 {s['spike_ratio']}배↑ "
@@ -287,8 +288,8 @@ def _notify_search_spikes(spikes: list) -> None:
 
 
 def _notify_new_trademarks(filings: list) -> None:
-    """신규 해외 상표 출원 = 진출 임박 조기경보 Slack 알림(webhook 없으면 스킵)."""
-    url = os.getenv("SLACK_WEBHOOK_URL_2") or os.getenv("SLACK_WEBHOOK_URL", "")
+    """신규 해외 상표 출원 = 진출 임박 조기경보 — 개인·수집 채널만. webhook 없으면 스킵."""
+    url = os.getenv("SLACK_WEBHOOK_URL", "")
     if not url:
         return
     _FL = {"US": "🇺🇸", "JP": "🇯🇵", "EU": "🇪🇺"}
@@ -664,12 +665,22 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # 매일 08:00 KST — 전날 수집분 일간 브리핑
+    # 화~금 08:00 KST — 아침 브리핑 (월요일은 주간 심층으로 대체 → 중복 방지)
     scheduler.add_job(
         generate_daily_briefing,
-        trigger=CronTrigger(hour=8, minute=0),
+        trigger=CronTrigger(day_of_week="tue-fri", hour=8, minute=0),
         id="daily_briefing",
-        name="[일간] 브리핑 생성 및 Slack 전송",
+        name="[평일아침] 브리핑 생성 및 Slack 전송",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 평일 13:00 KST — 오후 다이제스트 (오전 새 HIGH 있을 때만 발송)
+    scheduler.add_job(
+        generate_afternoon_digest,
+        trigger=CronTrigger(day_of_week="mon-fri", hour=13, minute=0),
+        id="afternoon_digest",
+        name="[평일오후] 신규 HIGH 다이제스트(있을때만)",
         max_instances=1,
         coalesce=True,
     )

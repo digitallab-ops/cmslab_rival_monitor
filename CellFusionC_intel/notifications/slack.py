@@ -90,7 +90,7 @@ def notify_high_importance(article) -> bool:
             {"type": "divider"},
         ],
     }
-    return _post(payload, secondary=True)
+    return _post(payload)          # 실시간 속보 → 개인·수집 채널만(팀 채널 조용히)
 
 
 def notify_negative_signal(article) -> bool:
@@ -122,7 +122,7 @@ def notify_negative_signal(article) -> bool:
             {"type": "divider"},
         ],
     }
-    return _post(payload, secondary=True)
+    return _post(payload)          # 실시간 속보 → 개인·수집 채널만
 
 
 def notify_collection_summary(label: str, agg: dict) -> bool:
@@ -284,6 +284,24 @@ def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
             {"type": "divider"},
             *_briefing_blocks(briefing_text),
             {"type": "divider"},
+            _dashboard_footer(),
+        ],
+    }
+    return _post(payload, secondary=True)
+
+
+def send_afternoon_digest(briefing_text: str, stats: dict) -> bool:
+    """오후 다이제스트 — 오전 신규 HIGH 있을 때만(호출 자체가 조건부). 팀+개인 채널."""
+    d = _kst_date_label()
+    payload = {
+        "text": f"🕐 오후 업데이트 · {d}",
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": f"🕐 오후 업데이트 · {d}"}},
+            {"type": "context", "elements": [
+                {"type": "mrkdwn", "text": f"⏱ *오전 새로 뜬 중요 활동* · 평일 오후  ·  "
+                                           f"🔴 HIGH *{stats.get('high',0)}*건"}]},
+            {"type": "divider"},
+            *_briefing_blocks(briefing_text),
             _dashboard_footer(),
         ],
     }
