@@ -4130,7 +4130,18 @@ _CX_SCRIPT = r"""<script>
     pr:{lab:"홍보 위주",c:"#e8654e",bg:"rgba(232,101,78,.16)",desc:"기사만 늘고 검색은 그대로"},
     stable:{lab:"조용함",c:"#93a0bd",bg:"rgba(147,160,189,.14)",desc:"큰 변화 없음"}};
   var curSort="score", sel=null;
+  var GEO_KO={US:"미국",USA:"미국",JP:"일본",CN:"중국",EU:"유럽",KR:"한국",GB:"영국",VN:"베트남"};
   function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function tmGeoShort(b){
+    var ks=Object.keys(b.tmGeo||{}); if(!ks.length) return b.tm+"건";
+    ks.sort(function(x,y){return b.tmGeo[y]-b.tmGeo[x];});
+    return ks.slice(0,2).map(function(c){return GEO_KO[c]||c;}).join("·");
+  }
+  function tmGeoFull(b){
+    var ks=Object.keys(b.tmGeo||{}); if(!ks.length) return b.tm+"건 출원";
+    ks.sort(function(x,y){return b.tmGeo[y]-b.tmGeo[x];});
+    return ks.map(function(c){return (GEO_KO[c]||c)+" "+b.tmGeo[c]+"건";}).join(" · ");
+  }
   function moClass(m){return m>=1.15?"cx-up":(m<=0.9?"cx-dn":"cx-flat");}
   function moArrow(m){return m>=1.15?"▲":(m<=0.9?"▼":"▶");}
   function vinfo(v){return VERD[v]||VERD.stable;}
@@ -4204,8 +4215,15 @@ _CX_SCRIPT = r"""<script>
       ? movesArr.map(function(m){return "<li>"+(movesIsFallback?m:esc(m))+"</li>";}).join("")
       : '<li style="opacity:.6">최근 뚜렷한 활동 기사가 부족합니다</li>';
     var evParts=[];
-    if(b.arts&&b.arts.length) evParts.push('<span class="cx-h">핵심 기사</span>'+b.arts.map(function(a){return "· "+esc(a.t)+(a.s?'<br><span style="color:#8a93aa">'+esc(a.s)+'</span>':"");}).join("<br>"));
-    if(b.tm>0) evParts.push('<span class="cx-h">해외 상표</span>'+b.tm+'건 출원 — 진출 준비 정황');
+    if(b.arts&&b.arts.length) evParts.push('<span class="cx-h">핵심 기사</span>'+b.arts.map(function(a){
+        var link=a.u?' <a href="'+esc(a.u)+'" target="_blank" rel="noopener" style="color:#4a80f0;font-weight:600">원문↗</a>':'';
+        return "· "+esc(a.t)+link+(a.s?'<br><span style="color:#8a93aa">'+esc(a.s)+'</span>':"");
+      }).join("<br>"));
+    if(b.tm>0){
+      var _mk=(b.tmMarks&&b.tmMarks.length)?' · 출원명 예: '+b.tmMarks.map(esc).join(", "):'';
+      evParts.push('<span class="cx-h">해외 상표</span>'+tmGeoFull(b)+_mk+' — 진출 준비 정황 '
+        +'<a href="#" onclick="cxJumpTM();return false;" style="color:#4a80f0;font-weight:600">상표 자세히 →</a>');
+    }
     if(b.neg) evParts.push('<span class="cx-h">악재</span>'+esc(b.neg));
     var evHTML=evParts.length?('<details class="cx-ev"><summary>근거 자세히 (핵심 기사·상표·악재)</summary><div class="cx-evtext">'+evParts.join("")+'</div></details>'):"";
     document.getElementById("cx-detail").innerHTML=
@@ -4219,7 +4237,7 @@ _CX_SCRIPT = r"""<script>
         +(b.gt?'<div class="cx-chip"><span class="cx-k">해외 검색 '+esc(b.gt.geo)+'</span><span class="cx-v cx-up">▲'+b.gt.mult.toFixed(1)+'배</span></div>':'<div class="cx-chip"><span class="cx-k">해외 검색</span><span class="cx-v" style="color:#6b769a">잠잠</span></div>')
         +'<div class="cx-chip"><span class="cx-k">주요 뉴스</span><span class="cx-v">'+b.high+'건</span></div>'
         +'<div class="cx-chip"><span class="cx-k">기사량(4주)</span><span class="cx-v">'+b.recent4w+'</span></div>'
-        +(b.tm>0?'<div class="cx-chip"><span class="cx-k">해외 상표</span><span class="cx-v" style="color:#5bbf8a">냈음</span></div>':'')
+        +(b.tm>0?'<div class="cx-chip" style="cursor:pointer" onclick="cxJumpTM()" title="상표 섹션으로 이동"><span class="cx-k">해외 상표</span><span class="cx-v" style="color:#5bbf8a">'+tmGeoShort(b)+' ↗</span></div>':'')
         +(b.neg?'<div class="cx-chip"><span class="cx-k">악재</span><span class="cx-v" style="color:#e8654e">있음</span></div>':'')
       +'</div>'
       +'<div class="cx-dmoves"><div class="cx-t">최근 움직임 — 무엇을 했고, 무슨 의미인가</div><ul>'+movesHTML+'</ul></div>'
@@ -4231,6 +4249,11 @@ _CX_SCRIPT = r"""<script>
     try{document.getElementById("cx-detail").scrollIntoView({behavior:"smooth",block:"nearest"});}catch(e){}
   }
   window.cxToggleMethod=function(){document.getElementById("cx-method").classList.toggle("show");};
+  window.cxJumpTM=function(){
+    var f=document.querySelector(".evidence-fold"); if(f) f.open=true;
+    var el=document.getElementById("cx-ev-tm");
+    if(el) try{el.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
+  };
   function init(){
     if(!document.getElementById("cxtab"))return;
     document.getElementById("cx-weights").innerHTML=AX.slice().sort(function(a,b){return b.w-a.w;}).map(function(a){
@@ -4300,6 +4323,19 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
     tmb: dict = {}
     for tb in (trademark_sig or {}).get("brands", []):
         tmb[tb["brand"]] = tmb.get(tb["brand"], 0) + (tb.get("recent") or 0)
+    # 상표 국가 분포 + 출원명 샘플(어디에 뭘 냈나)
+    tm_geo: dict = {}
+    tm_marks: dict = {}
+    for f in (trademark_sig or {}).get("feed", []):
+        b = f.get("brand")
+        if not b:
+            continue
+        cc = (f.get("country") or "").upper() or "기타"
+        tm_geo.setdefault(b, {})
+        tm_geo[b][cc] = tm_geo[b].get(cc, 0) + 1
+        tm_marks.setdefault(b, [])
+        if f.get("mark") and len(tm_marks[b]) < 4 and f["mark"] not in tm_marks[b]:
+            tm_marks[b].append(f["mark"])
     # 지난 스냅샷 순위(순위 변동용)
     prev_scores = {b: o["scores"][-2] for b, o in (score_trend or {}).items()
                    if o.get("scores") and len(o["scores"]) >= 2}
@@ -4319,7 +4355,8 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
             _t = (a.get("title_ko") or a.get("title") or "").strip()
             if not _t:
                 continue
-            arts.append({"t": _t, "s": (a.get("details") or "").strip()[:120]})
+            arts.append({"t": _t, "s": (a.get("details") or "").strip()[:120],
+                         "u": (a.get("url") or "").strip()})
             if len(arts) >= 3:
                 break
         st = (score_trend or {}).get(b, {})
@@ -4340,6 +4377,8 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
             "gt": gspk.get(b),
             "neg": neg.get(b),
             "tm": tmb.get(b, 0),
+            "tmGeo": tm_geo.get(b, {}),
+            "tmMarks": tm_marks.get(b, []),
             "spark": list(st.get("scores") or [])[-8:],
             "headline": headline,
             "moves": moves,
@@ -4667,7 +4706,7 @@ def _build_full_html(
         <div class="section-title">🧴 제품 전성분 인텔 <span class="section-sub">전성분→핵심성분·효능→셀퓨전씨 대응각</span></div>
         {ingredient_intel_html}
       </div>
-      <div class="section">
+      <div class="section" id="cx-ev-tm">
         <div class="section-title">🪧 해외 상표 출원 <span class="section-sub">미국·일본 출원 — 진출 선행신호</span><span class="section-basis">📅 최근 18개월({_bden(547)}~{_bt}) 출원분</span></div>
         {trademark_html}
       </div>
