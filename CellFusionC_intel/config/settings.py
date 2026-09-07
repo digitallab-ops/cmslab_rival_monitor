@@ -42,6 +42,9 @@ HIGH_ALERT_MIN_SCORE = int(os.getenv("HIGH_ALERT_MIN_SCORE", "85"))
 # 속보 발행 최신성 게이트 — 발행일이 이보다 오래된 기사는 '속보'로 안 보냄(뒤늦게 수집된 옛뉴스 차단).
 # 예: 6월 발탁 기사가 9월에 재수집돼도 속보 X. (브리핑·대시보드에는 정상 반영)
 ALERT_MAX_AGE_DAYS = int(os.getenv("ALERT_MAX_AGE_DAYS", "10"))
+# 수집 발행 최신성 필터 — 발행일이 이보다 오래된 기사는 분류·저장 자체를 안 함(분류비용 절감).
+# 구글 RSS가 몇 달 전 기사를 다른 URL로 재수집하는 것을 원천 차단. 최근 창(브리핑·기간토글)은 유지되게 넉넉히.
+COLLECT_MAX_AGE_DAYS = int(os.getenv("COLLECT_MAX_AGE_DAYS", "30"))
 # 같은 사건 속보 중복억제 창(시간). 72h → 168h(7일): 몇 주 걸쳐 찔끔 수집되는 같은 캠페인 반복 차단.
 HIGH_ALERT_DEDUP_HOURS = int(os.getenv("HIGH_ALERT_DEDUP_HOURS", "168"))
 

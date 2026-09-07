@@ -31,10 +31,24 @@ from storage.repository import (
     high_alert_is_duplicate, record_high_alert,
 )
 from config.settings import (CLASSIFIER_MODEL_DETAIL, HIGH_ALERT_MIN_SCORE,
-                             ALERT_MAX_AGE_DAYS, HIGH_ALERT_DEDUP_HOURS)
+                             ALERT_MAX_AGE_DAYS, HIGH_ALERT_DEDUP_HOURS,
+                             COLLECT_MAX_AGE_DAYS)
 from notifications.slack import notify_high_importance, notify_negative_signal
 
 logger = logging.getLogger(__name__)
+
+
+def _collect_fresh(raw) -> bool:
+    """발행일이 COLLECT_MAX_AGE_DAYS 이내인 기사만 분류·저장. 옛뉴스 재수집을 분류 전에 차단."""
+    pd = getattr(raw, "published", None)
+    if not pd:
+        return True                      # 발행일 불명은 통과(과억제 방지)
+    try:
+        if getattr(pd, "tzinfo", None) is not None:
+            pd = pd.replace(tzinfo=None)
+        return (datetime.utcnow() - pd) <= timedelta(days=COLLECT_MAX_AGE_DAYS)
+    except Exception:
+        return True
 
 
 def _alert_fresh(article) -> bool:
@@ -84,6 +98,14 @@ def _run_single(
     """단일 컬렉터로 수집 → 중복제거 → 분류 → 저장."""
     raw_articles = collector.collect(brand, country)
     stats.found += len(raw_articles)
+
+    # 발행 최신성 필터 — 오래된 발행 기사는 분류 전에 제거(옛뉴스 재수집·분류비용 차단)
+    _before = len(raw_articles)
+    raw_articles = [a for a in raw_articles if _collect_fresh(a)]
+    _stale = _before - len(raw_articles)
+    if _stale:
+        logger.info("옛뉴스 스킵(발행 %d일 초과): %s/%s %d건",
+                    COLLECT_MAX_AGE_DAYS, brand, country, _stale)
 
     if not raw_articles:
         return
