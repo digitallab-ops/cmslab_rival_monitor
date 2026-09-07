@@ -4197,12 +4197,14 @@ _CX_SCRIPT = r"""<script>
         +'<span class="cx-abar"><span class="cx-afill" style="width:'+(has?val:0)+'%;background:'+a.c+'"></span></span>'
         +'<span class="cx-av">'+(has?('<b>'+val+'</b>/100 ×'+a.w+'%'):'<span style="opacity:.5">데이터 없음</span>')+'</span></div>';
     }).join("");
-    var movesArr=(b.moves&&b.moves.length)?b.moves:(b.arts||[]);
+    var movesArr=(b.moves&&b.moves.length)?b.moves
+      :(b.arts||[]).map(function(a){return esc(a.t)+(a.s?' <span style="color:#8a93aa">— '+esc(a.s)+'</span>':'');});
+    var movesIsFallback=!(b.moves&&b.moves.length);
     var movesHTML=movesArr.length
-      ? movesArr.map(function(m){return "<li>"+esc(m)+"</li>";}).join("")
+      ? movesArr.map(function(m){return "<li>"+(movesIsFallback?m:esc(m))+"</li>";}).join("")
       : '<li style="opacity:.6">최근 뚜렷한 활동 기사가 부족합니다</li>';
     var evParts=[];
-    if(b.arts&&b.arts.length) evParts.push('<span class="cx-h">핵심 기사</span>'+b.arts.map(function(a){return "· "+esc(a);}).join("<br>"));
+    if(b.arts&&b.arts.length) evParts.push('<span class="cx-h">핵심 기사</span>'+b.arts.map(function(a){return "· "+esc(a.t)+(a.s?'<br><span style="color:#8a93aa">'+esc(a.s)+'</span>':"");}).join("<br>"));
     if(b.tm>0) evParts.push('<span class="cx-h">해외 상표</span>'+b.tm+'건 출원 — 진출 준비 정황');
     if(b.neg) evParts.push('<span class="cx-h">악재</span>'+esc(b.neg));
     var evHTML=evParts.length?('<details class="cx-ev"><summary>근거 자세히 (핵심 기사·상표·악재)</summary><div class="cx-evtext">'+evParts.join("")+'</div></details>'):"";
@@ -4221,7 +4223,7 @@ _CX_SCRIPT = r"""<script>
         +(b.neg?'<div class="cx-chip"><span class="cx-k">악재</span><span class="cx-v" style="color:#e8654e">있음</span></div>':'')
       +'</div>'
       +'<div class="cx-dmoves"><div class="cx-t">최근 움직임 — 무엇을 했고, 무슨 의미인가</div><ul>'+movesHTML+'</ul></div>'
-      +(b.angle?'<div class="cx-angle"><div class="cx-angle-t">→ 시사점 · 대응 제언</div><div class="cx-angle-b">'+esc(b.angle).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")+'</div></div>':"")
+      +(b.angle?'<div class="cx-angle"><div class="cx-angle-t">→ 시사점 · 대응 제언</div><div class="cx-angle-b">'+esc(b.angle).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/(^|\n)\s*[-•]\s*/g,"$1• ").replace(/\n/g,"<br>")+'</div></div>':"")
       +evHTML
       +'<div class="cx-dbasis">📅 <b>'+(window.CX_BASIS||"최근 4주")+'</b> 기준 · 기사·네이버검색·구글검색·아마존·올리브영·매출·상표 <b>7가지 데이터</b>를 합쳐 자동으로 만든 요약입니다.</div>'
       +'</div>';
@@ -4312,9 +4314,14 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
         d = demand.get(b, {})
         ins = (brand_insights or {}).get(b, {})
         headline, moves, angle = _parse_insight_sections(ins.get("strategy", ""))
-        arts = [((a.get("title_ko") or a.get("title") or "").strip())
-                for a in (ins.get("key_articles") or [])]
-        arts = [a for a in arts if a][:3]
+        arts = []
+        for a in (ins.get("key_articles") or []):
+            _t = (a.get("title_ko") or a.get("title") or "").strip()
+            if not _t:
+                continue
+            arts.append({"t": _t, "s": (a.get("details") or "").strip()[:120]})
+            if len(arts) >= 3:
+                break
         st = (score_trend or {}).get(b, {})
         _ko = BRAND_KO_NAMES.get(b)
         _name = (_ko[0] if isinstance(_ko, list) and _ko else (_ko or b))

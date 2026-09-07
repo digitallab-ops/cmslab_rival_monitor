@@ -10,6 +10,10 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# 브랜드 전략 인사이트 전용 모델 — 품질(구체성·통찰) 위해 gpt-4o 기본.
+# 비용 낮추려면 INSIGHT_MODEL=gpt-4o-mini 로 환경변수 지정.
+_INSIGHT_MODEL = os.getenv("INSIGHT_MODEL", "gpt-4o")
+
 # 자사 프로필 — 인사이트를 우리(씨엠에스랩) 관점으로 튜닝하기 위한 컨텍스트.
 # 실제 내용은 config/company_profile.md에서 로드 (기획팀이 코드 없이 편집).
 # 파일이 없거나 비면 아래 _DEFAULT_CMS_PROFILE 사용(파이프라인 안전장치).
@@ -84,14 +88,11 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
 한 줄 안에 구체 사실(제품·채널·국가·파트너)과 그 의도/영향을 함께 담아라. 띡 한 줄로 끝내지 말 것.
 
 ### 관전 포인트
-이 브랜드의 움직임에서 나오는 전략적 시사점과 취할 만한 대응을 1~2문장으로.
-**중요(톤): 특정 회사명(셀퓨전씨·당사·우리)으로 시작하지 말 것.** "위협받는다" 같은 방어적 표현 대신,
-더마 선케어 후발/경쟁 브랜드라면 누구에게든 통하는 <b>중립적 조언 톤</b>으로 (예: "~에 주목할 필요",
-"~ 라인에서 성분 근거로 차별화하는 접근이 유효", "~ 시장 진입 타이밍을 지켜볼 만"). 다음 중 최소 하나:
-(a) 겹치는 지점(선케어·더마·해외시장 특히 베트남/중국/일본)과 그 함의,
-(b) 고려할 대응/선점 포인트,
-(c) 다음에 지켜볼 시그널.
-일반론 말고 이 브랜드·이 상황에 특정된 조언만.
+이 브랜드의 움직임에서 나오는 시사점·대응을 **2~3개의 짧은 줄**로 (각 줄 앞에 `- `, 한 줄 = 하나의 구체 포인트).
+- **톤**: 특정 회사명(셀퓨전씨·당사·우리)으로 시작하지 말 것. "위협받는다"류 방어적 표현 대신,
+  더마 선케어 경쟁 브랜드라면 누구에게든 통하는 <b>중립적 조언 톤</b>("~에 주목", "~로 차별화가 유효", "~ 타이밍을 주시").
+- **금지**: '경쟁력 강화', '주목할 필요' 같은 공허한 일반론·미사여구. 구체 사실(채널·국가·성분·수치)로 못박아라.
+- 최소 하나씩 담기: (a) 겹치는 지점(선케어·더마·베트남/중국/일본)과 함의, (b) 우리가 선점/대응할 포인트, (c) 지켜볼 시그널.
 
 {_TONE_GUIDE}"""
 
@@ -99,8 +100,8 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            max_tokens=600,
+            model=_INSIGHT_MODEL,
+            max_tokens=800,
             temperature=0.4,
             messages=[{"role": "user", "content": prompt}],
         )
