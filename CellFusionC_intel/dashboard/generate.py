@@ -4070,6 +4070,10 @@ _CX_STYLE = """<style>
 #cxtab .cx-angle{background:linear-gradient(90deg,rgba(43,169,178,.12),rgba(74,128,240,.06));border:1px solid rgba(43,169,178,.35);border-left:3px solid var(--cxteal);border-radius:9px;padding:12px 14px;margin:0 0 6px}
 #cxtab .cx-angle-t{font-size:12.5px;font-weight:700;color:var(--cxteal);margin-bottom:6px}
 #cxtab .cx-angle-b{font-size:13.5px;line-height:1.6;color:#e4ebf8}
+#cxtab .cx-synth{background:rgba(138,127,240,.08);border:1px solid rgba(138,127,240,.32);
+  border-left:3px solid #8a7ff0;border-radius:9px;padding:12px 14px;margin:10px 0 6px}
+#cxtab .cx-synth-t{font-size:12.5px;font-weight:700;color:#a89dff;margin-bottom:6px}
+#cxtab .cx-synth-b{font-size:13.5px;line-height:1.65;color:#e9ecfb}
 #cxtab .cx-ev{border-top:1px solid var(--cxline);margin-top:12px}
 #cxtab .cx-ev summary{cursor:pointer;padding:11px 0 2px;font-size:12.5px;color:var(--cxmut);font-weight:600;list-style:none}
 #cxtab .cx-ev summary::-webkit-details-marker{display:none}
@@ -4196,7 +4200,7 @@ _CX_SCRIPT = r"""<script>
       return '<div class="cx-lrow" data-n="'+esc(b.n)+'">'
         +'<div class="cx-rank"><span class="cx-rnum '+(rank===1?"top":"")+'">'+rank+'</span>'+delta+'</div>'
         +'<div><span class="cx-bname">'+esc(b.n)+'</span>'+(b.tier===1?'<span class="cx-btier">★1군</span>':'')+'</div>'
-        +'<div class="cx-scorewrap"><div class="cx-scoretop"><span class="cx-scoreval">'+(b.score||0)+'</span><span class="cx-scorewhy">강점 · '+esc(topSp(b))+'</span></div>'+stack(b)+'</div>'
+        +'<div class="cx-scorewrap"><div class="cx-scoretop"><span class="cx-scoreval">'+(b.score||0)+'</span><span class="cx-scorewhy">'+(b.tag?('전략 · '+esc(b.tag)):('강점 · '+esc(topSp(b))))+'</span></div>'+stack(b)+'</div>'
         +'<div class="cx-c-spark">'+sparkSVG(b.spark,68,20,v.c)+'</div>'
         +'<div class="cx-mo '+moClass(b.mult)+'">'+moArrow(b.mult)+' '+b.mult.toFixed(1)+'배</div>'
         +'<div class="cx-c-verd"><span class="cx-verd" style="color:'+v.c+';background:'+v.bg+'">'+v.lab+'</span></div>'
@@ -4255,6 +4259,7 @@ _CX_SCRIPT = r"""<script>
       +'</div>'
       +'<div class="cx-dmoves"><div class="cx-t">최근 움직임 — 무엇을 했고, 무슨 의미인가</div><ul>'+movesHTML+'</ul></div>'
       +(b.angle?'<div class="cx-angle"><div class="cx-angle-t">→ 시사점 · 대응 제언</div><div class="cx-angle-b">'+esc(b.angle).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/(^|\n)\s*[-•]\s*/g,"$1• ").replace(/\n/g,"<br>")+'</div></div>':"")
+      +(b.synth?'<div class="cx-synth"><div class="cx-synth-t">🧭 종합 의견 — 이 브랜드는 어디로 크고 있나</div><div class="cx-synth-b">'+esc(b.synth).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/\n/g,"<br>")+'</div></div>':"")
       +evHTML
       +'<div class="cx-dbasis">📅 <b>'+(window.CX_BASIS||"최근 4주")+'</b> 기준 · 기사·네이버검색·구글검색·아마존·올리브영·매출·상표 <b>7가지 데이터</b>를 합쳐 자동으로 만든 요약입니다.</div>'
       +'</div>';
@@ -4304,7 +4309,9 @@ def _parse_insight_sections(strategy: str):
         return ""
 
     headline = grab("한줄 요약", "전략 요약")
+    tag = grab("전략 태그").strip().lstrip("-•*·∙◦ ").strip().split("\n")[0][:40]
     angle = grab("관전 포인트", "시사점")
+    synth = grab("종합 의견", "종합")
     moves = []
     for ln in grab("최근 움직임").splitlines():
         t = ln.strip().lstrip("-•*·∙◦ ").strip()
@@ -4312,7 +4319,7 @@ def _parse_insight_sections(strategy: str):
             moves.append(t)
     if not headline and not moves and not angle:          # 섹션 없는 폴백 텍스트
         headline = (strategy or "").strip().split("\n")[0][:200]
-    return headline, moves[:4], angle
+    return headline, tag, moves[:4], angle, synth
 
 
 def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
@@ -4362,7 +4369,7 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
         r = radar.get(b, {})
         d = demand.get(b, {})
         ins = (brand_insights or {}).get(b, {})
-        headline, moves, angle = _parse_insight_sections(ins.get("strategy", ""))
+        headline, tag, moves, angle, synth = _parse_insight_sections(ins.get("strategy", ""))
         arts = []
         for a in (ins.get("key_articles") or []):
             _t = (a.get("title_ko") or a.get("title") or "").strip()
@@ -4394,8 +4401,10 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
             "tmMarks": tm_marks.get(b, []),
             "spark": list(st.get("scores") or [])[-8:],
             "headline": headline,
+            "tag": tag,
             "moves": moves,
             "angle": angle,
+            "synth": synth,
             "arts": arts,
         }
     return json.dumps(out, ensure_ascii=False)
