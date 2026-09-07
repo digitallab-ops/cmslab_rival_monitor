@@ -44,6 +44,7 @@ from analytics.queries import (
     get_trademark_signals,
     get_google_spikes,
     get_brand_composite_score,
+    get_pending_brand_candidates,
     get_opportunity_stories,
     get_nice_financials,
     get_brand_signal_summary,
@@ -4088,6 +4089,18 @@ _CX_STYLE = """<style>
 .evidence-fold>summary::before{content:"▸ ";color:#6b769a}
 .evidence-fold[open]>summary::before{content:"▾ "}
 .evidence-fold .section:first-of-type{margin-top:4px}
+.cxc-panel{margin:0 0 16px;border:1px solid rgba(217,164,65,.4);border-left:3px solid #d9a441;
+  border-radius:11px;background:linear-gradient(90deg,rgba(217,164,65,.10),rgba(217,164,65,.02));padding:13px 15px}
+.cxc-head{font-size:14px;font-weight:700;color:#e7ecf7}
+.cxc-head b{color:#d9a441}
+.cxc-sub{display:block;font-size:11.5px;font-weight:400;color:#93a0bd;margin-top:3px}
+.cxc-sub code{background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;color:#e7ecf7}
+.cxc-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.cxc-item{display:flex;align-items:baseline;gap:9px;font-size:12.5px;flex-wrap:wrap}
+.cxc-name{font-weight:650;color:#eef2fb}
+.cxc-ko{color:#93a0bd;font-weight:400}
+.cxc-cnt{font-size:11px;color:#d9a441;background:rgba(217,164,65,.14);padding:1px 7px;border-radius:20px}
+.cxc-smp{color:#8a93aa;font-size:11.5px}
 </style>"""
 
 _CX_SHELL = """<div id="cxtab">
@@ -4404,6 +4417,26 @@ def _render_competitor_tab(dossier_json: str, basis_text: str,
             + _CX_SCRIPT)
 
 
+def _render_brand_candidates(cands: list) -> str:
+    """신흥 브랜드 발견 후보(대기) 상시 패널 — 슬랙 알림을 놓쳐도 대시보드에서 항상 보임."""
+    if not cands:
+        return ""
+    items = []
+    for c in cands[:8]:
+        ko = c.get("ko") or ""
+        lbl = _esc(c["name"]) + (f' <span class="cxc-ko">({_esc(ko)})</span>' if ko and ko != c["name"] else "")
+        smp = f'<span class="cxc-smp">{_esc((c.get("sample") or "")[:64])}</span>' if c.get("sample") else ""
+        items.append(f'<div class="cxc-item"><span class="cxc-name">{lbl}</span>'
+                     f'<span class="cxc-cnt">언급 {c.get("count", 0)}</span>{smp}</div>')
+    return (
+        '<div class="cxc-panel">'
+        f'<div class="cxc-head">🆕 신흥 브랜드 후보 <b>{len(cands)}</b>'
+        '<span class="cxc-sub">레이더 밖에서 뜬 브랜드 · 슬랙 봇에게 <code>승인 &lt;브랜드&gt;</code>로 모니터링 등록</span></div>'
+        f'<div class="cxc-list">{"".join(items)}</div>'
+        '</div>'
+    )
+
+
 def _build_full_html(
     stats: dict,
     high_articles: list,
@@ -4438,6 +4471,7 @@ def _build_full_html(
     search_spikes: list = None,
     composite: list = None,
     score_trend: dict = None,
+    brand_candidates: list = None,
     brand_signals: list = None,
     stories: list = None,
     rank_trends: list = None,
@@ -4529,6 +4563,7 @@ def _build_full_html(
         f"7가지 데이터 통합 · 순위 변동은 지난주 대비",
         f"{_bden(28)} ~ {_bt} (최근 4주)",
         "데이터는 매일 자동 수집·갱신 — 뉴스·리테일·올리브영 매일 · 상표 주기적 · 재무(NICE) 월 1회")
+    brand_candidates_html = _render_brand_candidates(brand_candidates or [])
     market_script     = _build_market_script()
     trend_html        = _canvas_or_table_trend(trend, has_chartjs)
     activity_html     = _canvas_or_table_activity(distribution, has_chartjs)
@@ -4680,6 +4715,7 @@ def _build_full_html(
 
   <!-- ===== 탭: 경쟁사 ===== -->
   <div class="tab-panel" id="tab-brands">
+    {brand_candidates_html}
     {competitor_tab_html}
 
     <!-- 근거 자료: cross-brand 원자료 상세표(기본 접힘) -->
@@ -5476,6 +5512,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             score_trend = get_score_trend(session, weeks=12)
         except Exception:
             score_trend = {}
+        # 신흥 브랜드 발견 후보(대기) — 대시보드 상시 표시
+        try:
+            brand_candidates_pending = get_pending_brand_candidates(session)
+        except Exception:
+            brand_candidates_pending = []
         # 브랜드 신호 요약(직관형 — 실수치 라벨) : #2 재설계
         try:
             brand_signals = get_brand_signal_summary(session, limit=12)
@@ -5695,6 +5736,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         search_spikes=search_spikes,
         composite=composite,
         score_trend=score_trend,
+        brand_candidates=brand_candidates_pending,
         brand_signals=brand_signals,
         stories=stories,
         category_battle=category_battle,

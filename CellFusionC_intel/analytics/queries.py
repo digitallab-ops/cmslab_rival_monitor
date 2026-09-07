@@ -2280,6 +2280,20 @@ _COMPOSITE_DRV = {"momentum": "성장세", "financial": "매출", "trademark": "
 _VERDICT_DEMAND = {"real": 1.0, "latent": 0.7, "stable": 0.4, "pr": 0.2}
 
 
+def get_pending_brand_candidates(session: Session, limit: int = 8) -> list[dict]:
+    """신흥 브랜드 발견 후보(대기) — 대시보드 상시 표시용. 테이블 없으면 []."""
+    try:
+        rows = session.execute(text(f"""
+            SELECT name, ko_name, mention_count, sample_titles
+            FROM {DB_SCHEMA}.brand_candidates WHERE status = 'pending'
+            ORDER BY mention_count DESC, proposed_at DESC LIMIT :lim
+        """), {"lim": limit}).fetchall()
+    except Exception:
+        return []
+    return [{"name": r[0], "ko": r[1] or "", "count": r[2] or 0,
+             "sample": (r[3] or "").split(" · ")[0]} for r in rows]
+
+
 def get_brand_composite_score(session: Session) -> list[dict]:
     """
     브랜드 종합 스코어 — 성장세·해외판매·해외검색·매출·국내검색·올영·상표 7축을 0~100으로 통합.
