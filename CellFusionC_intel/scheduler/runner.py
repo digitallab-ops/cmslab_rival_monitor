@@ -375,6 +375,18 @@ def job_ingredient_intel() -> None:
         logger.warning("전성분 인텔 스킵: %s", e)
 
 
+def job_brand_discovery() -> None:
+    """신흥 브랜드 발견 — 광역 뉴스에서 미등록 브랜드 탐지 → 슬랙 후보 제안(주1회). 승인은 봇에서."""
+    logger.info("=== [주간] 신흥 브랜드 발견 시작 ===")
+    try:
+        from signals.brand_discovery import run as run_disc
+        r = run_disc()
+        logger.info("신흥 브랜드 발견: 헤드라인 %d · 신규 후보 %d",
+                    r.get("headlines", 0), len(r.get("new", [])))
+    except Exception as e:
+        logger.warning("신흥 브랜드 발견 스킵: %s", e)
+
+
 def job_self_collection() -> None:
     """자사(셀퓨전씨) 뉴스 수집 — 경쟁사 대비 기준선(baseline). is_self=True로 분리 저장.
 
@@ -490,6 +502,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day_of_week="mon", hour=19, minute=0),
         id="weekly_momentum",
         name="[주간] 브랜드 모멘텀 계산",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매주 화요일 09:10 KST — 신흥 브랜드 발견(미등록 브랜드 탐지 → 슬랙 후보 제안)
+    scheduler.add_job(
+        job_brand_discovery,
+        trigger=CronTrigger(day_of_week="tue", hour=9, minute=10),
+        id="brand_discovery",
+        name="[주간] 신흥 브랜드 발견",
         max_instances=1,
         coalesce=True,
     )

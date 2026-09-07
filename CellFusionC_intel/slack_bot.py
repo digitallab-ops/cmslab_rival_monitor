@@ -37,6 +37,10 @@ from mcp import ClientSession
 from slack_bolt.async_app import AsyncApp
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 
+from sqlalchemy import text as _sqltext
+from storage.models import get_session
+from config.settings import DB_SCHEMA
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
 logger = logging.getLogger("slack_bot")
@@ -167,6 +171,70 @@ app = AsyncApp(token=SLACK_BOT_TOKEN)
 _BOT_MENTION = re.compile(r"<@[A-Z0-9]+>")
 
 
+def _brand_command(text: str):
+    """신흥 브랜드 후보 명령. 명령이면 응답 문자열, 아니면 None(→ 일반 Q&A로)."""
+    t = (text or "").strip()
+    if t in ("후보", "브랜드 후보", "후보 목록"):
+        s = get_session()
+        try:
+            rows = s.execute(_sqltext(
+                f"SELECT name, ko_name, mention_count FROM {DB_SCHEMA}.brand_candidates "
+                f"WHERE status='pending' ORDER BY mention_count DESC, proposed_at DESC LIMIT 20")).fetchall()
+        except Exception as e:
+            return f"⚠️ 후보 조회 실패: {e}"
+        finally:
+            s.close()
+        if not rows:
+            return "대기 중인 신흥 브랜드 후보가 없어요."
+        out = ["*신흥 브랜드 후보(대기)* — `추가 <브랜드>`로 등록 · `제외 <브랜드>`로 무시"]
+        for n, ko, c in rows:
+            lbl = n + (f" ({ko})" if ko and ko != n else "")
+            out.append(f"• {lbl} — 언급 {c}건")
+        return "\n".join(out)
+    for verb, kind in (("추가", "approve"), ("제외", "reject")):
+        for pfx in (verb + " ", "브랜드 " + verb + " "):
+            if t.startswith(pfx):
+                name = t[len(pfx):].strip()
+                if not name:
+                    return f"어떤 브랜드를 {verb}할까요? 예) `{verb} 브랜드명`"
+                return _apply_brand(name, kind)
+    return None
+
+
+def _apply_brand(name: str, kind: str) -> str:
+    s = get_session()
+    try:
+        row = s.execute(_sqltext(
+            f"SELECT name, ko_name FROM {DB_SCHEMA}.brand_candidates "
+            f"WHERE lower(name)=lower(:n) OR ko_name=:n LIMIT 1"), {"n": name}).fetchone()
+        cand_name = row[0] if row else name
+        cand_ko = row[1] if row else None
+        if kind == "reject":
+            s.execute(_sqltext(
+                f"UPDATE {DB_SCHEMA}.brand_candidates SET status='rejected' "
+                f"WHERE lower(name)=lower(:n) OR ko_name=:n"), {"n": name})
+            s.commit()
+            return f"🚫 *{cand_name}* 제외했어요. 다시 제안하지 않습니다."
+        ko_arr = [cand_ko] if cand_ko else None
+        s.execute(_sqltext(f"""
+            INSERT INTO {DB_SCHEMA}.monitored_brands (name, tier, ko_names, is_active)
+            VALUES (:n, 2, :ko, TRUE)
+            ON CONFLICT (name) DO UPDATE SET is_active=TRUE,
+                tier=LEAST({DB_SCHEMA}.monitored_brands.tier, 2)
+        """), {"n": cand_name, "ko": ko_arr})
+        s.execute(_sqltext(
+            f"UPDATE {DB_SCHEMA}.brand_candidates SET status='approved' "
+            f"WHERE lower(name)=lower(:n) OR ko_name=:n"), {"n": name})
+        s.commit()
+        return (f"✅ *{cand_name}* 모니터링에 등록했어요(Tier2·주간). "
+                f"다음 수집 주기부터 뉴스·신호가 쌓입니다.")
+    except Exception as e:
+        s.rollback()
+        return f"⚠️ 처리 실패: {e}"
+    finally:
+        s.close()
+
+
 async def _handle(event: dict, client, in_thread: bool):
     user = event.get("user", "?")
     channel = event["channel"]
@@ -174,7 +242,12 @@ async def _handle(event: dict, client, in_thread: bool):
     thread_ts = event.get("thread_ts") or (event["ts"] if in_thread else None)
     if not text:
         await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
-                                      text="무엇을 물어볼까요? 예) `아누아 최근 미국 동향`, `베트남 시장 경쟁 상황`, `앰플 카테고리 압박`")
+                                      text="무엇을 물어볼까요? 예) `아누아 최근 미국 동향`, `베트남 시장 경쟁 상황`, `앰플 카테고리 압박`\n브랜드 관리: `후보` · `추가 <브랜드>` · `제외 <브랜드>`")
+        return
+
+    _cmd = _brand_command(text)
+    if _cmd is not None:
+        await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=_cmd)
         return
 
     ph = await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text="🔎 조회 중…")
