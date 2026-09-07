@@ -216,33 +216,34 @@ def _brand_command(text: str, user_id: str = ""):
             lbl = n + (f" ({ko})" if ko and ko != n else "")
             out.append(f"• {lbl} — 언급 {c}건")
         return "\n".join(out)
-    # "승인 <브랜드>" / "제외 <브랜드>" (브랜드 접두어도 허용)
-    verbs = [(v, "approve") for v in _APPROVE_VERBS] + [(v, "reject") for v in _REJECT_VERBS]
-    for verb, kind in verbs:
-        for pfx in (verb + " ", "브랜드 " + verb + " "):
-            if t.startswith(pfx):
-                name = t[len(pfx):].strip()
-                if name:
-                    if not _can_write():
-                        return _denied()
-                    return _apply_brand(name, kind)
-    # 브랜드명 없는 단독 명령("승인"·"추가"·"제외"…) → 대기 후보가 딱 1개면 그걸로 처리
-    bare = t.replace("브랜드", "").strip()
-    kind = "approve" if bare in _APPROVE_VERBS else ("reject" if bare in _REJECT_VERBS else None)
-    if kind:
-        if not _can_write():
-            return _denied()
-        try:
-            pend = _pending_candidates()
-        except Exception as e:
-            return f"⚠️ 후보 조회 실패: {e}"
-        if not pend:
-            return "대기 중인 후보가 없어요."
-        if len(pend) == 1:
-            return _apply_brand(pend[0][0], kind)
-        names = ", ".join(p[0] for p in pend)
-        return f"후보가 여러 개예요 — 브랜드명을 붙여주세요. 예) `{bare} {pend[0][0]}`\n대기: {names}"
-    return None
+    # 짧은 명령만 인식(일반 질문 오탐 방지): "승인 아뮤즈" / "아뮤즈 승인" / "브랜드 승인 아뮤즈" / "승인"
+    toks = [x for x in t.split() if x != "브랜드"]
+    if not (1 <= len(toks) <= 3):
+        return None
+    kind, vpos = None, None
+    for i, tok in enumerate(toks):
+        if tok in _APPROVE_VERBS:
+            kind, vpos = "approve", i; break
+        if tok in _REJECT_VERBS:
+            kind, vpos = "reject", i; break
+    if not kind:
+        return None
+    if not _can_write():
+        return _denied()
+    name = " ".join(tok for j, tok in enumerate(toks) if j != vpos).strip()
+    if name:
+        return _apply_brand(name, kind)
+    # 브랜드명 없이 동사만 → 대기 후보가 딱 1개면 그걸로
+    try:
+        pend = _pending_candidates()
+    except Exception as e:
+        return f"⚠️ 후보 조회 실패: {e}"
+    if not pend:
+        return "대기 중인 후보가 없어요."
+    if len(pend) == 1:
+        return _apply_brand(pend[0][0], kind)
+    names = ", ".join(p[0] for p in pend)
+    return f"후보가 여러 개예요 — 브랜드명을 붙여주세요. 예) `{toks[vpos]} {pend[0][0]}`\n대기: {names}"
 
 
 def _apply_brand(name: str, kind: str) -> str:
