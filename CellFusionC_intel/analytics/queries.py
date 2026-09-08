@@ -2280,6 +2280,45 @@ _COMPOSITE_DRV = {"momentum": "성장세", "financial": "매출", "trademark": "
 _VERDICT_DEMAND = {"real": 1.0, "latent": 0.7, "stable": 0.4, "pr": 0.2}
 
 
+def get_brand_products_map(session: Session, days: int = 45, per_brand: int = 5) -> dict:
+    """브랜드별 최근 신제품·리뉴얼 — {brand: {'global':[{name,country,note}], 'domestic':[...]}}.
+    제품명 있거나 신제품/리뉴얼 활동 기사. 국내(KR)/해외 분리, 이름 중복 제외, 최근 우선."""
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    try:
+        rows = session.execute(text(f"""
+            SELECT brand, country, product_name,
+                   COALESCE(NULLIF(title_ko,''), title) AS t, published_date
+            FROM {DB_SCHEMA}.news_articles
+            WHERE published_date >= :since
+              AND product_name IS NOT NULL AND product_name <> ''
+              AND char_length(product_name) BETWEEN 2 AND 40
+              AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
+              AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+            ORDER BY brand, published_date DESC
+        """), {"since": since}).fetchall()
+    except Exception:
+        return {}
+    out: dict = {}
+    for brand, country, pname, title, _pd in rows:
+        if not brand:
+            continue
+        name = (pname or "").strip()
+        # 제목류·문장류(따옴표·말줄임·… 포함)나 너무 긴 건 제외 — 진짜 제품명만
+        if not name or len(name) > 40 or any(c in name for c in ("…", "”", "“", "?")):
+            continue
+        o = out.setdefault(brand, {"global": [], "domestic": []})
+        if len(o["global"]) + len(o["domestic"]) >= per_brand:
+            continue
+        bucket = "domestic" if (country or "").upper() == "KR" else "global"
+        key = name[:12]
+        if any(key in x["name"] or x["name"][:12] in name
+               for x in (o["global"] + o["domestic"])):
+            continue
+        o[bucket].append({"name": name, "country": country or "",
+                          "note": (title or "").strip()[:74]})
+    return out
+
+
 def get_pending_brand_candidates(session: Session, limit: int = 8) -> list[dict]:
     """신흥 브랜드 발견 후보(대기) — 대시보드 상시 표시용. 테이블 없으면 []."""
     try:

@@ -13,6 +13,7 @@ TIER1_BRANDS = [
     "Skin1004",          # 스킨1004 — 세포라 입점, 마다가스카르 센텔라
     "Dr.Jart+",          # 닥터자르트 — 에스티로더 인수, 미주 강세
     "Torriden",          # 토리든 — 일본·미국 인플루언서 성장
+    "Medicube",          # 메디큐브(APR) — 미국 아마존 뷰티 상위·에이지알 디바이스
 ]
 
 # Tier 2: 주 1회 수집
@@ -192,6 +193,7 @@ BRAND_KO_NAMES: dict[str, list[str]] = {
     "b.plain":          ["비플레인"],
     "Goodal":           ["구달"],
     "Torriden":         ["토리든"],
+    "Medicube":         ["메디큐브"],
     "Abib":             ["아비브"],
     "Rejuran":          ["리쥬란", "리쥬란코스메틱"],
     "Mixsoon":          ["믹순"],
