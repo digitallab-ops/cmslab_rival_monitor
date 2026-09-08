@@ -269,12 +269,25 @@ def _dashboard_footer() -> dict:
         {"type": "mrkdwn", "text": f"🔗 <{url}|대시보드에서 전체 보기 →>  ·  각 무브의 ‘원문 ↗’로 기사 직접 확인"}]}
 
 
+def _start_marker(name: str) -> dict:
+    """메시지 시작 경계 — 앞 메시지와 확실히 구분."""
+    return {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": f"┏━━━━━ ▼ 여기부터 · *{name}* ━━━━━┓"}]}
+
+
+def _end_marker(name: str) -> dict:
+    """메시지 끝 경계."""
+    return {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": f"┗━━━━━ ▲ 여기까지 · *{name}* ━━━━━┛"}]}
+
+
 def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
     """주간 브리핑 Slack 전송 (긴 본문 자동 분할)."""
     d = _kst_date_label()
     payload = {
         "text": f"📊 위클리 심층 브리핑 · {d}",
         "blocks": [
+            _start_marker("위클리 심층 브리핑"),
             {"type": "header", "text": {"type": "plain_text", "text": f"📊 위클리 심층 브리핑 · {d}"}},
             {"type": "context", "elements": [
                 {"type": "mrkdwn",
@@ -285,6 +298,7 @@ def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
             *_briefing_blocks(briefing_text),
             {"type": "divider"},
             _dashboard_footer(),
+            _end_marker("위클리 심층 브리핑"),
         ],
     }
     return _post(payload, secondary=True)
@@ -296,6 +310,7 @@ def send_afternoon_digest(briefing_text: str, stats: dict) -> bool:
     payload = {
         "text": f"🕐 오후 업데이트 · {d}",
         "blocks": [
+            _start_marker("오후 업데이트"),
             {"type": "header", "text": {"type": "plain_text", "text": f"🕐 오후 업데이트 · {d}"}},
             {"type": "context", "elements": [
                 {"type": "mrkdwn", "text": f"⏱ *오전 새로 뜬 중요 활동* · 평일 오후  ·  "
@@ -303,6 +318,7 @@ def send_afternoon_digest(briefing_text: str, stats: dict) -> bool:
             {"type": "divider"},
             *_briefing_blocks(briefing_text),
             _dashboard_footer(),
+            _end_marker("오후 업데이트"),
         ],
     }
     return _post(payload, secondary=True)
@@ -314,15 +330,17 @@ def send_daily_briefing(briefing_text: str, stats: dict) -> bool:
     payload = {
         "text": f"🌅 데일리 브리핑 · {d}",
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": f"🌅 데일리 브리핑 · {d}"}},
+            _start_marker("아침 브리핑"),
+            {"type": "header", "text": {"type": "plain_text", "text": f"🌅 데일리(아침) 브리핑 · {d}"}},
             {"type": "context", "elements": [
-                {"type": "mrkdwn", "text": f"📅 *어제 수집분 요약* · 매일 아침  ·  📥 신규 *{stats.get('total',0)}*건  ·  "
+                {"type": "mrkdwn", "text": f"📅 *어제 수집분 · 객관 분석* · 화~금 아침  ·  📥 신규 *{stats.get('total',0)}*건  ·  "
                                            f"🔴 HIGH *{stats.get('high',0)}*  ·  "
                                            f"🏷 브랜드 *{stats.get('brands',0)}*  ·  🌐 국가 *{stats.get('countries',0)}*"}]},
             {"type": "divider"},
             *_briefing_blocks(briefing_text),
             {"type": "divider"},
             _dashboard_footer(),
+            _end_marker("아침 브리핑"),
         ],
     }
     return _post(payload, secondary=True)
