@@ -1766,6 +1766,32 @@ def get_market_export_growth(session: Session, hs_like: str = "330499",
     return out
 
 
+def get_export_total_series(session: Session, hs_like: str = "330499", months: int = 6) -> list[dict]:
+    """관세청 화장품 총 수출 추이 — 최근 N개월 월별 총액 + 전년동월 대비 YoY. 주식차트(막대+성장률)용.
+    반환: [{label 'YY.MM', total, yoy}], 오래된→최근 순. export_stats 없으면 []."""
+    try:
+        rows = session.execute(text(f"""
+            WITH tot AS (
+                SELECT period, SUM(exp_usd)::float e
+                FROM {DB_SCHEMA}.export_stats
+                WHERE hs_cd LIKE :hs
+                GROUP BY period)
+            SELECT period, e,
+                   (SELECT e FROM tot p2 WHERE p2.period = tot.period - interval '1 year') AS prev
+            FROM tot ORDER BY period DESC LIMIT :m
+        """), {"hs": hs_like, "m": months}).fetchall()
+    except Exception:
+        return []
+    out = []
+    for period, e, prev in reversed(rows):
+        e = float(e or 0)
+        prev = float(prev) if prev else 0.0
+        yoy = round((e / prev - 1) * 100, 1) if prev > 0 else None
+        lbl = period.strftime("%y.%m") if hasattr(period, "strftime") else str(period)[2:7]
+        out.append({"label": lbl, "total": e, "yoy": yoy})
+    return out
+
+
 def get_export_period_label(session: Session, trailing: int = 3) -> dict:
     """수출 랭킹이 실제 커버하는 월 범위 — '최근 3개월'의 실제 기간을 라벨로 명시하기 위함.
 

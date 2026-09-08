@@ -39,6 +39,7 @@ from analytics.queries import (
     compute_brand_momentum,
     get_demand_triangulation,
     get_market_export_growth,
+    get_export_total_series,
     get_export_period_label,
     get_market_growth_story,
     get_trademark_signals,
@@ -616,11 +617,102 @@ def _render_expansion_playbook(playbook: list) -> str:
     )
 
 
-def _render_export_growth(growth: list, period_label: dict = None) -> str:
-    """관세청 화장품 수출 성장 — 국가별 최근3M 수출액 + 전년 YoY (성과 신호)."""
+_XG2_STYLE = """<style>
+.xg2{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}
+@media(max-width:720px){.xg2{grid-template-columns:1fr}}
+.xg2-card{background:var(--panel,#141d33);border:1px solid var(--border,#26314e);border-radius:12px;padding:14px 15px}
+.xg2-t{font-size:13.5px;font-weight:700;color:var(--hi,#e7ecf7);margin-bottom:2px}
+.xg2-s{font-size:11px;color:var(--lo,#6b769a);margin-bottom:14px}
+.xg2-bars{display:flex;align-items:flex-end;gap:8px;height:150px;padding-top:22px}
+.xg2-bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative}
+.xg2-col{width:66%;border-radius:4px 4px 0 0;background:linear-gradient(180deg,#4a5a86,#2a3550)}
+.xg2-bar.hl .xg2-col{background:linear-gradient(180deg,#5a8bf5,#2f4a8a)}
+.xg2-v{font-size:10.5px;color:var(--mid,#93a0bd);margin-bottom:3px;font-variant-numeric:tabular-nums}
+.xg2-yr{font-size:10.5px;color:var(--lo,#6b769a);margin-top:6px}
+.xg2-g{position:absolute;top:-2px;font-size:9.5px;font-weight:700;border-radius:9px;padding:1px 5px}
+.xg2-g.up{color:#7fe0c0;background:rgba(43,169,178,.16)}.xg2-g.dn{color:#f0a08e;background:rgba(232,101,78,.16)}
+.xg2-rank{display:flex;flex-direction:column;gap:13px}
+.xg2-r{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:9px}
+.xg2-no{width:21px;height:21px;border-radius:5px;background:#2a3550;color:#cdd6ea;font-weight:800;font-size:11px;display:flex;align-items:center;justify-content:center}
+.xg2-no.g1{background:#d9a441;color:#0e1526}
+.xg2-cty{font-weight:650;font-size:13px}
+.xg2-bw{height:8px;background:#0c1424;border-radius:5px;overflow:hidden;margin-top:4px}
+.xg2-bf{height:100%;border-radius:5px}
+.xg2-yo{font-weight:700;font-size:13px;white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+.xg2-amt{color:var(--lo,#93a0bd);font-size:11px;font-weight:500}
+.xg2-up{color:#2ba9b2}.xg2-dn{color:#e8654e}.xg2-neu{color:#93a0bd}
+</style>"""
+
+
+def _render_export_growth(growth: list, period_label: dict = None, total_series: list = None) -> str:
+    """관세청 화장품 수출 — 주식차트 스타일(좌: 총 추이 막대+성장률 · 우: 상위 목적국 랭킹)."""
     if not growth:
         return ('<p class="no-data">수출통계 데이터 없음 '
                 '(관세청 수집 전 · 매월 3일 갱신)</p>')
+    pl = period_label or {}
+    ser = total_series or []
+
+    # ── 좌: 총 수출 추이 막대 + YoY 마커 ──
+    left = ""
+    if ser:
+        mx = max((x["total"] for x in ser), default=1.0) or 1.0
+        cols = []
+        for i, x in enumerate(ser):
+            h = max(8, x["total"] / mx * 100)
+            g = ""
+            if x["yoy"] is not None:
+                cls = "up" if x["yoy"] >= 0 else "dn"
+                g = f'<span class="xg2-g {cls}">{"+" if x["yoy"]>=0 else ""}{x["yoy"]:.0f}%</span>'
+            hl = "hl" if i == len(ser) - 1 else ""
+            cols.append(f'<div class="xg2-bar {hl}">{g}<span class="xg2-v">${x["total"]/1e6:,.0f}M</span>'
+                        f'<div class="xg2-col" style="height:{h:.0f}%"></div><span class="xg2-yr">{x["label"]}</span></div>')
+        left = (f'<div class="xg2-card"><div class="xg2-t">한국 스킨케어 수출 추이</div>'
+                f'<div class="xg2-s">월별 총 수출액($M) · 상단 = 전년동월 대비 성장률</div>'
+                f'<div class="xg2-bars">{"".join(cols)}</div></div>')
+
+    # ── 우: 상위 목적국 3개 랭킹 ──
+    top3 = growth[:3]
+    mxc = max((g["exp_usd_3m"] for g in top3), default=1.0) or 1.0
+    r3 = []
+    for i, g in enumerate(top3):
+        cc = g["country_code"]
+        flag = COUNTRY_FLAGS.get(cc, "🌐")
+        name = _COUNTRY_KO_LBL.get(cc, g["country_name"] or cc)
+        cur = g["exp_usd_3m"] / 1e6
+        yoy = g["yoy_pct"]
+        w = max(6, g["exp_usd_3m"] / mxc * 100)
+        barcol = "#4a80f0" if i == 0 else ("#2ba9b2" if i == 1 else "#93a0bd")
+        if yoy is None:
+            yo = '<span class="xg2-neu">—</span>'
+        else:
+            ycls = "xg2-up" if yoy >= 0 else "xg2-dn"
+            yo = f'<span class="{ycls}">{"▲" if yoy>=0 else "▼"} {"+" if yoy>=0 else ""}{yoy:.0f}%</span>'
+        r3.append(
+            f'<div class="xg2-r"><div class="xg2-no {"g1" if i==0 else ""}">{i+1}</div>'
+            f'<div><div class="xg2-cty">{flag} {_esc(name)}</div>'
+            f'<div class="xg2-bw"><div class="xg2-bf" style="width:{w:.0f}%;background:{barcol}"></div></div></div>'
+            f'<div class="xg2-yo">{yo}<div class="xg2-amt">${cur:,.0f}M</div></div></div>')
+    _plbl = (f'{pl["cur_from"]}~{pl["cur_to"]}' if pl.get("cur_from") else '최근 3개월')
+    right = (f'<div class="xg2-card"><div class="xg2-t">수출 상위 목적국 <span style="color:var(--lo,#6b769a);font-weight:400;font-size:11px">{_plbl}</span></div>'
+             f'<div class="xg2-s">막대=수출액($M, 3개월 합) · ▲▼=전년 동기 대비</div>'
+             f'<div class="xg2-rank">{"".join(r3)}</div></div>')
+
+    if pl.get("cur_from"):
+        _period = (f'<b>{pl["cur_from"]}~{pl["cur_to"]}</b> vs 전년 동기 (관세청 최신 확정월 {pl["latest"]} 기준)')
+    else:
+        _period = '최근 3개월 vs 전년 동기'
+    return (
+        _XG2_STYLE
+        + f'<div class="fin-basis">📊 {_period} · '
+        f'<span class="fin-basis-src">출처 관세청 수출통계(실측 통관액) · HS 330499 스킨케어·기초 · 익월 중순 갱신(1~2개월 지연)</span></div>'
+        + f'<div class="xg2">{left}{right}</div>'
+    )
+
+
+def _render_export_growth_OLD(growth: list, period_label: dict = None) -> str:
+    """(구) 12개국 가로 막대 — 미사용."""
+    if not growth:
+        return ""
     pl = period_label or {}
 
     # 수출 규모순 상위 12개국. 바 = 현재(틸) 위에 전년(회색) 오버레이 → 성장분이 틸로 드러남.
@@ -4476,6 +4568,7 @@ def _build_full_html(
     demand_tri: list = None,
     export_growth: list = None,
     export_period: dict = None,
+    export_total_series: list = None,
     growth_story: dict = None,
     nice_financials: list = None,
     ingredient_trends: list = None,
@@ -4531,7 +4624,7 @@ def _build_full_html(
     _dg = digest or {}
     radar_html        = _render_brand_radar(brand_radar or [])
     demand_html       = _render_demand_signal(demand_tri or [])
-    export_growth_html = _render_export_growth(export_growth or [], export_period or {})
+    export_growth_html = _render_export_growth(export_growth or [], export_period or {}, export_total_series or [])
     growth_story_html  = _render_growth_story(growth_story or {})
     financials_nice_html = _render_financials_nice(nice_financials or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
@@ -5467,8 +5560,9 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         try:
             export_growth = get_market_export_growth(session, hs_like="330499", trailing=3)
             export_period = get_export_period_label(session, trailing=3)
+            export_total_series = get_export_total_series(session, hs_like="330499", months=6)
         except Exception:
-            export_growth, export_period = [], {}
+            export_growth, export_period, export_total_series = [], {}, []
         # 시장 성장 스토리(수출 YoY x 그 시장 경쟁사 활동) — 삼각검증 통합 뷰
         try:
             growth_story = get_market_growth_story(session)
@@ -5743,6 +5837,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         demand_tri=demand_tri,
         export_growth=export_growth,
         export_period=export_period,
+        export_total_series=export_total_series,
         growth_story=growth_story,
         nice_financials=nice_financials,
         ingredient_trends=ingredient_trends,
