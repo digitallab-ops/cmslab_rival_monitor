@@ -108,8 +108,10 @@ def ping_dashboard_refresh() -> None:
     import os
     import requests
     url = os.getenv("RENDER_EXTERNAL_URL") or "https://cmslab-rival-monitor.onrender.com"
+    # ADMIN_KEY 설정 시 refresh가 게이팅되므로 로컬 핑에도 동봉(미설정이면 빈값=통과)
+    _params = {"key": os.getenv("ADMIN_KEY", "").strip()}
     try:
-        requests.post(url.rstrip("/") + "/api/refresh", timeout=10)
+        requests.post(url.rstrip("/") + "/api/refresh", params=_params, timeout=10)
         logger.info("대시보드 refresh 핑 전송: %s", url)
     except Exception as e:
         logger.warning("대시보드 refresh 핑 실패(무시): %s", e)

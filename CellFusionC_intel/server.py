@@ -166,6 +166,14 @@ app = FastAPI(title="K-뷰티 경쟁사 인텔리전스", docs_url="/docs", life
 # MCP 엔드포인트 Bearer 인증 (MCP_API_KEY 설정 시에만). 공개 URL 보호.
 _MCP_API_KEY = os.getenv("MCP_API_KEY", "").strip()
 
+# 관리자 전용 게이팅(기간 조정·실시간 조회·재생성). ADMIN_KEY 미설정 시 통과(하위호환),
+# 설정 시 key 일치 필요. 프론트는 URL ?admin=<key>일 때만 컨트롤 노출.
+_ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()
+
+
+def _admin_ok(key: str) -> bool:
+    return (not _ADMIN_KEY) or ((key or "").strip() == _ADMIN_KEY)
+
 
 class _MCPAuthASGI:
     """마운트된 MCP 앱 앞단 Bearer 인증 래퍼 (키 미설정 시 통과)."""
@@ -210,8 +218,11 @@ async def dashboard():
 
 
 @app.post("/api/refresh")
-async def refresh(background_tasks: BackgroundTasks):
-    """대시보드 재생성 (백그라운드). 로컬 수집 직후 ping_dashboard_refresh가 호출."""
+async def refresh(background_tasks: BackgroundTasks, key: str = Query("")):
+    """대시보드 재생성 (백그라운드). 로컬 수집 직후 ping_dashboard_refresh가 호출.
+    ADMIN_KEY 설정 시 관리자 키 필요(로컬 ping도 ADMIN_KEY 동봉)."""
+    if not _admin_ok(key):
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
     background_tasks.add_task(_regen_async)
     return {"status": "ok", "message": "재생성 중 — 잠시 후 새로고침하세요"}
 
@@ -272,9 +283,12 @@ async def api_ask(request: Request):
 
 @app.get("/api/period")
 async def api_period(from_date: str = Query(..., alias="from"),
-                     to_date: str = Query(..., alias="to")):
+                     to_date: str = Query(..., alias="to"),
+                     key: str = Query("")):
     """임의 구간(과거 포함) 브리핑 데이터 — KPI·기사·synth를 DB에서 직접 조회.
-    클라 90일 캐시로 못 보는 구간(예: 26년 1분기)을 서버가 계산해 반환."""
+    클라 90일 캐시로 못 보는 구간(예: 26년 1분기)을 서버가 계산해 반환. 관리자 전용."""
+    if not _admin_ok(key):
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
     import re as _re
     if not (_re.match(r"^\d{4}-\d{2}-\d{2}$", from_date or "") and _re.match(r"^\d{4}-\d{2}-\d{2}$", to_date or "")):
         return JSONResponse({"error": "날짜 형식 오류(YYYY-MM-DD)"}, status_code=400)
@@ -294,13 +308,16 @@ async def api_period(from_date: str = Query(..., alias="from"),
 async def api_insights(
     from_date: str = Query(..., description="시작일 YYYY-MM-DD"),
     to_date: str   = Query(..., description="종료일 YYYY-MM-DD"),
+    key: str = Query(""),
 ):
-    """날짜 범위 기반 브랜드 전략 인사이트.
+    """날짜 범위 기반 브랜드 전략 인사이트. 관리자 전용.
 
     DB 캐시 히트 → 즉시 반환.
     캐시 미스 → OpenAI 생성 → DB 저장 → 반환.
     동일 날짜 범위는 영구 캐시 (기사가 변하지 않으므로 결과도 동일).
     """
+    if not _admin_ok(key):
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
     from analytics.queries import (
         get_insights_cache,
         upsert_insight_cache,

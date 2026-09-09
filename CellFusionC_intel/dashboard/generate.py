@@ -5029,8 +5029,8 @@ def _build_full_html(
     <button class="tab-btn" data-tab="feed" onclick="switchTab('feed')">기록</button>
     <button class="tab-btn" data-tab="search" onclick="switchTab('search')">검색</button>
   </div>
-  <div class="period-row">
-    <span class="period-row-label">기간<span class="period-basis-hint" title="상단 기간은 뉴스 수집 범위(KPI·기사·지도·브랜드동향)에 적용됩니다. 검색=주간, 수출=월간, 재무=연간처럼 데이터 성격상 자체 기준을 쓰는 모듈은 각 섹션에 기준을 표기합니다.">ⓘ 뉴스 기준</span></span>
+  <div class="period-row" id="admin-bar" style="display:none">
+    <span class="period-row-label">🔒 관리자<span class="period-basis-hint" title="상단 기간은 뉴스 수집 범위(KPI·기사·지도·브랜드동향)에 적용됩니다. 검색=주간, 수출=월간, 재무=연간처럼 데이터 성격상 자체 기준을 쓰는 모듈은 각 섹션에 기준을 표기합니다.">ⓘ 뉴스 기준</span></span>
     <div class="period-presets" id="pb-presets">
       <button class="period-btn{"" if days != 30 else " active"}" data-days="30" onclick="setPeriod(30)">30일</button>
       <button class="period-btn{"" if days != 60 else " active"}" data-days="60" onclick="setPeriod(60)">60일</button>
@@ -5043,24 +5043,38 @@ def _build_full_html(
       <input type="date" id="to-date" class="period-date-input" />
       <button class="period-apply-btn" onclick="applyDateRange()">조회</button>
     </div>
+    <div class="period-vsep"></div>
+    <button class="period-apply-btn" onclick="adminRefresh()" title="최신 DB로 대시보드 재생성">🔄 실시간 새로고침</button>
     <span id="period-msg" class="period-msg" style="display:none"></span>
   </div>
+  <script>
+  (function(){{
+    var m = location.search.match(/[?&]admin=([^&]+)/);
+    window.ADMIN_KEY = m ? decodeURIComponent(m[1]) : '';
+    if (window.ADMIN_KEY) {{ var b=document.getElementById('admin-bar'); if(b) b.style.display=''; }}
+  }})();
+  function adminRefresh(){{
+    var msg=document.getElementById('period-msg');
+    if(msg){{ msg.style.display=''; msg.textContent='재생성 요청 중…'; }}
+    fetch('/api/refresh?key='+encodeURIComponent(window.ADMIN_KEY||''), {{method:'POST'}})
+      .then(function(r){{return r.json();}})
+      .then(function(d){{ if(msg){{ msg.style.display=''; msg.textContent=(d.message||d.error||'요청됨')+' (30~60초 후 새로고침)'; }} }})
+      .catch(function(e){{ if(msg){{ msg.style.display=''; msg.textContent='실패: '+e; }} }});
+  }}
+  </script>
 </div>
 
 <div class="page-body">
 
   <!-- ===== 탭: 브리핑 (심플 종합 — 지금 대응→오늘→이번주→스토리) ===== -->
   <div class="tab-panel active" id="tab-overview">
-    <!-- 1) 이번 주 주목 관점 (최우선) -->
-    <div class="eyebrow"><span class="lab">이번 주 주목 관점</span><span class="rule"></span><span class="rt">📅 {b_7d} · 매일 갱신</span></div>
-    {action_banner_html}
+    <!-- (제거) 이번 주 주목 관점 — 주간 총평이 대체. action_banner는 숨김 보존 -->
+    <div style="display:none">{action_banner_html}</div>
 
     <!-- 2) 오늘 핵심 지표 -->
     {metric_rail_html}
 
-    <!-- 2b) 우리(셀퓨전씨) 위치 — 경쟁사 대비 기준선 -->
-    <div class="eyebrow"><span class="lab">🪞 우리(셀퓨전씨) 위치</span><span class="rule"></span><span class="rt">경쟁사 대비 기준선</span></div>
-    {self_position_html}
+    <!-- (이동) 우리 위치 → 경쟁사 탭으로 이동 -->
 
     <!-- 3) 주간 브리핑 — 종합 총평 → 급성장 시장 → 브랜드별 국가 공략(접힘/펼침) -->
     <div class="eyebrow"><span class="lab">주간 브리핑</span><span class="rule"></span><span class="rt">📅 {b_7d} · 매일 갱신</span></div>
@@ -5073,7 +5087,22 @@ def _build_full_html(
   <!-- ===== 탭: 경쟁사 ===== -->
   <div class="tab-panel" id="tab-brands">
     {brand_candidates_html}
+
+    <!-- 우리(셀퓨전씨) 위치 (브리핑에서 이동) — 경쟁사 대비 기준선 -->
+    <div class="eyebrow"><span class="lab">🪞 우리(셀퓨전씨) 위치</span><span class="rule"></span><span class="rt">경쟁사 대비 기준선</span></div>
+    {self_position_html}
+
     {competitor_tab_html}
+
+    <!-- 상표 제품 추측 + 전성분 (근거 접힘에서 승격 — 잘 보이게) -->
+    <div class="section" id="cx-ev-tm">
+      <div class="section-title">🪧 해외 상표 출원 · 제품 추측 <span class="section-sub">미국·일본 출원 조합으로 어떤 제품·전략인지 판독(추측)</span><span class="section-basis">📅 최근 18개월({_bden(547)}~{_bt}) 출원분</span></div>
+      {trademark_html}
+    </div>
+    <div class="section">
+      <div class="section-title">🧴 제품 전성분 인텔 <span class="section-sub">전성분→핵심성분·효능→셀퓨전씨 대응각</span></div>
+      {ingredient_intel_html}
+    </div>
 
     <!-- 근거 자료: cross-brand 원자료 상세표(기본 접힘) -->
     <details class="evidence-fold">
@@ -5094,14 +5123,6 @@ def _build_full_html(
       <div class="section">
         <div class="section-title">🧪 경쟁사 성분 지형 <span class="section-sub">경쟁 신제품에 뜨는 성분·주도 브랜드</span><span class="section-basis">{b_ingr}</span></div>
         {ingredient_trends_html}
-      </div>
-      <div class="section">
-        <div class="section-title">🧴 제품 전성분 인텔 <span class="section-sub">전성분→핵심성분·효능→셀퓨전씨 대응각</span></div>
-        {ingredient_intel_html}
-      </div>
-      <div class="section" id="cx-ev-tm">
-        <div class="section-title">🪧 해외 상표 출원 <span class="section-sub">미국·일본 출원 — 진출 선행신호</span><span class="section-basis">📅 최근 18개월({_bden(547)}~{_bt}) 출원분</span></div>
-        {trademark_html}
       </div>
       <div class="section">
         <div class="section-title">브랜드별 HIGH 비중</div>
@@ -5455,7 +5476,7 @@ function applyDateRange() {{
   var lbl = document.getElementById('period-label'); if (lbl) lbl.textContent = fromStr + ' ~ ' + toStr;
 
   // 서버 조회 — 임의 구간(과거 포함, 90일 제한 없음). DB에서 KPI·기사·synth 계산.
-  fetch('/api/period?from=' + encodeURIComponent(fromStr) + '&to=' + encodeURIComponent(toStr))
+  fetch('/api/period?from=' + encodeURIComponent(fromStr) + '&to=' + encodeURIComponent(toStr) + (window.ADMIN_KEY ? '&key=' + encodeURIComponent(window.ADMIN_KEY) : ''))
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
       if (d.error) {{ if (msgEl) {{ msgEl.style.display=''; msgEl.textContent=d.error; }} return; }}
@@ -5485,7 +5506,7 @@ function _fetchInsights(fromStr, toStr) {{
   var grid = document.getElementById('insight-grid');
   if (!grid) return;
   grid.innerHTML = '<div style="padding:32px;text-align:center;color:#9ca3af;font-size: 14.5px;">인사이트 생성 중...</div>';
-  fetch('/api/insights?from_date=' + encodeURIComponent(fromStr) + '&to_date=' + encodeURIComponent(toStr))
+  fetch('/api/insights?from_date=' + encodeURIComponent(fromStr) + '&to_date=' + encodeURIComponent(toStr) + (window.ADMIN_KEY ? '&key=' + encodeURIComponent(window.ADMIN_KEY) : ''))
     .then(function(r) {{ return r.json(); }})
     .then(function(data) {{
       if (window._renderInsights) window._renderInsights(data);
