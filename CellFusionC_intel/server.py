@@ -217,6 +217,12 @@ async def dashboard():
     return HTMLResponse(_dashboard_html, headers=_NO_CACHE)
 
 
+@app.get("/api/admin-check")
+async def admin_check(key: str = Query("")):
+    """관리자 비밀번호 확인 — 프론트 잠금해제용. 일치 여부만 반환(값 노출 없음)."""
+    return {"ok": _admin_ok(key)}
+
+
 @app.post("/api/refresh")
 async def refresh(background_tasks: BackgroundTasks, key: str = Query("")):
     """대시보드 재생성 (백그라운드). 로컬 수집 직후 ping_dashboard_refresh가 호출.
