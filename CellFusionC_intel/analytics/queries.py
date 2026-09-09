@@ -1792,6 +1792,53 @@ def get_export_total_series(session: Session, hs_like: str = "330499", months: i
     return out
 
 
+def get_export_stacked_series(session: Session, hs_like: str = "330499",
+                              months: int = 6, top_n: int = 4) -> dict:
+    """월별 총 수출액 + 국가별 구성(누적 막대용). 상위 top_n국 + 기타.
+    반환: {labels:[], countries:[{cc,name}...], series:[{label,total,segs:{cc:usd}}]}. 없으면 {}."""
+    try:
+        periods = [r[0] for r in session.execute(text(f"""
+            SELECT DISTINCT period FROM {DB_SCHEMA}.export_stats
+            WHERE hs_cd LIKE :hs ORDER BY period DESC LIMIT :m
+        """), {"hs": hs_like, "m": months}).fetchall()]
+        if not periods:
+            return {}
+        periods = list(reversed(periods))
+        tops = session.execute(text(f"""
+            SELECT country_code, MAX(country_name) nm, SUM(exp_usd)::float e
+            FROM {DB_SCHEMA}.export_stats
+            WHERE hs_cd LIKE :hs AND period = ANY(:ps)
+            GROUP BY country_code ORDER BY e DESC LIMIT :n
+        """), {"hs": hs_like, "ps": periods, "n": top_n}).fetchall()
+        top_ccs = [r[0] for r in tops]
+        rows = session.execute(text(f"""
+            SELECT period, country_code, SUM(exp_usd)::float e
+            FROM {DB_SCHEMA}.export_stats
+            WHERE hs_cd LIKE :hs AND period = ANY(:ps)
+            GROUP BY period, country_code
+        """), {"hs": hs_like, "ps": periods}).fetchall()
+    except Exception:
+        return {}
+    by_period: dict = {p: {"total": 0.0, "top": {}} for p in periods}
+    for period, cc, e in rows:
+        e = float(e or 0)
+        d = by_period.get(period)
+        if d is None:
+            continue
+        d["total"] += e
+        if cc in top_ccs:
+            d["top"][cc] = d["top"].get(cc, 0.0) + e
+    series = []
+    for p in periods:
+        d = by_period[p]
+        segs = {cc: d["top"].get(cc, 0.0) for cc in top_ccs}
+        segs["기타"] = max(0.0, d["total"] - sum(segs.values()))
+        lbl = p.strftime("%y.%m") if hasattr(p, "strftime") else str(p)[2:7]
+        series.append({"label": lbl, "total": d["total"], "segs": segs})
+    countries = [{"cc": r[0], "name": r[1]} for r in tops] + [{"cc": "기타", "name": "기타"}]
+    return {"labels": [s["label"] for s in series], "countries": countries, "series": series}
+
+
 def get_export_period_label(session: Session, trailing: int = 3) -> dict:
     """수출 랭킹이 실제 커버하는 월 범위 — '최근 3개월'의 실제 기간을 라벨로 명시하기 위함.
 
