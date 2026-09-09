@@ -1099,8 +1099,46 @@ def _render_search_spikes(spikes: list) -> str:
     return '<div class="sp-list">' + "".join(rows) + '</div>'
 
 
+# 상표명 속 성분·용어 → 한국어 풀이(무슨 성분인지 바로 알 수 있게). 대문자 부분일치.
+_TM_GLOSSARY = [
+    ("MADECASSOSIDE", "마데카소사이드(병풀유래·진정재생)"),
+    ("CENTELLA", "센텔라(병풀·진정재생)"), ("CICA", "시카(병풀·진정)"),
+    ("TECA", "테카(병풀 4성분·진정)"), ("HEARTLEAF", "어성초(진정)"),
+    ("PDRN", "PDRN(연어DNA·재생·수분)"), ("HYALURON", "히알루론산(수분)"),
+    ("HYAL", "히알루론산(수분)"), ("NIACINAMIDE", "나이아신아마이드(미백·장벽)"),
+    ("QUERCETIN", "퀘르세틴(항산화 플라보노이드)"), ("PROBIO", "프로바이오틱스(피부 미생물 균형)"),
+    ("NON-COMED", "논코메도제닉(모공 막힘 적음)"), ("NONCOMED", "논코메도제닉(모공 막힘 적음)"),
+    ("AZELAIC", "아젤라산(진정·잡티)"), ("RETINAL", "레티날(주름·턴오버)"),
+    ("RETINOL", "레티놀(주름·턴오버)"), ("COLLAGEN", "콜라겐(탄력)"),
+    ("PEPTIDE", "펩타이드(탄력·재생)"), ("GLUTATHIONE", "글루타치온(미백·항산화)"),
+    ("TRUFFLE", "트러플(영양)"), ("TONE-UP", "톤업(피부톤 보정)"), ("TONEUP", "톤업(피부톤 보정)"),
+    ("BARRIER", "피부장벽(보습 강화)"), ("LONGEVITY", "안티에이징(장기 탄력)"),
+    ("SOOTHING", "진정"), ("HEALING", "힐링(진정·회복)"), ("VITA", "비타민(항산화·미백)"),
+    ("SUNSCREEN", "자외선 차단"), ("SUN", "자외선 차단"), ("LAYER", "레이어링(층상 보습)"),
+    ("PROBIOTICS", "프로바이오틱스(피부 미생물 균형)"), ("OIL", "오일(클렌징·영양)"),
+]
+
+
+def _tm_ingredients(mark: str, limit: int = 3) -> str:
+    """상표명에서 알려진 성분·용어를 찾아 한국어 풀이(중복 제거, 최대 limit개)."""
+    if not mark:
+        return ""
+    up = mark.upper()
+    seen, out = set(), []
+    for kw, desc in _TM_GLOSSARY:
+        if kw in up and desc not in seen:
+            seen.add(desc)
+            out.append(desc)
+        if len(out) >= limit:
+            break
+    return " · ".join(out)
+
+
 def _render_trademark(sig: dict) -> str:
     """해외 상표 출원 선행신호 — 최근 자기출원(화장품) 피드 + 브랜드 요약."""
+    def _tbko(b):
+        v = BRAND_KO_NAMES.get(b)
+        return (v[0] if isinstance(v, list) and v else (v or b))
     feed = (sig or {}).get("feed") or []
     brands = (sig or {}).get("brands") or []
     if not feed and not brands:
@@ -1115,7 +1153,7 @@ def _render_trademark(sig: dict) -> str:
         flag = COUNTRY_FLAGS.get(b["country"], "🌐")
         chips.append(
             f'<span class="tm-chip"><span class="tm-chip-flag">{flag}</span>'
-            f'<b>{_esc(b["brand"])}</b> <span class="tm-chip-n">최근 {b["recent"]}건</span></span>'
+            f'<b>{_esc(_tbko(b["brand"]))}</b> <span class="tm-chip-n">최근 {b["recent"]}건</span></span>'
         )
     chips_html = f'<div class="tm-chips">{"".join(chips)}</div>' if chips else ""
 
@@ -1127,7 +1165,7 @@ def _render_trademark(sig: dict) -> str:
         if rd:
             flag = COUNTRY_FLAGS.get(b["country"], "🌐")
             read_rows.append(
-                f'<div class="tm-read"><span class="tm-read-brand">{flag} {_esc(b["brand"])}</span>'
+                f'<div class="tm-read"><span class="tm-read-brand">{flag} {_esc(_tbko(b["brand"]))}</span>'
                 f'<span class="tm-read-txt">{_esc(rd)}</span></div>')
     reads_html = (f'<div class="tm-reads"><div class="tm-reads-h">🔮 상표 판독 — 조합이 시사하는 방향</div>'
                   f'{"".join(read_rows)}</div>') if read_rows else ""
@@ -1136,12 +1174,14 @@ def _render_trademark(sig: dict) -> str:
     rows = []
     for f in feed:
         flag = COUNTRY_FLAGS.get(f["country"], "🌐")
+        ingr = _tm_ingredients(f["mark"] or "")
+        ingr_html = f'<span class="tm-ingr">💊 {_esc(ingr)}</span>' if ingr else ""
         rows.append(
             f'<div class="tm-row">'
             f'<span class="tm-date">{_esc(f["date"])}</span>'
             f'<span class="tm-flag">{flag}</span>'
-            f'<span class="tm-brand">{_esc(f["brand"])}</span>'
-            f'<span class="tm-mark">{_esc(f["mark"] or "")}</span>'
+            f'<span class="tm-brand">{_esc(_tbko(f["brand"]))}</span>'
+            f'<span class="tm-mark">{_esc(f["mark"] or "")}{ingr_html}</span>'
             f'</div>'
         )
     return chips_html + reads_html + '<div class="tm-list">' + "".join(rows) + '</div>'
@@ -2467,6 +2507,7 @@ a:hover { color: var(--gold); }
 .tm-flag { flex-shrink: 0; }
 .tm-brand { font-weight: 700; color: var(--hi); min-width: 120px; white-space: nowrap; flex-shrink: 0; }
 .tm-mark { color: var(--mid); letter-spacing: 0.02em; }
+.tm-ingr { display: block; margin-top: 2px; font-size: 11px; color: #9fd8be; letter-spacing: 0; }
 
 /* ── 개요 성장 헤드라인 배너 ── */
 .gh-band { display: flex; gap: 20px; flex-wrap: wrap; align-items: stretch;

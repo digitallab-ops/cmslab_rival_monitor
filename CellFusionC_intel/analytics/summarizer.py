@@ -417,7 +417,17 @@ def generate_trademark_reads(brand_marks: dict) -> dict:
     items = [(b, ms) for b, ms in brand_marks.items() if ms]
     if not items:
         return {}
-    lines = [f"[{i}] {b}: {', '.join(ms[:8])}" for i, (b, ms) in enumerate(items)]
+    # 브랜드명은 화면에서 별도로 표기하므로, LLM에는 한국어명을 참고로만 주고
+    # 판독문에는 브랜드명을 반복하지 않게 한다(예: 'Anua'→'안와' 오음역 방지).
+    try:
+        from config.brands import BRAND_KO_NAMES as _BKN
+        def _ko(b):
+            v = _BKN.get(b)
+            return (v[0] if isinstance(v, list) and v else (v or b))
+    except Exception:
+        def _ko(b):
+            return b
+    lines = [f"[{i}] {_ko(b)}: {', '.join(ms[:8])}" for i, (b, ms) in enumerate(items)]
     prompt = f"""당신은 씨엠에스랩(더마 선케어 '셀퓨전씨')의 경쟁 인텔리전스 분석가입니다.
 아래는 경쟁 브랜드들이 최근 미국·일본에 낸 상표 출원명 목록입니다. 상표명은 신제품·신라인의
 선행신호입니다. 각 브랜드의 상표 조합이 **무슨 방향(신제품 카테고리·라인 확장·디바이스 등)을
@@ -427,7 +437,9 @@ def generate_trademark_reads(brand_marks: dict) -> dict:
 
 - 예: "괄사(gua sha)+스킨케어 상표 동시 출원 → 뷰티툴·디바이스 라인 확장 가능성"
 - 상표명에서 읽히는 **제품군/성분/폼팩터**를 근거로. 억지 추측은 피하고 근거 약하면 '~일 수 있음' 정도로.
-- 각 30자 내외, 한국어.
+- **브랜드명은 화면에 따로 표기되니 판독문에 브랜드명을 다시 쓰지 말고, 방향(동사구)으로 시작**하세요.
+  (예: "센텔라·프로바이오틱스 성분 강화 제품군으로 확장하는 것으로 보임")
+- 각 35자 내외, 한국어.
 {_TONE_GUIDE}
 반드시 JSON만: {{"reads": [{{"i": 0, "read": "..."}}, ...]}} — 모든 인덱스 포함."""
     try:
