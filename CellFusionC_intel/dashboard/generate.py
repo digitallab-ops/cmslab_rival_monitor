@@ -61,13 +61,18 @@ from analytics.queries import (
     get_oliveyoung_review_landscape,
     get_product_ingredient_intel,
     get_self_position,
+    get_retail_performance,
+    get_brief_records,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
     generate_opportunity_actions, generate_trademark_reads,
 )
+from analytics.brief_strategy import build_brief_strategy
 from analytics.history import get_score_trend
 from storage.models import get_session
+from sqlalchemy import text as _sql_text
+from config.settings import DB_SCHEMA
 from config.brands import (ALL_BRANDS, BRAND_KO_NAMES, ACTIVITY_GROUPS,
                             ACTIVITY_GROUP_ORDER, ACTIVITY_GROUP_OF, STORE_ONLY_ACTS)
 
@@ -4511,6 +4516,275 @@ def _render_competitor_tab(dossier_json: str, basis_text: str,
             + _CX_SCRIPT)
 
 
+_VERDICT_KO = {"real": "실제 수요", "latent": "숨은 수요", "pr": "홍보 위주", "stable": "조용함"}
+_BRIEF_LABEL = {
+    "market":   {"t": "뜨는 시장",   "c": "#5bbf8a", "d": "국가 자체가 성장 — 여러 브랜드 동시 반응"},
+    "verified": {"t": "판매까지 검증", "c": "#e8654e", "d": "리테일 상위 + 검색 동반"},
+    "pr":       {"t": "홍보 우세",    "c": "#d9a441", "d": "보도는 많으나 검색·판매 미동반"},
+    "watch":    {"t": "관찰 대상",    "c": "#4a80f0", "d": "신호는 있으나 아직 한 축 중심"},
+    "early":    {"t": "초기 신호",    "c": "#93a0bd", "d": "아직 뉴스 한 축뿐"},
+}
+_BRIEF_STYLE = """<style>
+#bf2{margin-top:4px}
+#bf2 .tongp{padding:16px 18px;background:linear-gradient(135deg,#16213a,#131c2d);border:1px solid #26314e;border-left:3px solid #e0ad4a;border-radius:12px;margin:0 0 14px}
+#bf2 .tongp .tl{font-size:11px;letter-spacing:.14em;color:#e0ad4a;font-weight:800;margin-bottom:8px}
+#bf2 .tongp p{margin:0;font-size:14.5px;line-height:1.75;color:#e2e7f2}
+#bf2 .bf-strip{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
+#bf2 .bf-kpi{background:#141d33;border:1px solid #26314e;border-radius:9px;padding:8px 13px;min-width:96px}
+#bf2 .bf-kpi .n{font-size:19px;font-weight:800;color:#e7ecf7;font-variant-numeric:tabular-nums}
+#bf2 .bf-kpi .k{font-size:11px;color:#6b769a;display:block}
+#bf2 .bsec{font-size:14px;font-weight:800;margin:24px 0 11px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+#bf2 .bsec .sub{font-size:11px;color:#6b769a;font-weight:500}
+#bf2 .mkt{background:#141d33;border:1px solid #26314e;border-radius:12px;padding:15px 18px}
+#bf2 .mrow{display:grid;grid-template-columns:120px 1fr 54px;align-items:center;gap:11px;padding:4px 0}
+#bf2 .mc{font-size:12.5px;color:#e7ecf7;font-weight:600}
+#bf2 .mbar{position:relative;background:rgba(255,255,255,.05);border-radius:5px;height:18px;overflow:hidden}
+#bf2 .mbar>div{height:100%;background:linear-gradient(90deg,#3a6fd0,#5a8bf5);border-radius:5px}
+#bf2 .ml{position:absolute;right:8px;top:0;height:100%;display:flex;align-items:center;font-size:11px;color:#eaf0ff;font-weight:700}
+#bf2 .my{font-size:12px;font-weight:700;text-align:right;color:#93a0bd;font-variant-numeric:tabular-nums}
+#bf2 .bigcap{margin-top:10px;padding-top:10px;border-top:1px solid #26314e;font-size:11px;color:#6b769a}
+#bf2 .list{border:1px solid #26314e;border-radius:12px;overflow:hidden;background:#141d33}
+#bf2 .brow{padding:13px 16px;cursor:pointer;border-bottom:1px solid rgba(37,49,76,.55);transition:background .12s}
+#bf2 .brow:hover{background:rgba(90,139,245,.06)}
+#bf2 .bhead{display:grid;grid-template-columns:20px 118px 1fr auto 76px;align-items:center;gap:12px}
+#bf2 .bsum{font-size:12.5px;color:#aeb8cf;line-height:1.55;margin:7px 0 0 32px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#bf2 .tri{color:#6b769a;font-size:12px;transition:transform .15s;display:inline-block}
+#bf2 .tri.op{transform:rotate(90deg);color:#e0ad4a}
+#bf2 .bname{font-size:16px;font-weight:800;color:#e7ecf7}
+#bf2 .bflags{font-size:12px;color:#93a0bd;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bf2 .bctry{font-size:12px;color:#6b769a;font-weight:600;white-space:nowrap}
+#bf2 .battn{width:76px;height:6px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;display:inline-block}
+#bf2 .battn>span{display:block;height:100%;background:linear-gradient(90deg,#c98f2e,#e0ad4a)}
+#bf2 .bexp{display:none;padding:4px 16px 16px 48px;background:#0f1726;border-bottom:1px solid rgba(37,49,76,.55)}
+#bf2 .bexp.op{display:block}
+#bf2 .ccb{padding:12px 0;border-top:1px solid rgba(37,49,76,.5)}
+#bf2 .ccb:first-child{border-top:0}
+#bf2 .cch{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:6px;color:#e7ecf7}
+#bf2 .cdot{width:8px;height:8px;border-radius:50%;background:#e0ad4a;flex:none}
+#bf2 .clab{font-size:10px;font-weight:800;padding:2px 7px;border-radius:20px}
+#bf2 .cprod{font-size:13.5px;color:#eef1f8;margin:3px 0}
+#bf2 .cprod b{font-weight:700}
+#bf2 .cprod a{color:#eef1f8;text-decoration:none;border-bottom:1px dashed #4a577a}
+#bf2 .cprod a:hover{color:#8fb4ff}
+#bf2 .cpm{display:block;font-size:11.5px;color:#93a0bd;margin-top:2px}
+#bf2 .cwhy{font-size:13px;color:#9fd8be;margin:5px 0 0;line-height:1.55}
+#bf2 .cstrat{font-size:13px;color:#a9c2ff;margin:6px 0 0;line-height:1.55}
+#bf2 .quiet{font-size:11.5px;color:#6b769a;margin:12px 0 0;padding:10px 14px;background:#0f1726;border:1px solid #26314e;border-radius:9px;line-height:1.6}
+#bf2 .bhint{font-size:11.5px;color:#6b769a;margin:10px 2px 0;text-align:center}
+#bf2 .bf-empty{color:#6b769a;font-size:13px;padding:16px}
+</style>"""
+
+# 국가코드→한글(대시보드 _COUNTRY_KO_LBL의 영문 매핑 AE='UAE' 등을 오버라이드)
+_BF_CC = {"US": "미국", "JP": "일본", "KR": "한국", "CN": "중국", "GB": "영국", "PL": "폴란드",
+          "SG": "싱가포르", "TH": "태국", "CA": "캐나다", "AU": "호주", "DE": "독일", "FR": "프랑스",
+          "ID": "인도네시아", "MY": "말레이시아", "VN": "베트남", "PH": "필리핀", "IT": "이탈리아",
+          "IN": "인도", "MX": "멕시코", "RU": "러시아", "ES": "스페인", "PT": "포르투갈", "KE": "케냐",
+          "EU": "유럽", "UZ": "우즈베키스탄", "AE": "아랍에미리트", "UAE": "아랍에미리트", "BR": "브라질",
+          "SA": "사우디", "NL": "네덜란드", "SE": "스웨덴", "TR": "튀르키예"}
+_BF_TAC = {"신시장_진출": ("🚩", "신흥시장 선점"), "유통_채널": ("🏬", "유통망 확대"),
+           "신제품_런칭": ("🧪", "신제품 출시"), "브랜드_마케팅": ("📣", "브랜드 마케팅"),
+           "인플루언서_협업": ("👥", "인플루언서"), "가격_프로모션": ("🏷️", "프로모션"),
+           "투자_BD": ("🤝", "투자·제휴")}
+_BF_CHNORM = {"ulta beauty": "얼타뷰티", "ulta": "얼타뷰티", "얼타뷰티": "얼타뷰티", "얼타": "얼타뷰티",
+              "sephora": "세포라", "세포라": "세포라", "amazon": "아마존", "아마존": "아마존",
+              "olive young": "올리브영", "올리브영": "올리브영", "oliveyoung": "올리브영",
+              "qoo10": "큐텐", "큐텐": "큐텐", "큐텐재팬": "큐텐재팬", "coupang": "쿠팡", "쿠팡": "쿠팡",
+              "costco": "코스트코", "코스트코": "코스트코", "boots": "부츠", "iherb": "아이허브",
+              "콜스": "콜스", "kohls": "콜스", "kohl's": "콜스", "나이카": "나이카", "무신사": "무신사",
+              "다이소": "다이소", "cj온스타일": "CJ온스타일", "롯데온": "롯데온", "plaza": "플라자",
+              "플라자": "플라자", "로프트": "로프트", "walmart": "월마트"}
+_BF_PROD_PRE = [r"^d[\'’]?alba\s*(piedmont)?", r"^SKIN1004", r"^Beauty of Joseon", r"^Abib",
+                r"^Anua", r"^ANUA\([^)]*\)", r"^CENTELLIAN\s*24", r"^MEDIHEAL", r"^medicube",
+                r"^COSRX", r"^VT", r"^Numbuzin", r"^numbuzin", r"^Mixsoon", r"^mixsoon"]
+
+
+def _bf_cty(c):
+    c = (c or "").upper()
+    return _BF_CC.get(c) or _COUNTRY_KO_LBL.get(c) or c
+
+
+def _bf_prod_name(p):
+    import re as _re
+    if not p:
+        return None
+    p = _re.sub(r"\[[^\]]*\]", "", p)
+    p = _re.sub(r"\s+", " ", p).strip(" ,·-")
+    for pre in _BF_PROD_PRE:
+        p = _re.sub(pre, "", p, flags=_re.I).strip(" ,·-")
+    return p[:48] or None
+
+
+def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
+                       monitored=None, days_label="") -> str:
+    """브리핑 — 종합 총평 + 급성장 시장 + 브랜드별 국가 공략(접힘/펼침, 나라별 제품·왜·전략).
+    strat_data: build_brief_strategy 반환({strat,why,bsum,tongp,active}). 없으면 총평·해석 생략."""
+    if not records:
+        return _BRIEF_STYLE + '<div id="bf2"><p class="bf-empty">최근 기간에 잡힌 경쟁 활동이 없습니다.</p></div>'
+    rp = rp or {}
+    mkt = mkt or []
+    sd = strat_data or {}
+    strat = sd.get("strat", {})
+    why = sd.get("why", {})
+    bsum = sd.get("bsum", {})
+    tongp = sd.get("tongp", "")
+
+    def _bko(b):
+        v = BRAND_KO_NAMES.get(b)
+        return (v[0] if isinstance(v, list) and v else (v or b))
+
+    def _line_of(r):
+        from analytics.brief_strategy import is_meaningful_line
+        v = strat.get((r["brand"], r["country"]))
+        return v.strip() if (v and is_meaningful_line(v)) else None
+
+    def _channels(r, k=3):
+        agg = {}
+        for name, cnt in (r.get("channels") or {}).items():
+            nn = _BF_CHNORM.get(str(name).strip().lower(), str(name).strip())
+            agg[nn] = agg.get(nn, 0) + cnt
+        return [x for x, _ in sorted(agg.items(), key=lambda z: -z[1])][:k]
+
+    def _tactics(r, k=2):
+        t = r.get("tactics") or {}
+        return [kk for kk, _ in sorted(t.items(), key=lambda z: -z[1]) if kk in _BF_TAC][:k]
+
+    from collections import defaultdict as _dd
+    g = _dd(list)
+    for r in records:
+        g[r["brand"]].append(r)
+
+    def _brand_countries(b, rs):
+        cc_map = {}
+        bc = (rp.get(b) or {}).get("by_country") or {}
+        for cc, it in bc.items():
+            if (it.get("review_count") or 0) < 100:
+                continue
+            cc_map.setdefault(cc, {})["prod"] = it
+            cc_map[cc]["why"] = why.get((b, cc))
+        for r in rs:
+            ln = _line_of(r)
+            if not ln:
+                continue
+            d = cc_map.setdefault(r["country"], {})
+            d["strat"] = ln
+            d["label"] = r["label"]
+        def keyf(kv):
+            cc, d = kv
+            return (0 if d.get("prod") else 1, d.get("prod", {}).get("rank", 999))
+        return sorted(cc_map.items(), key=keyf)
+
+    brands = sorted(g.items(), key=lambda x: -sum(r.get("attn", 0) for r in x[1]))
+    maxb = max((sum(r.get("attn", 0) for r in rs) for _, rs in brands), default=1)
+
+    rows_html = ""
+    idx = 0
+    shown_brands = set()
+    for b, rs in brands:
+        ccs = _brand_countries(b, rs)
+        if not ccs:
+            continue
+        idx += 1
+        shown_brands.add(b)
+        battn = sum(r.get("attn", 0) for r in rs)
+        aw = battn / maxb * 100
+        _cn = [_bf_cty(cc) for cc, _ in ccs]
+        ctrytxt = " · ".join(_cn[:4]) + (f" 외 {len(_cn)-4}" if len(_cn) > 4 else "")
+        blocks = ""
+        for cc, d in ccs[:6]:
+            lab = ""
+            if d.get("label"):
+                lm = _BRIEF_LABEL.get(d["label"], _BRIEF_LABEL["watch"])
+                lab = f'<span class="clab" style="color:{lm["c"]};background:{lm["c"]}1a">{lm["t"]}</span>'
+            prodhtml = ""
+            if d.get("prod"):
+                it = d["prod"]
+                pn = _bf_prod_name(it.get("product")) or "제품"
+                rk = it["rank"]
+                cat = it.get("category") or ""
+                rv = it.get("review_count") or 0
+                rating = it.get("rating")
+                url = it.get("url")
+                star = f" · ★{rating}" if rating else ""
+                pn_h = (f'<a href="{_esc(url)}" target="_blank" rel="noopener">{_esc(pn)}</a>'
+                        if url else _esc(pn))
+                prodhtml = (f'<div class="cprod">🛒 <b>{pn_h}</b>'
+                            f'<span class="cpm">아마존 {_esc(cat)} {rk}위 · 리뷰 {rv:,}{star}</span></div>')
+                if d.get("why"):
+                    prodhtml += f'<div class="cwhy">💡 {_esc(d["why"])}</div>'
+            strat_h = f'<div class="cstrat">📈 {_esc(d["strat"])}</div>' if d.get("strat") else ""
+            blocks += (f'<div class="ccb"><div class="cch"><span class="cdot"></span>'
+                       f'<b>{_esc(_bf_cty(cc))}</b> {lab}</div>{prodhtml}{strat_h}</div>')
+        bs = _esc(bsum.get(b) or "")
+        rows_html += (
+            f'<div class="brow" onclick="bf2tg({idx})"><div class="bhead">'
+            f'<span class="tri" id="bf2t{idx}">▸</span>'
+            f'<span class="bname">{_esc(_bko(b))}</span>'
+            f'<span class="bflags">{ctrytxt}</span>'
+            f'<span class="bctry">{len(ccs)}개국</span>'
+            f'<span class="battn"><span style="width:{aw:.0f}%"></span></span></div>'
+            f'<div class="bsum">{bs}</div></div>'
+            f'<div class="bexp" id="bf2e{idx}">{blocks}</div>')
+
+    # ── 급성장 시장(성장률 순, $8M+) ──
+    mk = [m for m in mkt if m.get("yoy_pct") is not None and m.get("exp_usd_3m", 0) >= 8e6]
+    mk = sorted(mk, key=lambda z: -z["yoy_pct"])[:6]
+    ymax = max((m["yoy_pct"] for m in mk), default=1)
+    mbars = ""
+    for m in mk:
+        w = max(m["yoy_pct"] / ymax * 100, 7)
+        usd = m["exp_usd_3m"] / 1e6
+        mbars += (f'<div class="mrow"><span class="mc">{_esc(m["country_name"])}</span>'
+                  f'<div class="mbar"><div style="width:{w:.0f}%"></div>'
+                  f'<span class="ml">전년比 ▲{m["yoy_pct"]:.0f}%</span></div>'
+                  f'<span class="my">${usd:,.0f}M</span></div>')
+    big = sorted([m for m in mkt if m.get("exp_usd_3m")], key=lambda z: -z["exp_usd_3m"])[:3]
+    big_cap = " · ".join(f'{_esc(m["country_name"])} ${m["exp_usd_3m"]/1e6:,.0f}M' for m in big)
+    mkt_html = (f'<div class="bsec">🔥 급성장 중인 시장 <span class="sub">수출 증가율 순 · '
+                f'관세청 확정월 vs 전년동기 · HS330499</span></div>'
+                f'<div class="mkt">{mbars}<div class="bigcap">규모 최대 시장(절대 수출액): {big_cap}</div></div>') if mk else ""
+
+    # ── KPI ──
+    n = len(records)
+    nh = sum(1 for r in records if r.get("importance") == "high" or (r.get("high_cnt") or 0) > 0)
+    nver = len({r["brand"] for r in records if r["label"] == "verified"})
+    nmkt = len({r["country"] for r in records if r["label"] == "market"})
+    kpis = (f'<div class="bf-strip">'
+            f'<div class="bf-kpi"><span class="n">{n}</span><span class="k">이번 주 신호</span></div>'
+            f'<div class="bf-kpi"><span class="n">{nh}</span><span class="k">HIGH 중요</span></div>'
+            f'<div class="bf-kpi"><span class="n">{nver}</span><span class="k">판매 검증</span></div>'
+            f'<div class="bf-kpi"><span class="n">{nmkt}</span><span class="k">뜨는 시장(국)</span></div>'
+            f'</div>')
+
+    # ── 총평 ──
+    tongp_html = (f'<div class="tongp"><div class="tl">이번 주 종합 총평</div>'
+                  f'<p>{_esc(tongp)}</p></div>') if tongp else ""
+
+    # ── 조용 브랜드 ──
+    quiet_html = ""
+    if monitored:
+        quiet = sorted(_bko(m) for m in monitored if m not in shown_brands)
+        if quiet:
+            quiet_html = (f'<p class="quiet">이번 주 새 활동 없음({len(quiet)}): '
+                          + " · ".join(_esc(q) for q in quiet) + "</p>")
+    mon_n = len(monitored) if monitored else len(shown_brands)
+
+    basis = f'{days_label}'
+    if asof:
+        basis += f' · 데이터 기준 {asof}(KST) · 매일 자동 수집'
+    brand_sec = (f'<div class="bsec">🎯 브랜드별 국가 공략 <span class="sub">'
+                 f'브랜드를 누르면 나라별 주력 제품·왜 잘나가나·전략이 펼쳐집니다{(" · " + basis) if basis else ""}</span></div>'
+                 f'<div class="list">{rows_html}</div>{quiet_html}'
+                 f'<p class="bhint">▸ 브랜드 행을 클릭해 상세를 펼쳐 보세요 · '
+                 f'모니터링 {mon_n}개 중 이번 주 활동 {len(shown_brands)}개</p>')
+
+    script = ("<script>function bf2tg(i){var e=document.getElementById('bf2e'+i),"
+              "t=document.getElementById('bf2t'+i);if(e){e.classList.toggle('op');"
+              "t.classList.toggle('op');}}</script>")
+
+    return (_BRIEF_STYLE + '<div id="bf2">' + tongp_html + kpis
+            + mkt_html + brand_sec + '</div>' + script)
+
+
 def _render_brand_candidates(cands: list) -> str:
     """신흥 브랜드 발견 후보(대기) 상시 패널 — 슬랙 알림을 놓쳐도 대시보드에서 항상 보임."""
     if not cands:
@@ -4575,6 +4849,7 @@ def _build_full_html(
     oliveyoung_movers: list = None,
     oliveyoung_flagship: dict = None,
     oliveyoung_reviews: list = None,
+    brief_feed_html: str = "",
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -4787,27 +5062,12 @@ def _build_full_html(
     <div class="eyebrow"><span class="lab">🪞 우리(셀퓨전씨) 위치</span><span class="rule"></span><span class="rt">경쟁사 대비 기준선</span></div>
     {self_position_html}
 
-    <!-- 3) 이번 주 동향 — 가장 활발한 시장 | 핵심 무브 -->
-    <div class="eyebrow"><span class="lab">이번 주 동향</span><span class="rule"></span><span class="rt jump" onclick="switchTab('strategy')">시장 탭 전체 →</span></div>
-    <div class="cmd cmd-2">
-      <div class="box"><div class="ph">가장 활발한 시장 <span class="c">수출 YoY</span></div><div class="mkl">{market_list_html}</div></div>
-      <div class="box"><div class="ph">핵심 무브 <span class="c">기간 연동</span></div><div id="move-stream-wrap">{move_stream_html}</div></div>
-    </div>
+    <!-- 3) 주간 브리핑 — 종합 총평 → 급성장 시장 → 브랜드별 국가 공략(접힘/펼침) -->
+    <div class="eyebrow"><span class="lab">주간 브리핑</span><span class="rule"></span><span class="rt">📅 {b_7d} · 매일 갱신</span></div>
+    {brief_feed_html}
 
-    <!-- 4) 주간 AI 종합 + 브랜드 신호 강도 -->
-    <div class="eyebrow"><span class="lab">주간 종합</span><span class="rule"></span><span class="rt">📅 {b_7d} AI 인사이트</span></div>
-    <div id="synth-wrap">{synth_html}</div>
-    <div class="section">
-      <div class="section-title">브랜드 신호 요약
-        <span class="section-sub">각 브랜드가 왜 강한지 — 기사·검색·매출·상표·리테일 실수치로 (클릭 시 상세)</span><span class="section-basis">{b_kpi}</span>
-      </div>
-      {brand_signals_html}
-    </div>
-
-    <!-- 5) 기회 스토리 (딥다이브 — 맨 아래) -->
-    <div class="eyebrow"><span class="lab">Opportunity Stories</span><span class="rule"></span><span class="rt">나라·브랜드·무브·제품 → 우리가 할 것 (상세)</span></div>
-    {stories_html}
-    {legend_html}
+    <!-- (숨김) 이전 섹션 대체: 동향→시장탭, 브랜드신호→경쟁사탭, 스토리→접힘 근거 -->
+    <div style="display:none">{synth_html}{market_list_html}{move_stream_html}{brand_signals_html}{stories_html}{legend_html}</div>
   </div>
 
   <!-- ===== 탭: 경쟁사 ===== -->
@@ -5558,6 +5818,26 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             growth_story["period"] = export_period    # 주간요약 수출 기준 표기용
         except Exception:
             growth_story = {"overall": None, "markets": []}
+        # 브리핑 탭(재설계) — 브랜드×국가 레코드 + 리테일 성과 + 모니터링/기준시점
+        try:
+            brief_records = get_brief_records(session, days=7)
+            brief_rp      = get_retail_performance(session)
+        except Exception:
+            brief_records, brief_rp = [], {}
+        try:
+            _mon_rows = session.execute(_sql_text(
+                f"SELECT name FROM {DB_SCHEMA}.monitored_brands WHERE is_active")).fetchall()
+            brief_monitored = [r[0] for r in _mon_rows]
+        except Exception:
+            brief_monitored = []
+        try:
+            _last_col = session.execute(_sql_text(
+                f"SELECT MAX(collected_at) FROM {DB_SCHEMA}.news_articles")).scalar()
+            from datetime import timezone as _tz, timedelta as _td
+            brief_asof = (_last_col.astimezone(_tz(_td(hours=9))).strftime("%Y.%m.%d %H:%M")
+                          if _last_col else "")
+        except Exception:
+            brief_asof = ""
         # NICE BizLine 재무(비상장 포함, 연 단위) — 재무 탭
         try:
             nice_financials = get_nice_financials(session)
@@ -5791,10 +6071,30 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                                           "top_act": None, "top_pct": 0, "high_pct": 0.0})
         except Exception as _e:
             logger.warning("상표 판독 생성 스킵: %s", _e)
+        # 브리핑 탭(재설계) — 나라별 전략 해석·왜 잘나가나·브랜드 종합·주간 총평 생성/캐시
+        try:
+            _bf_to = datetime.utcnow().date().isoformat()
+            _bf_from = (datetime.utcnow() - timedelta(days=7)).date().isoformat()
+            def _bf_bko(b):
+                v = BRAND_KO_NAMES.get(b)
+                return (v[0] if isinstance(v, list) and v else (v or b))
+            brief_strat = build_brief_strategy(insight_session, brief_records, brief_rp,
+                                               export_growth, _bf_from, _bf_to, bko=_bf_bko)
+        except Exception as _e:
+            logger.warning("브리핑 전략 생성 실패: %s", _e)
+            brief_strat = {}
+            _bf_from = (datetime.utcnow() - timedelta(days=7)).date().isoformat()
+            _bf_to = datetime.utcnow().date().isoformat()
         # 오래된 캐시행 정리(무한 증가 방지) — 리포트 생성 1회당 1 DELETE(경미).
         purge_old_insights(insight_session, keep_days=45)
     finally:
         insight_session.close()
+
+    # 브리핑 피드 렌더(세션 불필요) — 총평+급성장시장+브랜드별 국가 공략(접힘/펼침)
+    _bf_days_label = f"최근 7일({_bf_from[5:].replace('-', '.')}~{_bf_to[5:].replace('-', '.')})"
+    brief_feed_html = _render_brief_feed(
+        brief_records, rp=brief_rp, mkt=export_growth, strat_data=brief_strat,
+        asof=brief_asof, monitored=brief_monitored, days_label=_bf_days_label)
 
     # 현재 기간 brand_insights (하위 호환용)
     brand_insights = period_data.get(days, {}).get("insights", {})
@@ -5845,6 +6145,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brand_candidates=brand_candidates_pending,
         brand_products=brand_products,
         brand_signals=brand_signals,
+        brief_feed_html=brief_feed_html,
         stories=stories,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,

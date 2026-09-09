@@ -2353,6 +2353,188 @@ _COMPOSITE_DRV = {"momentum": "성장세", "financial": "매출", "trademark": "
 _VERDICT_DEMAND = {"real": 1.0, "latent": 0.7, "stable": 0.4, "pr": 0.2}
 
 
+def get_brief_records(session: Session, days: int = 7, limit: int = 40) -> list[dict]:
+    """브리핑 탭 통합 — (브랜드×국가) 하나로 조인해 한 번만 판정. 원본 신호 중복 제거.
+
+    최근 N일 뉴스가 있는 (brand,country)를 키로, 브랜드/국가 단위 신호(수요검증·재무·상표·
+    검색·리테일·수출)를 붙이고 규칙 기반 라벨+확신도를 매긴다. 점수는 쓰지 않고 주목도/확신도로.
+    반환: 레코드 리스트(정렬·문구 생성은 렌더러). news_articles 없으면 [].
+    """
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    try:
+        rows = session.execute(text(f"""
+            WITH base AS (
+              SELECT brand, country, published_date, importance, activity_type,
+                     COALESCE(NULLIF(title_ko,''), title) AS headline, source_url,
+                     COALESCE(NULLIF(article_body_ko,''), NULLIF(details,'')) AS summary,
+                     product_name,
+                     ROW_NUMBER() OVER (PARTITION BY brand, country ORDER BY published_date DESC) rn,
+                     COUNT(*) OVER (PARTITION BY brand, country) AS cnt,
+                     COUNT(*) FILTER (WHERE importance='high') OVER (PARTITION BY brand, country) AS hcnt
+              FROM {DB_SCHEMA}.news_articles
+              WHERE published_date >= :since
+                AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
+                AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+                AND brand IS NOT NULL AND country IS NOT NULL
+                AND activity_type NOT IN ('실적_공시')
+            ),
+            heads AS (
+              SELECT brand, country,
+                     string_agg(DISTINCT COALESCE(NULLIF(title_ko,''), title), '||'
+                                ORDER BY COALESCE(NULLIF(title_ko,''), title)) AS other_heads
+              FROM (
+                SELECT brand, country, title_ko, title,
+                       ROW_NUMBER() OVER (PARTITION BY brand, country ORDER BY published_date DESC) rn2
+                FROM {DB_SCHEMA}.news_articles
+                WHERE published_date >= :since
+                  AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
+                  AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+                  AND brand IS NOT NULL AND country IS NOT NULL
+                  AND activity_type NOT IN ('실적_공시')
+              ) q WHERE rn2 BETWEEN 2 AND 4
+              GROUP BY brand, country
+            )
+            SELECT b.brand, b.country, b.published_date, b.importance, b.activity_type,
+                   b.headline, b.source_url, b.summary, b.product_name, b.cnt, b.hcnt,
+                   h.other_heads
+            FROM base b LEFT JOIN heads h ON h.brand=b.brand AND h.country=b.country
+            WHERE b.rn = 1
+        """), {"since": since}).fetchall()
+    except Exception:
+        return []
+    if not rows:
+        return []
+
+    # 브랜드/국가 단위 신호 재사용(중복 조인 없이 dict 룩업)
+    demand = {d["brand"]: d for d in get_demand_triangulation(session)}
+    fins = {f["brand"]: f for f in get_competitor_financials(session)}
+    tmc: dict = {}
+    for b in get_trademark_signals(session).get("brands", []):
+        tmc[b["brand"]] = tmc.get(b["brand"], 0) + (b.get("recent") or 0)
+    naver = get_search_momentum(session)
+    gspk: dict = {}
+    for s in get_google_spikes(session):
+        b = s.get("brand")
+        if b and s.get("spike_ratio", 0) > gspk.get(b, 0):
+            gspk[b] = s["spike_ratio"]
+    retail = get_retail_performance(session)
+    exp = {e["country_code"]: e for e in get_market_export_growth(session)}
+    oy_best: dict = {}
+    try:
+        _cap = session.execute(text(f"SELECT MAX(capture_date) FROM {DB_SCHEMA}.oliveyoung_rankings")).scalar()
+        if _cap:
+            for r in session.execute(text(f"""
+                SELECT brand, MIN(rank_position) FROM {DB_SCHEMA}.oliveyoung_rankings
+                WHERE capture_date=:cap AND is_monitored AND brand IS NOT NULL AND rank_position IS NOT NULL
+                GROUP BY brand"""), {"cap": _cap}).fetchall():
+                oy_best[r[0]] = r[1]
+    except Exception:
+        oy_best = {}
+    country_brand_cnt: dict = {}
+    for r in rows:
+        country_brand_cnt[r[1]] = country_brand_cnt.get(r[1], 0) + 1
+
+    # 브랜드×국가 전략 신호 — 활동유형(마케팅 방식)·판매채널 집계. '어떻게 파는가'.
+    tac: dict = {}
+    try:
+        for br, co, at, ch, c in session.execute(text(f"""
+            SELECT brand, country, activity_type, channel, count(*)
+            FROM {DB_SCHEMA}.news_articles
+            WHERE published_date >= :since AND brand IS NOT NULL AND country IS NOT NULL
+              AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
+              AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+            GROUP BY brand, country, activity_type, channel
+        """), {"since": since}).fetchall():
+            d = tac.setdefault((br, co), {"acts": {}, "channels": {}})
+            if at and at not in ("기타", "실적_공시"):
+                d["acts"][at] = d["acts"].get(at, 0) + c
+            if ch:
+                for one in str(ch).split(","):
+                    one = one.strip()
+                    if one:
+                        d["channels"][one] = d["channels"].get(one, 0) + c
+    except Exception:
+        tac = {}
+
+    out = []
+    for brand, country, pdate, imp, act, headline, url, summary, pname, cnt, hcnt, other_heads in rows:
+        verdict = (demand.get(brand) or {}).get("verdict")
+        sales_yoy = (fins.get(brand) or {}).get("rev_yoy_pct")
+        nav = naver.get(brand) or {}
+        search_up = nav.get("signal") == "rising"
+        gt = gspk.get(brand)
+        rp = retail.get(brand) or {}
+        rank = rp.get("rank")
+        # 리테일 순위 맥락(나라·카테고리·리뷰수) — 맥락 없는 '#1'은 오해 소지.
+        # 대표 순위는 리뷰 볼륨이 있는 리스팅 우선(얕은 신규 스파이크 배제).
+        rt_country = rp.get("country"); rt_cat = rp.get("category")
+        rt_reviews = rp.get("review_count"); rt_url = rp.get("url")
+        rt_product = rp.get("product"); rt_same = False
+        _cats = rp.get("by_category") or []
+        _by_cc = rp.get("by_country") or {}
+        _same = _by_cc.get(country)
+        _solid = [c for c in _cats if (c.get("review_count") or 0) >= 100]
+        if _same and (_same.get("review_count") or 0) >= 30:
+            # 카드 국가에 실제 리테일 성과가 있으면 그걸 주력으로(가장 정합)
+            rank_solid = _same["rank"]; rt_country = country; rt_cat = _same.get("category")
+            rt_reviews = _same.get("review_count"); rt_url = _same.get("url"); rt_product = _same.get("product")
+            rt_same = True
+        elif _solid:
+            _b = min(_solid, key=lambda x: x["rank"])
+            rank_solid = _b["rank"]; rt_country = _b.get("country"); rt_cat = _b.get("category")
+            rt_reviews = _b.get("review_count"); rt_url = _b.get("url"); rt_product = _b.get("product")
+        else:
+            rank_solid = None
+        oy = oy_best.get(brand)
+        exp_yoy = (exp.get(country) or {}).get("yoy_pct")
+        tm = tmc.get(brand, 0)
+
+        axes = sum(1 for v in [verdict, rank, oy, exp_yoy, (tm or None),
+                               sales_yoy, gt, (nav.get("momentum") if search_up else None)] if v)
+        conf = "high" if axes >= 4 else ("mid" if axes >= 2 else "low")
+
+        # 판정(조정): 점수 대신 규칙 · 기존 수요검증(verdict) 재사용
+        strong_retail = (rank is not None and rank <= 15) or (oy is not None and oy <= 15)
+        any_retail = (rank is not None and rank <= 30) or (oy is not None and oy <= 20)
+        search_hot = search_up or (gt is not None and gt >= 1.5)
+        if axes <= 1:
+            label = "early"
+        elif strong_retail and search_hot and (sales_yoy is None or sales_yoy > 0):
+            label = "verified"                      # 리테일 상위 + 검색 동반 = 판매까지 검증
+        elif exp_yoy is not None and exp_yoy >= 30 and country_brand_cnt.get(country, 0) >= 2:
+            label = "market"                        # 국가 수출 급등 + 여러 브랜드 = 뜨는 시장
+        elif verdict == "pr" or (imp == "high" and rank is None and oy is None):
+            label = "pr"                            # 홍보 우세(기존 수요검증 재사용)
+        elif any_retail or search_hot or (tm and tm > 0) or (exp_yoy is not None and exp_yoy >= 15):
+            label = "watch"                         # 신호 있음 — 관찰 대상
+        else:
+            label = "early"
+
+        out.append({
+            "brand": brand, "country": country,
+            "date": str(pdate)[:10], "importance": imp or "", "activity_type": act or "",
+            "headline": headline or "", "url": url or "",
+            "summary": (summary or "").strip(),
+            "product_name": (pname or "").strip(),
+            "other_heads": [h for h in (other_heads or "").split("||") if h][:3],
+            "news_cnt": cnt or 0, "high_cnt": hcnt or 0,
+            "verdict": verdict, "sales_yoy": sales_yoy,
+            "search_up": search_up, "search_momentum": nav.get("momentum"),
+            "google_spike": gt, "retail_rank": rank, "oy_rank": oy,
+            "retail_rank_solid": rank_solid, "retail_country": rt_country,
+            "retail_category": rt_cat, "retail_reviews": rt_reviews, "retail_url": rt_url,
+            "retail_product": rt_product, "retail_same_country": rt_same,
+            "tactics": (tac.get((brand, country)) or {}).get("acts", {}),
+            "channels": (tac.get((brand, country)) or {}).get("channels", {}),
+            "export_yoy": exp_yoy, "trademark_cnt": tm,
+            "label": label, "confidence": conf,
+            "attn": (hcnt or 0) * 2 + (cnt or 0),
+        })
+    _cw = {"high": 2, "mid": 1, "low": 0}
+    out.sort(key=lambda x: (_cw[x["confidence"]], x["attn"]), reverse=True)
+    return out[:limit]
+
+
 def get_brand_products_map(session: Session, days: int = 45, per_brand: int = 5) -> dict:
     """브랜드별 최근 신제품·리뉴얼 — {brand: {'global':[{name,country,note}], 'domestic':[...]}}.
     제품명 있거나 신제품/리뉴얼 활동 기사. 국내(KR)/해외 분리, 이름 중복 제외, 최근 우선."""
