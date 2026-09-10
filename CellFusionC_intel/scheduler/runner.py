@@ -15,6 +15,7 @@ from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.events import EVENT_JOB_ERROR
 
 from config.brands import TIER1_BRANDS, ALL_BRANDS, TIER1_COUNTRIES, COUNTRIES
 from config.settings import TITLE_SIMILARITY_THRESHOLD
@@ -63,6 +64,7 @@ def _run_collection(label: str, brands: list[str], countries: list[str],
     t0 = time.time()
     agg = {"found": 0, "saved": 0, "classified": 0, "high": 0, "errors": 0}
     saved_by_brand: dict = defaultdict(int)
+    error_samples: list = []
 
     for brand in brands:
         for country in countries:
@@ -77,11 +79,14 @@ def _run_collection(label: str, brands: list[str], countries: list[str],
                     saved_by_brand[brand] += st.saved
             except Exception as e:
                 agg["errors"] += 1
+                if len(error_samples) < 5:
+                    error_samples.append(f"{brand}/{country}: {e}")
                 logger.error("오류 [%s/%s]: %s", brand, country, e)
 
     usage = get_token_usage()
     agg["brands"]    = len(brands)
     agg["countries"] = len(countries)
+    agg["error_samples"] = error_samples
     agg["duration"]  = time.time() - t0
     agg["top_saved"] = sorted(saved_by_brand.items(), key=lambda x: -x[1])
     agg["tokens_in"]  = usage["in"]
@@ -96,6 +101,12 @@ def _run_collection(label: str, brands: list[str], countries: list[str],
         notify_collection_summary(label, agg)
     except Exception as e:
         logger.warning("수집 요약 Slack 전송 실패: %s", e)
+    # AI 파수꾼 — 수집 직후 소스/리테일/오류율 이상 감지→진단→슬랙(실패해도 무해)
+    try:
+        from scheduler.watchdog import run_watchdog
+        run_watchdog(agg)
+    except Exception as e:
+        logger.warning("watchdog 실행 스킵: %s", e)
     ping_dashboard_refresh()   # 수집 직후 Render 대시보드 재생성 트리거
 
 
@@ -476,8 +487,20 @@ def job_weekly_dedup() -> None:
     logger.info("=== 주간 중복 정리 완료 ===")
 
 
+def _on_job_error(event) -> None:
+    """잡이 예기치 않게 크래시하면 AI 파수꾼이 traceback 원인·수정방향 진단→슬랙."""
+    try:
+        from scheduler.watchdog import diagnose_failure
+        diagnose_failure(getattr(event, "job_id", "?"),
+                         getattr(event, "exception", Exception("unknown")),
+                         getattr(event, "traceback", "") or "")
+    except Exception as e:
+        logger.warning("job error 리스너 처리 실패: %s", e)
+
+
 def create_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
+    scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)   # 실패 자동진단
 
     # 매일 09:00 & 18:00 KST — 하루 2회 수집(오전·저녁) → HIGH 속보를 오전/저녁 두 번 포착
     scheduler.add_job(

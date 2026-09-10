@@ -65,6 +65,18 @@ def _post(payload: dict, secondary: bool = False) -> bool:
     return ok
 
 
+def send_watchdog(title: str, body: str) -> bool:
+    """AI 파수꾼 리포트(수집 이상·잡 실패 진단) — 개인/수집 채널만(시끄러워도 OK)."""
+    payload = {
+        "text": title,
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": f"*{title}*\n\n{body}"[:2900]}},
+            {"type": "divider"},
+        ],
+    }
+    return _post(payload)   # secondary=False → 팀 채널로는 안 감
+
+
 def notify_high_importance(article) -> bool:
     """high importance 기사 즉시 알림."""
     flag = COUNTRY_FLAGS.get(article.country, "🌐")
