@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 _WD_MODEL = os.getenv("BRIEF_MODEL", "gpt-4o-mini")
 _COOLDOWN_HOURS = 72          # 같은 이상은 3일에 한 번만 알림(나그 방지)
 
+# 분류기가 실제 낼 수 있는 활동유형(claude_classifier enum이 진짜 기준 —
+# config/brands.ACTIVITY_TYPES는 '가격_프로모션' 누락 등 불일치가 있어 여기 고정).
+_KNOWN_ACTIVITY = {"신시장_진출", "유통_채널", "신제품_런칭", "인플루언서_협업",
+                   "투자_BD", "브랜드_마케팅", "실적_공시", "가격_프로모션", "기타"}
+
 
 # ── 중복 방지(high_alert_log 재사용) ─────────────────────────────────────────
 def _dedup_ok(session, key: str) -> bool:
@@ -162,25 +167,175 @@ def _diagnose(findings: list[dict]) -> dict:
         return {}
 
 
+# ── 2단계: 데이터 드리프트 감시 ──────────────────────────────────────────────
+def _suggest_country_ko(codes: list[str]) -> str:
+    """미매핑 국가코드 → 한국어명 제안(1 LLM). 실패 시 코드 나열."""
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        resp = client.chat.completions.create(
+            model=_WD_MODEL, max_tokens=200, temperature=0,
+            messages=[{"role": "user", "content":
+                       f"다음 국가코드(ISO 또는 약칭)를 한국어 국가명으로. 'CODE=한국어' 콤마구분 한 줄만: {', '.join(codes)}"}])
+        return (resp.choices[0].message.content or "").strip() or ", ".join(codes)
+    except Exception:
+        return ", ".join(codes)
+
+
+def check_data_drift(session) -> list[dict]:
+    """미매핑 국가코드·새 활동유형·제품명 이상치를 감지 → 매핑/점검 제안."""
+    findings: list[dict] = []
+    # 1) 미매핑 국가코드(최근 7일 뉴스+리테일) — 화면에 코드로 노출될 위험
+    try:
+        from analytics.brief_strategy import _COUNTRY_KO
+        ccs = set()
+        for (c,) in session.execute(text(
+            f"SELECT DISTINCT country FROM {DB_SCHEMA}.news_articles "
+            f"WHERE published_date >= now() - interval '7 days' AND country IS NOT NULL")):
+            ccs.add((c or "").upper())
+        for (c,) in session.execute(text(
+            f"SELECT DISTINCT country FROM {DB_SCHEMA}.retail_rankings "
+            f"WHERE capture_date >= now()::date - 7 AND country IS NOT NULL")):
+            ccs.add((c or "").upper())
+        unmapped = sorted(c for c in ccs
+                          if c and c != "NULL" and c.isalpha() and len(c) <= 3
+                          and c not in _COUNTRY_KO)
+        if unmapped:
+            sugg = _suggest_country_ko(unmapped)
+            findings.append({
+                "type": "drift_country", "key": "drift:cc:" + ",".join(unmapped),
+                "title": f"미매핑 국가코드 {len(unmapped)}개: {', '.join(unmapped)}",
+                "detail": "화면에 한국어명 없이 코드로 노출될 수 있음(예전 AE='UAE' 케이스).",
+                "read": f"generate.py `_BF_CC` / brief_strategy `_COUNTRY_KO`에 추가 제안 → {sugg}",
+            })
+    except Exception as e:
+        logger.warning("드리프트(국가) 체크 실패: %s", e)
+    # 2) 새 활동유형 — 분류기 enum 밖 값(오분류/새 카테고리)
+    try:
+        known = _KNOWN_ACTIVITY
+        ats = set()
+        for (a,) in session.execute(text(
+            f"SELECT DISTINCT activity_type FROM {DB_SCHEMA}.news_articles "
+            f"WHERE published_date >= now() - interval '7 days' AND activity_type IS NOT NULL")):
+            ats.add(a)
+        newats = sorted(a for a in ats if a and a not in known)
+        if newats:
+            findings.append({
+                "type": "drift_activity", "key": "drift:act:" + ",".join(newats),
+                "title": f"새 활동유형 {len(newats)}개: {', '.join(newats)}",
+                "detail": "분류기 정의(ACTIVITY_TYPES/enum) 밖 값. 오분류이거나 새 카테고리 등장.",
+                "read": "classifier enum·config/brands.ACTIVITY_TYPES 정합성 점검",
+            })
+    except Exception as e:
+        logger.warning("드리프트(활동유형) 체크 실패: %s", e)
+    # 3) 제품명 이상치율 — 기사 제목/문장이 product_name에 섞임
+    try:
+        row = session.execute(text(f"""
+            SELECT count(*) FILTER (WHERE product_name IS NOT NULL AND product_name <> ''),
+                   count(*) FILTER (WHERE product_name IS NOT NULL AND product_name <> ''
+                                    AND (char_length(product_name) > 40
+                                         OR product_name ~ '[…?“”]'))
+            FROM {DB_SCHEMA}.news_articles
+            WHERE published_date >= now() - interval '7 days'""")).fetchone()
+        tot, bad = int(row[0] or 0), int(row[1] or 0)
+        if tot >= 20 and bad / tot > 0.35:
+            findings.append({
+                "type": "drift_product", "key": "drift:prod",
+                "title": f"제품명 이상치 {bad}/{tot} ({bad/tot*100:.0f}%)",
+                "detail": "product_name에 기사 제목·문장이 섞임(추출 규칙 이탈).",
+                "read": "분류 프롬프트의 product_name 추출 규칙(제품명만) 점검",
+            })
+    except Exception as e:
+        logger.warning("드리프트(제품명) 체크 실패: %s", e)
+    return findings
+
+
+# ── 2단계: 분류 품질 스팟체크 ────────────────────────────────────────────────
+def check_classification_quality(session, sample: int = 10) -> list[dict]:
+    """최근 분류 표본을 AI가 재검토 → 오분류(중요도·브랜드·국가·활동유형) 이견만 리포트."""
+    try:
+        rows = session.execute(text(f"""
+            SELECT id, brand, country, importance, activity_type,
+                   COALESCE(NULLIF(title_ko,''), title) AS t,
+                   LEFT(COALESCE(NULLIF(article_body_ko,''), details, ''), 220) AS body
+            FROM {DB_SCHEMA}.news_articles
+            WHERE collected_at >= now() - interval '2 days'
+              AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
+            ORDER BY random() LIMIT :n"""), {"n": sample}).fetchall()
+    except Exception as e:
+        logger.warning("스팟체크 표본 조회 실패: %s", e)
+        return []
+    if not rows:
+        return []
+    items = []
+    for r in rows:
+        items.append(f"[{r[0]}] 브랜드={r[1]} 국가={r[2]} 중요도={r[3]} 활동={r[4]}\n제목:{r[5]}\n요지:{r[6]}")
+    prompt = f"""너는 K뷰티 뉴스 분류 QA 검수자다. 아래 분류 결과 표본을 검토해 **명백히 이상한 것만** 지적하라.
+점검: 브랜드가 실제 기사 주체인지, 국가가 맞는지, 중요도(high/medium/low)가 과대/과소인지, 활동유형이 내용과 맞는지.
+
+{chr(10).join(items)}
+
+- 이상한 항목만 "[id] 무엇이 어떻게 이상(→ 제안)" 한 줄씩. 멀쩡하면 아무것도 쓰지 마라.
+- 애매한 건 넘어가라(과검출 금지). 최대 5건.
+반드시 JSON만: {{"issues": ["[123] ...", ...]}}"""
+    try:
+        from openai import OpenAI
+        import json as _json
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        resp = client.chat.completions.create(
+            model=_WD_MODEL, max_tokens=500, temperature=0.2,
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}])
+        issues = (_json.loads(resp.choices[0].message.content or "{}").get("issues") or [])[:5]
+    except Exception as e:
+        logger.warning("스팟체크 LLM 실패: %s", e)
+        return []
+    if not issues:
+        return []
+    return [{
+        "type": "classify_qa", "key": "classify:qa",
+        "title": f"분류 스팟체크 — 표본 {len(rows)}건 중 이견 {len(issues)}건",
+        "detail": " / ".join(issues),
+        "read": "반복되면 분류 프롬프트·모델(classifier) 점검",
+    }]
+
+
+def _daily_deep_ok(session) -> bool:
+    """드리프트·스팟체크는 하루 1회만(수집이 하루 2회 돌아도 중복 방지)."""
+    return _dedup_ok(session, "wd:deep_daily")
+
+
 # ── 실행 진입점 ──────────────────────────────────────────────────────────────
 def run_watchdog(agg: dict | None = None) -> int:
     """수집 완료 후 호출 — 헬스 이상 감지→쿨다운 필터→AI 진단→슬랙. 반환: 알린 건수."""
     session = get_session()
     try:
         findings = check_collection_health(session, agg)
+        # 2단계 심층 체크(드리프트·분류 스팟체크)는 하루 1회만
+        if _daily_deep_ok(session):
+            try:
+                findings += check_data_drift(session)
+            except Exception as e:
+                logger.warning("드리프트 체크 실패: %s", e)
+            try:
+                findings += check_classification_quality(session)
+            except Exception as e:
+                logger.warning("스팟체크 실패: %s", e)
         fresh = [f for f in findings if _dedup_ok(session, f["key"])]
         if not fresh:
             logger.info("watchdog: 새 이상 없음(전체 %d, 쿨다운 후 0)", len(findings))
             return 0
-        reads = _diagnose(fresh)
+        # 사전 진단(read)이 없는 항목만 AI 진단
+        need = [f for f in fresh if not f.get("read")]
+        reads = _diagnose(need) if need else {}
         try:
             from notifications.slack import send_watchdog
             body_lines = []
             for f in fresh:
-                rd = reads.get(f["key"])
+                rd = f.get("read") or reads.get(f["key"])
                 body_lines.append(f"• *{f['title']}*\n{f['detail']}"
                                   + (f"\n🔧 _AI 진단:_ {rd}" if rd else ""))
-            send_watchdog(f"🐕 수집 파수꾼 — 이상 {len(fresh)}건 감지", "\n\n".join(body_lines))
+            send_watchdog(f"🐕 파이프라인 파수꾼 — 이상 {len(fresh)}건 감지", "\n\n".join(body_lines))
         except Exception as e:
             logger.warning("watchdog 슬랙 전송 실패: %s", e)
         logger.info("watchdog: 이상 %d건 알림", len(fresh))
