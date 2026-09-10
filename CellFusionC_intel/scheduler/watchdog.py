@@ -168,8 +168,9 @@ def _diagnose(findings: list[dict]) -> dict:
 
 
 # ── 2단계: 데이터 드리프트 감시 ──────────────────────────────────────────────
-def _suggest_country_ko(codes: list[str]) -> str:
-    """미매핑 국가코드 → 한국어명 제안(1 LLM). 실패 시 코드 나열."""
+def _suggest_country_ko(codes: list[str]) -> dict:
+    """미매핑 국가코드 → {코드: 한국어명} 제안(1 LLM). 실패 시 코드=코드."""
+    out = {c: c for c in codes}
     try:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -177,9 +178,16 @@ def _suggest_country_ko(codes: list[str]) -> str:
             model=_WD_MODEL, max_tokens=200, temperature=0,
             messages=[{"role": "user", "content":
                        f"다음 국가코드(ISO 또는 약칭)를 한국어 국가명으로. 'CODE=한국어' 콤마구분 한 줄만: {', '.join(codes)}"}])
-        return (resp.choices[0].message.content or "").strip() or ", ".join(codes)
+        txt = (resp.choices[0].message.content or "").strip()
+        for pair in txt.replace("\n", ",").split(","):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                k, v = k.strip().upper(), v.strip()
+                if k in out and v:
+                    out[k] = v
     except Exception:
-        return ", ".join(codes)
+        pass
+    return out
 
 
 def check_data_drift(session) -> list[dict]:
@@ -188,6 +196,8 @@ def check_data_drift(session) -> list[dict]:
     # 1) 미매핑 국가코드(최근 7일 뉴스+리테일) — 화면에 코드로 노출될 위험
     try:
         from analytics.brief_strategy import _COUNTRY_KO
+        from storage.repository import known_mapping_codes, propose_mapping
+        known = set(_COUNTRY_KO) | known_mapping_codes(session, "country")
         ccs = set()
         for (c,) in session.execute(text(
             f"SELECT DISTINCT country FROM {DB_SCHEMA}.news_articles "
@@ -199,14 +209,22 @@ def check_data_drift(session) -> list[dict]:
             ccs.add((c or "").upper())
         unmapped = sorted(c for c in ccs
                           if c and c != "NULL" and c.isalpha() and len(c) <= 3
-                          and c not in _COUNTRY_KO)
+                          and c not in known)
         if unmapped:
             sugg = _suggest_country_ko(unmapped)
+            for c in unmapped:                       # 제안을 DB에 등록(pending)
+                try:
+                    propose_mapping(session, "country", c, sugg.get(c, ""))
+                except Exception:
+                    pass
+            sugg_txt = ", ".join(f"{c}={sugg.get(c, c)}" for c in unmapped)
             findings.append({
                 "type": "drift_country", "key": "drift:cc:" + ",".join(unmapped),
                 "title": f"미매핑 국가코드 {len(unmapped)}개: {', '.join(unmapped)}",
-                "detail": "화면에 한국어명 없이 코드로 노출될 수 있음(예전 AE='UAE' 케이스).",
-                "read": f"generate.py `_BF_CC` / brief_strategy `_COUNTRY_KO`에 추가 제안 → {sugg}",
+                "detail": (f"화면에 한국어명 없이 코드로 노출될 수 있음(예전 AE='UAE' 케이스). "
+                           f"제안: {sugg_txt}"),
+                "read": "슬랙봇에게 `매핑` 확인 후 `매핑 승인`(전체) 또는 `매핑 " + unmapped[0]
+                        + "=" + sugg.get(unmapped[0], "한국어") + "`(개별)로 반영",
             })
     except Exception as e:
         logger.warning("드리프트(국가) 체크 실패: %s", e)

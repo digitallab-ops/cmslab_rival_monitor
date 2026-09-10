@@ -166,3 +166,109 @@ def query_articles(
         cutoff = datetime.utcnow() - timedelta(days=days)
         q = q.filter(NewsArticle.published_date >= cutoff)
     return q.order_by(NewsArticle.published_date.desc()).limit(limit).all()
+
+
+# ── 값 매핑(드리프트 승인→반영) ──────────────────────────────────────────────
+# 파수꾼이 미매핑 국가코드·채널을 감지→제안(pending), 슬랙 `매핑 승인`으로 active,
+# 대시보드가 런타임에 읽어 코드배포 없이 반영. kind='country'|'channel'.
+_VALUE_MAP_READY = False
+
+
+def _ensure_value_mappings(session: Session) -> None:
+    global _VALUE_MAP_READY
+    if _VALUE_MAP_READY:
+        return
+    session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.value_mappings (
+            id BIGSERIAL PRIMARY KEY,
+            kind VARCHAR(20) NOT NULL,
+            code VARCHAR(80) NOT NULL,
+            value VARCHAR(120),
+            suggested VARCHAR(120),
+            status VARCHAR(12) DEFAULT 'pending',
+            added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE (kind, code)
+        )
+    """))
+    session.commit()
+    _VALUE_MAP_READY = True
+
+
+def propose_mapping(session: Session, kind: str, code: str, suggested: str = "") -> None:
+    """미매핑 값을 pending 제안으로 등록(이미 있으면 무시)."""
+    _ensure_value_mappings(session)
+    session.execute(text(f"""
+        INSERT INTO {DB_SCHEMA}.value_mappings (kind, code, suggested, status)
+        VALUES (:k, :c, :s, 'pending')
+        ON CONFLICT (kind, code) DO NOTHING
+    """), {"k": kind, "c": code, "s": suggested})
+    session.commit()
+
+
+def list_pending_mappings(session: Session, kind: Optional[str] = None) -> list[tuple]:
+    """대기(pending) 제안 목록 → [(kind, code, suggested), ...]."""
+    _ensure_value_mappings(session)
+    q = f"SELECT kind, code, COALESCE(suggested,'') FROM {DB_SCHEMA}.value_mappings WHERE status='pending'"
+    p: dict = {}
+    if kind:
+        q += " AND kind = :k"; p["k"] = kind
+    q += " ORDER BY kind, code"
+    return [(r[0], r[1], r[2]) for r in session.execute(text(q), p).fetchall()]
+
+
+def approve_mapping(session: Session, code: str, value: Optional[str] = None,
+                    kind: Optional[str] = None) -> int:
+    """특정 code의 pending 제안을 active로(값=지정값 또는 제안값). 반환: 반영 건수."""
+    _ensure_value_mappings(session)
+    q = (f"UPDATE {DB_SCHEMA}.value_mappings "
+         f"SET value = COALESCE(:v, NULLIF(suggested,''), value), status='active' "
+         f"WHERE code = :c AND status='pending'")
+    p: dict = {"v": value, "c": code}
+    if kind:
+        q += " AND kind = :k"; p["k"] = kind
+    r = session.execute(text(q), p)
+    session.commit()
+    return r.rowcount or 0
+
+
+def approve_all_pending(session: Session, kind: Optional[str] = None) -> int:
+    """대기 제안 전부 active로(값=제안값 있는 것만). 반환: 반영 건수."""
+    _ensure_value_mappings(session)
+    q = (f"UPDATE {DB_SCHEMA}.value_mappings SET value = suggested, status='active' "
+         f"WHERE status='pending' AND COALESCE(suggested,'') <> ''")
+    p: dict = {}
+    if kind:
+        q += " AND kind = :k"; p["k"] = kind
+    r = session.execute(text(q), p)
+    session.commit()
+    return r.rowcount or 0
+
+
+def reject_mapping(session: Session, code: str, kind: Optional[str] = None) -> int:
+    """제안 거절(status='rejected' — 다시 제안 안 함)."""
+    _ensure_value_mappings(session)
+    q = f"UPDATE {DB_SCHEMA}.value_mappings SET status='rejected' WHERE code = :c AND status='pending'"
+    p: dict = {"c": code}
+    if kind:
+        q += " AND kind = :k"; p["k"] = kind
+    r = session.execute(text(q), p)
+    session.commit()
+    return r.rowcount or 0
+
+
+def get_active_mappings(session: Session, kind: str) -> dict:
+    """반영된(active) 매핑 {code: value} — 대시보드 런타임 병합용."""
+    _ensure_value_mappings(session)
+    rows = session.execute(text(
+        f"SELECT code, value FROM {DB_SCHEMA}.value_mappings "
+        f"WHERE kind = :k AND status='active' AND value IS NOT NULL"), {"k": kind}).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def known_mapping_codes(session: Session, kind: str) -> set:
+    """이미 제안됐거나(pending) 반영된(active) code 집합 — 파수꾼 재제안 방지용."""
+    _ensure_value_mappings(session)
+    rows = session.execute(text(
+        f"SELECT code FROM {DB_SCHEMA}.value_mappings "
+        f"WHERE kind = :k AND status IN ('pending','active')"), {"k": kind}).fetchall()
+    return {r[0] for r in rows}

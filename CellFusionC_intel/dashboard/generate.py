@@ -4655,9 +4655,13 @@ _BF_PROD_PRE = [r"^d[\'’]?alba\s*(piedmont)?", r"^SKIN1004", r"^Beauty of Jose
                 r"^COSRX", r"^VT", r"^Numbuzin", r"^numbuzin", r"^Mixsoon", r"^mixsoon"]
 
 
+# 런타임 승인 매핑(value_mappings active) — generate_report에서 채움. 코드배포 없이 반영.
+_BF_CC_RUNTIME: dict = {}
+
+
 def _bf_cty(c):
     c = (c or "").upper()
-    return _BF_CC.get(c) or _COUNTRY_KO_LBL.get(c) or c
+    return _BF_CC_RUNTIME.get(c) or _BF_CC.get(c) or _COUNTRY_KO_LBL.get(c) or c
 
 
 def _bf_prod_name(p):
@@ -5913,6 +5917,12 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             brief_rp      = get_retail_performance(session)
         except Exception:
             brief_records, brief_rp = [], {}
+        # 승인된 국가 매핑(value_mappings active)을 런타임 병합 — 코드배포 없이 반영
+        try:
+            from storage.repository import get_active_mappings
+            globals()["_BF_CC_RUNTIME"] = get_active_mappings(session, "country")
+        except Exception:
+            globals()["_BF_CC_RUNTIME"] = {}
         try:
             _mon_rows = session.execute(_sql_text(
                 f"SELECT name FROM {DB_SCHEMA}.monitored_brands WHERE is_active")).fetchall()

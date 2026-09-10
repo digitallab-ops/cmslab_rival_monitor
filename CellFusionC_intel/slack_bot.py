@@ -280,6 +280,71 @@ def _apply_brand(name: str, kind: str) -> str:
         s.close()
 
 
+def _mapping_command(text: str, user_id: str = ""):
+    """파수꾼 드리프트 매핑 승인 명령('매핑'으로 시작). 명령이면 응답, 아니면 None.
+    조회는 누구나, 승인/제외(쓰기)는 SLACK_BRAND_ADMINS만."""
+    t = (text or "").strip()
+    if not t.startswith("매핑"):
+        return None
+    rest = t[2:].strip()   # '매핑' 뒤
+    from storage.repository import (list_pending_mappings, approve_mapping,
+                                    approve_all_pending, reject_mapping)
+
+    def _can_write():
+        return bool(_BRAND_ADMINS) and user_id in _BRAND_ADMINS
+
+    def _fmt_pending(s):
+        rows = list_pending_mappings(s)
+        if not rows:
+            return "대기 중인 매핑 제안이 없어요."
+        out = ["*미매핑 제안(대기)* — `매핑 승인`(전체 반영) · `매핑 <코드>=<값>`(개별) · `매핑 제외 <코드>`"]
+        for kind, code, sug in rows:
+            out.append(f"• [{kind}] `{code}` → 제안: {sug or '(없음)'}")
+        return "\n".join(out)
+
+    s = get_session()
+    try:
+        # 조회
+        if rest in ("", "목록", "리스트", "확인"):
+            return _fmt_pending(s)
+        toks = rest.split()
+        # 제외
+        if toks and toks[0] in _REJECT_VERBS:
+            if not _can_write():
+                return f"🔒 매핑 승인/제외는 관리자만 가능해요. (당신 ID: `{user_id}`)"
+            if len(toks) < 2:
+                return "제외할 코드를 붙여주세요. 예) `매핑 제외 HK`"
+            n = reject_mapping(s, toks[1].upper())
+            return f"🚫 `{toks[1].upper()}` 제안 제외({n}건). 다시 제안하지 않아요." if n else "해당 코드 대기 제안이 없어요."
+        # 승인(전체)
+        if rest in ("승인", "전체 승인", "모두 승인") or toks[:1] == ["승인"] and len(toks) == 1:
+            if not _can_write():
+                return f"🔒 매핑 승인은 관리자만 가능해요. (당신 ID: `{user_id}`)"
+            n = approve_all_pending(s)
+            return f"✅ 대기 제안 {n}건 반영했어요. 다음 대시보드 갱신부터 한국어로 표시됩니다." if n else "반영할(제안값 있는) 대기 항목이 없어요."
+        # 개별: `매핑 HK=홍콩` 또는 `매핑 승인 HK` 또는 `매핑 HK`
+        if not _can_write():
+            return f"🔒 매핑 승인은 관리자만 가능해요. (당신 ID: `{user_id}`)"
+        target = rest
+        if toks and toks[0] in _APPROVE_VERBS:
+            target = rest[len(toks[0]):].strip()
+        val = None
+        code = target
+        if "=" in target:
+            code, val = [x.strip() for x in target.split("=", 1)]
+        code = code.upper()
+        if not code:
+            return "코드를 지정해주세요. 예) `매핑 HK=홍콩` 또는 `매핑 승인 HK`"
+        n = approve_mapping(s, code, val)
+        if n:
+            return f"✅ `{code}` → {val or '제안값'} 반영({n}건). 다음 갱신부터 표시돼요."
+        return f"`{code}` 대기 제안이 없어요. `매핑`으로 목록 확인하세요."
+    except Exception as e:
+        return f"⚠️ 매핑 처리 실패: {e}"
+    finally:
+        s.close()
+
+
 async def _handle(event: dict, client, in_thread: bool):
     user = event.get("user", "?")
     channel = event["channel"]
@@ -288,6 +353,11 @@ async def _handle(event: dict, client, in_thread: bool):
     if not text:
         await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
                                       text="무엇을 물어볼까요? 예) `아누아 최근 미국 동향`, `베트남 시장 경쟁 상황`, `앰플 카테고리 압박`\n브랜드 관리: `후보` · `추가 <브랜드>` · `제외 <브랜드>`")
+        return
+
+    _mcmd = _mapping_command(text, user)
+    if _mcmd is not None:
+        await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=_mcmd)
         return
 
     _cmd = _brand_command(text, user)
