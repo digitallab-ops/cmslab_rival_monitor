@@ -247,9 +247,10 @@ def _chunk(text: str, limit: int) -> list:
 
 
 def _briefing_blocks(text: str, limit: int = 2900) -> list:
-    """`### 섹션` 마크다운 → 섹션별 (구분선 + 볼드 헤더 + 본문) 슬랙 블록."""
+    """`### 섹션` 마크다운 → 정돈된 단일 블록(섹션 간 구분선 없이 볼드 헤더+본문).
+    짧은 브리핑에 구분선·이모지 중복이 겹쳐 난잡해지던 문제 해소."""
     parts = re.split(r"###\s+", text or "")
-    blocks = []
+    lines: list[str] = []
     for part in parts:
         part = part.strip()
         if not part:
@@ -257,13 +258,21 @@ def _briefing_blocks(text: str, limit: int = 2900) -> list:
         nl = part.find("\n")
         label = (part if nl == -1 else part[:nl]).strip()
         body = "" if nl == -1 else part[nl + 1:].strip()
-        header = f"*{_sec_emoji(label)}  {label}*"
-        body_clean = _clean_body(body)
-        content = header + (f"\n{body_clean}" if body_clean else "")
-        blocks.append({"type": "divider"})
-        for c in _chunk(content, limit):
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": c}})
-    return blocks
+        if lines:
+            lines.append("")                 # 섹션 사이 빈 줄 하나만
+        lines.append(f"*{label}*")           # 라벨에 이모지 이미 포함 → ▪️ 중복 제거
+        bc = _clean_body(body)
+        if bc:
+            lines.append(bc)
+    joined = "\n".join(lines)
+    return [{"type": "section", "text": {"type": "mrkdwn", "text": c}}
+            for c in _chunk(joined, limit)]
+
+
+def _body_blocks(text: str, limit: int = 2900) -> list:
+    """이미 정돈된 mrkdwn 본문을 그대로 섹션 블록으로(라벨 재가공·구분선 없음)."""
+    return [{"type": "section", "text": {"type": "mrkdwn", "text": c}}
+            for c in _chunk((text or "").strip(), limit) if c.strip()]
 
 
 def _kst_date_label() -> str:
@@ -278,7 +287,7 @@ def _dashboard_footer() -> dict:
     """Slack 브리핑 하단 — 대시보드 전체 보기 링크(원문은 항목별 링크로)."""
     url = os.getenv("RENDER_EXTERNAL_URL") or "https://cmslab-rival-monitor.onrender.com"
     return {"type": "context", "elements": [
-        {"type": "mrkdwn", "text": f"🔗 <{url}|대시보드에서 전체 보기 →>  ·  각 무브의 ‘원문 ↗’로 기사 직접 확인"}]}
+        {"type": "mrkdwn", "text": f"<{url}|대시보드에서 브랜드별 전체 보기 →>"}]}
 
 
 def _start_marker(name: str) -> dict:
@@ -293,24 +302,23 @@ def _end_marker(name: str) -> dict:
         {"type": "mrkdwn", "text": f"┗━━━━━ ▲ 여기까지 · *{name}* ━━━━━┛"}]}
 
 
+def _meta_line(lead: str, stats: dict) -> dict:
+    """헤더 아래 한 줄 메타(기준 + KPI). 컴팩트."""
+    return {"type": "context", "elements": [{"type": "mrkdwn", "text": (
+        f"{lead}  ·  신호 {stats.get('total',0)} · HIGH {stats.get('high',0)} · "
+        f"판매검증 {stats.get('brands',0)} · 뜨는시장 {stats.get('countries',0)}")}]}
+
+
 def send_weekly_briefing(briefing_text: str, stats: dict) -> bool:
     """주간 브리핑 Slack 전송 (긴 본문 자동 분할)."""
     d = _kst_date_label()
     payload = {
-        "text": f"📊 위클리 심층 브리핑 · {d}",
+        "text": f"📊 위클리 브리핑 · {d}",
         "blocks": [
-            _start_marker("위클리 심층 브리핑"),
-            {"type": "header", "text": {"type": "plain_text", "text": f"📊 위클리 심층 브리핑 · {d}"}},
-            {"type": "context", "elements": [
-                {"type": "mrkdwn",
-                 "text": (f"🗓 *지난 7일 종합* · 매주 월요일 아침  ·  📥 총 *{stats.get('total',0)}*건  ·  "
-                          f"🔴 HIGH *{stats.get('high',0)}*  ·  🏷 브랜드 *{stats.get('brands',0)}*  ·  "
-                          f"🌐 국가 *{stats.get('countries',0)}*")}]},
-            {"type": "divider"},
-            *_briefing_blocks(briefing_text),
-            {"type": "divider"},
+            {"type": "header", "text": {"type": "plain_text", "text": f"📊 위클리 브리핑 · {d}"}},
+            _meta_line("지난 7일 종합 · 월요일", stats),
+            *_body_blocks(briefing_text),
             _dashboard_footer(),
-            _end_marker("위클리 심층 브리핑"),
         ],
     }
     return _post(payload, secondary=True)
@@ -322,15 +330,11 @@ def send_afternoon_digest(briefing_text: str, stats: dict) -> bool:
     payload = {
         "text": f"🕐 오후 업데이트 · {d}",
         "blocks": [
-            _start_marker("오후 업데이트"),
             {"type": "header", "text": {"type": "plain_text", "text": f"🕐 오후 업데이트 · {d}"}},
             {"type": "context", "elements": [
-                {"type": "mrkdwn", "text": f"⏱ *오전 새로 뜬 중요 활동* · 평일 오후  ·  "
-                                           f"🔴 HIGH *{stats.get('high',0)}*건"}]},
-            {"type": "divider"},
+                {"type": "mrkdwn", "text": f"오전 새 HIGH · 🔴 {stats.get('high',0)}건"}]},
             *_briefing_blocks(briefing_text),
             _dashboard_footer(),
-            _end_marker("오후 업데이트"),
         ],
     }
     return _post(payload, secondary=True)
@@ -342,17 +346,10 @@ def send_daily_briefing(briefing_text: str, stats: dict) -> bool:
     payload = {
         "text": f"🌅 데일리 브리핑 · {d}",
         "blocks": [
-            _start_marker("아침 브리핑"),
-            {"type": "header", "text": {"type": "plain_text", "text": f"🌅 데일리(아침) 브리핑 · {d}"}},
-            {"type": "context", "elements": [
-                {"type": "mrkdwn", "text": f"📅 *어제 수집분 · 객관 분석* · 화~금 아침  ·  📥 신규 *{stats.get('total',0)}*건  ·  "
-                                           f"🔴 HIGH *{stats.get('high',0)}*  ·  "
-                                           f"🏷 브랜드 *{stats.get('brands',0)}*  ·  🌐 국가 *{stats.get('countries',0)}*"}]},
-            {"type": "divider"},
-            *_briefing_blocks(briefing_text),
-            {"type": "divider"},
+            {"type": "header", "text": {"type": "plain_text", "text": f"🌅 데일리 브리핑 · {d}"}},
+            _meta_line("최근 7일 · 화~금 아침", stats),
+            *_body_blocks(briefing_text),
             _dashboard_footer(),
-            _end_marker("아침 브리핑"),
         ],
     }
     return _post(payload, secondary=True)

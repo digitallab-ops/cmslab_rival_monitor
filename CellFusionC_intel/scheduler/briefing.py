@@ -284,107 +284,220 @@ def _signal_digest(session, weekly: bool = True) -> str:
     return header + "\n".join(L)
 
 
+# ── 데이터 리치 본문 구성 (대시보드 신호 재사용: 수치 배지 + 야무진 해석) ──────────
+
+def _bko(b):
+    from config.brands import BRAND_KO_NAMES
+    v = BRAND_KO_NAMES.get(b)
+    return (v[0] if isinstance(v, list) and v else (v or b))
+
+
+def _cty_ko(c):
+    from analytics.brief_strategy import _COUNTRY_KO
+    return _COUNTRY_KO.get((c or "").upper(), c)
+
+
+def _badges(r) -> list:
+    """레코드의 정제 신호 → 수치 배지(데이터 리치)."""
+    b = []
+    if r.get("retail_rank_solid"):
+        cat = r.get("retail_category") or ""
+        b.append(f"🛒 아마존 {cat} #{r['retail_rank_solid']}")
+    if r.get("google_spike"):
+        b.append(f"🔍 검색 ▲{r['google_spike']:.1f}배")
+    elif r.get("search_up"):
+        b.append("🔍 검색↑")
+    if r.get("export_yoy") is not None:
+        b.append(f"📦 수출 {'+' if r['export_yoy'] >= 0 else ''}{r['export_yoy']:.0f}%")
+    if r.get("oy_rank"):
+        b.append(f"🇰🇷 올영 #{r['oy_rank']}")
+    if r.get("trademark_cnt"):
+        b.append(f"🪧 상표 {r['trademark_cnt']}")
+    return b
+
+
+def _prod_short(p):
+    """상표·제품명 정리 — 브랜드 접두·괄호 제거, 짧게."""
+    import re
+    if not p:
+        return ""
+    p = re.sub(r"\[[^\]]*\]", "", p)
+    p = re.sub(r"\s+", " ", p).strip(" ,·-")
+    for pre in [r"^d[\'’]?alba\s*(piedmont)?", r"^SKIN1004", r"^Beauty of Joseon", r"^Abib",
+                r"^Anua", r"^ANUA\([^)]*\)", r"^CENTELLIAN\s*24", r"^MEDIHEAL", r"^medicube",
+                r"^COSRX", r"^VT", r"^Numbuzin", r"^numbuzin", r"^Mixsoon", r"^mixsoon"]:
+        p = re.sub(pre, "", p, flags=re.I).strip(" ,·-")
+    return p[:26]
+
+
+def _sig(r):
+    """핵심 신호 — 브랜드별 실측(수출은 국가값이라 제외, 아래 급성장시장에). 최대 2개."""
+    out = []
+    if r.get("retail_rank_solid"):
+        out.append(f"아마존 {r.get('retail_category','')} {r['retail_rank_solid']}위")
+    if r.get("google_spike"):
+        out.append(f"검색 {r['google_spike']:.1f}배↑")
+    elif r.get("oy_rank") and r["oy_rank"] <= 10:
+        out.append(f"올영 {r['oy_rank']}위")
+    return " · ".join(out[:2])
+
+
+def _theme_and_watch(moves, market_line):
+    """'매일 읽고 싶은' 편집물용 — 뾰족한 한 방(theme) + 지켜볼 것(watch). 1 LLM(json)."""
+    import json as _json
+    facts = []
+    for r, rd in moves:
+        ch = ", ".join(list((r.get("channels") or {}).keys())[:2])
+        facts.append(f"- {_bko(r['brand'])}/{_cty_ko(r['country'])} · 채널={ch or '-'} · {rd}")
+    prompt = (
+        "너는 K뷰티 경쟁 인텔리전스 애널리스트다. 아래 이번 주 무브로 '매일 아침 꼭 읽고 싶은' "
+        "브리핑의 두 요소를 써라.\n\n"
+        "1) theme('이번 주의 한 방') — 딱 2문장, 짧게(합쳐 90자 이내). **브랜드명·수치 하나도 쓰지 마라**"
+        "(아래 목록과 겹치면 안 됨).\n"
+        "   · 첫 문장 = 이번 주를 규정하는 뾰족한 헤드라인 한 방(35자 이내, 단정적). "
+        "예: '이번 주 진짜 뉴스는 브랜드가 아니라 채널이다' / 'K뷰티가 아마존 밖으로 나가기 시작했다' / "
+        "'팝업이 신제품을 이긴 한 주'.\n"
+        "   · 둘째 문장 = 그게 왜 지금 중요한지 근거 한 줄(55자 이내).\n"
+        "   · 금지어(상투어): '다변화', '모색', '전환점', '입지 강화', '시장 점유율 확대', '긍정적', '기대'. "
+        "예측·당위 금지, 관찰형.\n\n"
+        "2) watch('지켜볼 것') — 1~2개. 이 무브 중 '다음에 판가름날' 지점을 궁금증 유발하게 짧게. "
+        "예: '스킨1004 일본 팝업이 실제 판매로 이어지는지', '리쥬란 세포라가 반짝인지 안착인지'.\n\n"
+        "움직임:\n" + "\n".join(facts)
+        + (f"\n급성장 시장: {market_line}" if market_line else "")
+        + '\n\n반드시 JSON: {"theme":"...", "watch":["...","..."]}')
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        resp = client.chat.completions.create(
+            model="gpt-4o", max_tokens=360, temperature=0.4,
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}])
+        d = _json.loads(resp.choices[0].message.content or "{}")
+        return (d.get("theme") or "").strip(), [w.strip() for w in (d.get("watch") or []) if w.strip()][:2]
+    except Exception as e:
+        logger.warning("테마/지켜볼것 생성 실패: %s", e)
+        return "", []
+
+
+def _compose_brief_body(session, weekly: bool):
+    """슬랙 브리핑 본문 — 대시보드와 '무브 해석'은 동일(build_brief_strategy)하되,
+    상단 '큰 그림'은 목록과 겹치지 않는 통찰(별도 생성). 흥미·밀도 위해 4~6건.
+    반환: (body_markdown, kpi_stats)."""
+    from datetime import datetime, timedelta
+    from collections import defaultdict
+    from analytics.queries import (get_brief_records, get_retail_performance,
+                                   get_market_export_growth)
+    from analytics.brief_strategy import build_brief_strategy, is_meaningful_line
+
+    recs = get_brief_records(session, days=7)          # 대시보드와 동일 창
+    if not recs:
+        return "", {}
+    try:
+        rp = get_retail_performance(session)
+    except Exception:
+        rp = {}
+    try:
+        mkt = get_market_export_growth(session, hs_like="330499", trailing=3)
+    except Exception:
+        mkt = []
+    to7 = datetime.utcnow().date().isoformat()
+    from7 = (datetime.utcnow() - timedelta(days=7)).date().isoformat()
+    # 무브 해석은 대시보드와 동일 캐시(BS|…) — 클릭해 들어가도 같은 문구
+    sd = build_brief_strategy(session, recs, rp, mkt, from7, to7, bko=_bko)
+    strat = sd.get("strat", {})
+
+    # 대시보드 브랜드 카드와 동일 정렬(브랜드 attn 합), 각 브랜드 top 국가(의미있는 해석)
+    g = defaultdict(list)
+    for r in recs:
+        g[r["brand"]].append(r)
+    brands_sorted = sorted(g.items(), key=lambda x: -sum(rr["attn"] for rr in x[1]))
+    topN = 6 if weekly else 4
+    moves = []
+    for b, rs in brands_sorted:
+        cand = [r for r in sorted(rs, key=lambda x: -x["attn"])
+                if is_meaningful_line(strat.get((b, r["country"]), ""))]
+        if not cand:
+            continue
+        r = cand[0]
+        moves.append((r, strat[(b, r["country"])].strip()))
+        if len(moves) >= topN:
+            break
+    if not moves:
+        return "", {}
+
+    # 급성장 시장(성장률 순)
+    mk = sorted([m for m in mkt if m.get("yoy_pct") is not None and m.get("exp_usd_3m", 0) >= 8e6],
+                key=lambda z: -z["yoy_pct"])[:3]
+    market_line = " · ".join(f"*{_cty_ko(m['country_code'])}* +{m['yoy_pct']:.0f}%" for m in mk)
+
+    # 편집물 훅 — 뾰족한 한 방 + 지켜볼 것(목록과 겹치지 않음)
+    theme, watch = _theme_and_watch(moves, market_line)
+
+    # 무브 라인(번호 + 제품·수치 + 해석). 해석 앞 브랜드명 중복 제거.
+    move_lines = []
+    for idx, (r, line_read) in enumerate(moves, 1):
+        bn = _bko(r["brand"])
+        if line_read.startswith(bn):
+            line_read = line_read[len(bn):].lstrip("가이은는을를 ·,").strip()
+        sig = _sig(r)
+        head = f"*{idx}. {bn}* · {_cty_ko(r['country'])}"
+        if sig:
+            head += f"  —  {sig}"
+        move_lines.append(head + (f"\n{line_read}" if line_read else ""))
+
+    parts = []
+    if theme:
+        parts.append(f"*📌 이번 주의 한 방*\n{theme}")
+    parts.append("*🎯 주목할 움직임*\n" + "\n\n".join(move_lines))
+    if market_line:
+        parts.append(f"*📈 다음 격전지*  {market_line}")
+    if watch:
+        parts.append("*👀 지켜볼 것*\n" + "\n".join(f"• {w}" for w in watch))
+    body = "\n\n".join(parts)
+
+    kpi = {
+        "total": len(recs),
+        "high": sum(1 for r in recs if r.get("importance") == "high" or (r.get("high_cnt") or 0) > 0),
+        "brands": len({r["brand"] for r in recs if r["label"] == "verified"}),
+        "countries": len({r["country"] for r in recs if r["label"] == "market"}),
+    }
+    return body, kpi
+
+
 # ── 주간 브리핑 (심층) ────────────────────────────────────────────────────────
 
 def generate_weekly_briefing() -> str:
     """최근 7일 심층 주간 보고 → Slack (gpt-4o)."""
     session = get_session()
     try:
-        rows = _fetch_rows(session, hours=24 * 7)
-        stats = _stats(session, hours=24 * 7)
-        signal_digest = _signal_digest(session, weekly=True)
+        body, kpi = _compose_brief_body(session, weekly=True)
     finally:
         session.close()
-
-    if not rows:
-        logger.info("주간 브리핑: 수집 데이터 없음")
+    if not body:
+        logger.info("주간 브리핑: 데이터 없음")
         return ""
-
-    data_prompt = _build_prompt_by_region(rows, limit=100, detail_len=240)
-    if signal_digest:
-        data_prompt += ("\n\n=== [정량 신호: 검색수요·수출성과·상표선행·종합스코어] ===\n"
-                        "(뉴스와 교차해 반드시 해석에 반영)\n" + signal_digest)
-    system = (
-        "당신은 글로벌 경쟁 인텔리전스 수석 분석가입니다. 1주치 K뷰티 경쟁 브랜드 활동을 "
-        "월요일 아침에 읽는 위클리 브리핑으로 정리하세요. **핵심만 딱딱, 대신 각 줄은 야무지게.** "
-        "자세한 수치·차트·전체 근거는 대시보드에 있으니 여기선 '무슨 일 → 왜 중요'만 밀도 있게.\n\n"
-        "객관 원칙(엄수): 특정 회사(셀퓨전씨/우리) 기준 우열·경쟁심화·위협 단정 금지. 브랜드 움직임을 사실대로 분석하고 "
-        "'어느 부분을 확인·주시할지' 제시. 체급 다른 브랜드를 임의로 '우리 경쟁'으로 엮지 말 것.\n\n"
-        "출력(슬랙): 강조는 *별표 하나*(** 금지), 불릿 '- ', 머리말 '### '. 형식:\n\n"
-        "### 📊 이번 주 한눈에\n"
-        "- 이번 주 판을 요약하는 1~2문장. 야무지게(어느 시장·브랜드가 어떤 방향으로 움직였나).\n\n"
-        "### 핵심 변화\n"
-        "- 판을 바꾼 움직임 4~5개만. 각 한 줄: '- *브랜드*(국가) — 무엇을 어디서(채널·제품) → 왜 중요/의미' "
-        "구체적으로. 원문 있으면 끝에 `<URL|원문 ↗>`(없으면 생략).\n\n"
-        "### 확인·주시 포인트\n"
-        "- 더 지켜보거나 검증할 지점 2~3개(객관). 정량신호 해석 반영 — 발표만 있고 검색·수출 미동반이면 'PR 노이즈', "
-        "신규 해외 상표는 '진출 임박', 수출 급증은 '실질 성장' 관점.\n\n"
-        "데이터에 있는 사실만. 추측·과장 금지. 한국어."
-    )
-    try:
-        text_out = _openai("gpt-4o", system, data_prompt, max_tokens=1400)
-    except Exception as e:
-        logger.error("주간 브리핑 GPT 오류: %s", e)
-        text_out = f"브리핑 생성 오류: {e}"
-    # 하드데이터 덤프는 대시보드로 이관 — signal_digest는 data_prompt의 LLM 근거로만 쓰고 화면엔 안 붙임.
-    # 대시보드 링크는 send_weekly_briefing이 하단에 자동 첨부.
-
-    logger.info("주간 브리핑 생성 완료 (%d자)", len(text_out))
-    _save(kind="weekly", content=text_out, stats=stats, hours=24 * 7, model="gpt-4o")
-    send_weekly_briefing(text_out, stats)
-    return text_out
+    logger.info("주간 브리핑 생성 완료 (%d자)", len(body))
+    _save(kind="weekly", content=body, stats=kpi, hours=24 * 7, model="gpt-4o-mini")
+    send_weekly_briefing(body, kpi)
+    return body
 
 
 # ── 일간 브리핑 (간결) ────────────────────────────────────────────────────────
 
 def generate_daily_briefing() -> str:
-    """전날 수집분 요약 → Slack (gpt-4o-mini). 브랜드별·제품명·원문링크·조언형."""
-    from analytics.summarizer import _TONE_GUIDE
+    """어제 활동 → Slack. 대시보드 신호(수치 배지) + 야무진 해석."""
     session = get_session()
     try:
-        rows = _fetch_rows(session, hours=28)   # 전날 저녁 수집분 커버
-        stats = _stats(session, hours=28)
-        signal_digest = _signal_digest(session, weekly=False)
+        body, kpi = _compose_brief_body(session, weekly=False)
     finally:
         session.close()
-
-    if not rows:
-        logger.info("일간 브리핑: 전날 수집 없음")
-        send_daily_briefing("어제 새로 잡힌 주목할 경쟁 활동이 없습니다." + (signal_digest or ""), stats)
+    if not body:
+        logger.info("일간 브리핑: 데이터 없음")
+        send_daily_briefing("어제 새로 잡힌 주목할 경쟁 활동이 없습니다.", {})
         return ""
-
-    data_prompt = _build_prompt_by_brand(rows, limit=60, detail_len=220)
-    if signal_digest:
-        data_prompt += "\n\n=== [정량 신호 요약] ===\n" + signal_digest
-    system = (
-        "당신은 경쟁 인텔리전스 분석가입니다. 어제 K뷰티 경쟁 브랜드 활동을 "
-        "출근길에 30초면 핵심이 잡히는 아침 브리핑으로 정리하세요. **핵심만 딱딱, 대신 각 줄은 야무지게.** "
-        "자세한 수치·근거·차트는 대시보드에 있으니 여기선 '무슨 일 → 왜 중요'만.\n\n"
-        "객관 원칙(엄수): 브랜드 움직임을 사실대로. 특정 회사(셀퓨전씨/우리) 기준 우열·경쟁심화·위협 단정 금지. "
-        "'우리 주력시장/위협/경쟁 심화' 표현 금지. 체급 다른 브랜드를 임의로 '우리 경쟁'으로 엮지 말 것.\n\n"
-        "출력(슬랙): 강조는 *별표 하나*(** 금지), 불릿 '- ', 머리말 '### '. 분량 짧게. 형식:\n\n"
-        "### ☀️ 오늘 한눈에\n"
-        "- 어제 흐름을 관통하는 한 문장. 야무지게(어느 브랜드가 어디서 무엇을, 어떤 방향으로).\n\n"
-        "### 핵심 움직임\n"
-        "- 가장 중요한 3~4개만. 각 한 줄: '- *브랜드*(국가) — 무엇을 어디서(채널·제품) → 왜 중요/어떤 의미' "
-        "구체적으로(뭉뚱그림 금지). 원문 있으면 끝에 `<URL|원문 ↗>`(없으면 생략, 지어내기 금지).\n\n"
-        "### 확인 포인트\n"
-        "- 지켜볼 지점 1~2개(객관). 예: 'OO 진출이 실제 판매로 이어지는지'.\n\n"
-        "데이터에 있는 사실만. 추측·과장 금지. 한국어.\n\n"
-        f"{_TONE_GUIDE}"
-    )
-    try:
-        text_out = _openai("gpt-4o", system, data_prompt, max_tokens=900)
-    except Exception as e:
-        logger.error("일간 브리핑 GPT 오류: %s", e)
-        text_out = f"브리핑 생성 오류: {e}"
-    # 하드데이터 8섹션 덤프는 대시보드로 이관 — 슬랙엔 핵심 서술만(signal_digest는 위 data_prompt의
-    # LLM 근거로만 사용, 화면엔 안 붙임). 대시보드 링크는 send_daily_briefing이 하단에 자동 첨부.
-
-    logger.info("아침 브리핑 생성 완료 (%d자)", len(text_out))
-    _save(kind="daily", content=text_out, stats=stats, hours=28, model="gpt-4o")
-    send_daily_briefing(text_out, stats)
-    return text_out
+    logger.info("아침 브리핑 생성 완료 (%d자)", len(body))
+    _save(kind="daily", content=body, stats=kpi, hours=28, model="gpt-4o-mini")
+    send_daily_briefing(body, kpi)
+    return body
 
 
 # ── 오후 다이제스트 (오전 신규 HIGH 있을 때만) ────────────────────────────────
