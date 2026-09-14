@@ -405,7 +405,16 @@ def _compose_brief_body(session, weekly: bool):
     sd = build_brief_strategy(session, recs, rp, mkt, from7, to7, bko=_bko)
     strat = sd.get("strat", {})
 
-    # 대시보드 브랜드 카드와 동일 정렬(브랜드 attn 합), 각 브랜드 top 국가(의미있는 해석)
+    # 노이즈(재무·투자성) 제외 — 골프/투자/상장/M&A 등은 시장 무브가 아님(헤드라인까지 오염)
+    _NOISE = ("골프", "투자", "상장", "IPO", "M&A", "인수", "합병", "펀드", "유치",
+              "잭팟", "예비심사", "지분", "공시")
+
+    def _noisy(r):
+        txt = (strat.get((r["brand"], r["country"]), "") + " "
+               + (r.get("headline", "") or "") + " " + (r.get("summary", "") or ""))
+        return any(k in txt for k in _NOISE)
+
+    # 대시보드 브랜드 카드와 동일 정렬(브랜드 attn 합), 각 브랜드 top 국가(의미있는 해석, 노이즈 제외)
     g = defaultdict(list)
     for r in recs:
         g[r["brand"]].append(r)
@@ -414,7 +423,7 @@ def _compose_brief_body(session, weekly: bool):
     moves = []
     for b, rs in brands_sorted:
         cand = [r for r in sorted(rs, key=lambda x: -x["attn"])
-                if is_meaningful_line(strat.get((b, r["country"]), ""))]
+                if is_meaningful_line(strat.get((b, r["country"]), "")) and not _noisy(r)]
         if not cand:
             continue
         r = cand[0]
@@ -431,6 +440,9 @@ def _compose_brief_body(session, weekly: bool):
 
     # 편집물 훅 — 뾰족한 한 방 + 지켜볼 것(목록과 겹치지 않음)
     theme, watch = _theme_and_watch(moves, market_line)
+    if not watch:                       # 비면 top 무브로 폴백(항상 훅 제공)
+        watch = [f"{_bko(r['brand'])}의 {_cty_ko(r['country'])} 움직임이 실제 판매로 이어지는지"
+                 for r, _ in moves[:2]]
 
     # 무브 라인(번호 + 제품·수치 + 해석). 해석 앞 브랜드명 중복 제거.
     move_lines = []
