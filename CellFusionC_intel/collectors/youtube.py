@@ -26,42 +26,71 @@ _BUZZ_WINDOW_DAYS = 30          # 버즈 측정 창(최근 N일 내 조회수 �
 
 
 def _record_buzz(brand: str, video_ids: list, titles: dict) -> None:
-    """검색된 영상들의 조회수를 모아 '소셜 버즈' 지표로 적재.
+    """검색된 영상들의 반응을 '소셜 버즈' 지표로 적재. videos.list는 1유닛(최대 50건).
 
-    videos.list는 1유닛(최대 50건)이라 search.list(100유닛) 대비 부담 없음.
-    영상을 기사로만 담으면 '몇 개 올라왔나'만 알 뿐 — 실제 반응(조회수)이 버즈의 핵심.
+    단순 총조회수는 과대계상된다 — 'empties/haul'류 영상 하나가 10개 브랜드를 나열하면
+    그 조회수가 브랜드마다 통째로 잡히기 때문. 또 브랜드 공식 채널의 광고(TVCM)와
+    크리에이터의 자발적 리뷰는 의미가 완전히 달라(PR 우세 vs 실수요) 나눠 담는다:
+      recent_views   전체(참고)      focus_views   제목에 브랜드 = 전용 콘텐츠(진짜 버즈)
+      official_views 브랜드 공식채널 = 광고/자사 발행
+      organic_views  그 외 크리에이터 = 자발적 반응
+      engagement_pct (좋아요+댓글)/조회 — 노출뿐인지 실제 반응인지
     """
     if not video_ids:
         return
     try:
         resp = requests.get(YOUTUBE_VIDEOS_URL, timeout=10, params={
-            "key": YOUTUBE_API_KEY, "part": "statistics",
+            "key": YOUTUBE_API_KEY, "part": "statistics,snippet",   # 동시 요청도 1유닛
             "id": ",".join(video_ids[:50]),
         })
         resp.raise_for_status()
-        views = {}
+        bl = brand.lower().replace(" ", "")
+        vids = []
         for it in resp.json().get("items", []):
-            st = it.get("statistics", {}) or {}
+            st, sn = it.get("statistics", {}) or {}, it.get("snippet", {}) or {}
             try:
-                views[it.get("id", "")] = int(st.get("viewCount", 0) or 0)
+                vw = int(st.get("viewCount", 0) or 0)
             except (TypeError, ValueError):
                 continue
-        if not views:
+            title = sn.get("title", "") or ""
+            channel = sn.get("channelTitle", "") or ""
+            vids.append({
+                "id": it.get("id", ""), "views": vw, "title": title, "channel": channel,
+                "likes": int(st.get("likeCount", 0) or 0),
+                "comments": int(st.get("commentCount", 0) or 0),
+                # 제목에 브랜드 = 그 영상의 주제가 이 브랜드(스침 아님)
+                "focus": bl in title.lower().replace(" ", ""),
+                # 채널명이 브랜드 = 공식 계정 발행(광고·자사 콘텐츠)
+                "official": bl in channel.lower().replace(" ", ""),
+            })
+        if not vids:
             return
-        total = sum(views.values())
-        top_id = max(views, key=views.get)
+        total = sum(v["views"] for v in vids)
+        focus = sum(v["views"] for v in vids if v["focus"])
+        official = sum(v["views"] for v in vids if v["official"])
+        organic = total - official
+        inter = sum(v["likes"] + v["comments"] for v in vids)
+        eng = (inter / total * 100) if total else 0.0
+        top = max(vids, key=lambda v: v["views"])
+        tag = "공식" if top["official"] else "크리에이터"
+
         from storage.models import get_session
         from storage.repository import upsert_social_metric
         s = get_session()
         try:
-            upsert_social_metric(s, "youtube", brand, "recent_videos", len(views))
-            upsert_social_metric(s, "youtube", brand, "recent_views", total)
-            upsert_social_metric(s, "youtube", brand, "top_video_views", views[top_id],
-                                 meta=(titles.get(top_id) or "")[:200])
+            up = lambda m, v, meta=None: upsert_social_metric(s, "youtube", brand, m, v, meta)
+            up("recent_videos", len(vids))
+            up("recent_views", total)
+            up("focus_views", focus)
+            up("official_views", official)
+            up("organic_views", organic)
+            up("engagement_pct", round(eng, 2))
+            up("top_video_views", top["views"],
+               meta=f"[{tag}·{top['channel'][:24]}] {top['title']}"[:200])
         finally:
             s.close()
-        logger.info("YouTube 버즈: %s → 영상 %d · 조회 %s (최고 %s)",
-                    brand, len(views), f"{total:,}", f"{views[top_id]:,}")
+        logger.info("YouTube 버즈: %s → 영상 %d · 전체 %s(전용 %s·공식 %s) · 참여 %.2f%%",
+                    brand, len(vids), f"{total:,}", f"{focus:,}", f"{official:,}", eng)
     except Exception as e:
         logger.warning("YouTube 버즈 지표 스킵 (%s): %s", brand, e)
 
