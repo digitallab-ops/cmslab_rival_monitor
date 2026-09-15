@@ -272,3 +272,109 @@ def known_mapping_codes(session: Session, kind: str) -> set:
         f"SELECT code FROM {DB_SCHEMA}.value_mappings "
         f"WHERE kind = :k AND status IN ('pending','active')"), {"k": kind}).fetchall()
     return {r[0] for r in rows}
+
+
+# ── 슬랙봇 개인화: 대화 영속 + 사용자 장기 기억 ──────────────────────────────
+# 슬랙 user_id별로 (a) 대화를 DB에 남겨 재시작해도 맥락이 이어지고,
+# (b) '지속될 사실'(담당 시장·관심 브랜드·선호 형식)을 기억해 답변을 개인화한다.
+# 사용자는 `기억`으로 조회, `기억해 ~`로 추가, `잊어`로 삭제할 수 있다(제어권 보장).
+_BOT_MEM_READY = False
+
+
+def _ensure_bot_tables(session: Session) -> None:
+    global _BOT_MEM_READY
+    if _BOT_MEM_READY:
+        return
+    session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.bot_conversations (
+            id BIGSERIAL PRIMARY KEY,
+            user_id VARCHAR(32) NOT NULL,
+            role VARCHAR(12) NOT NULL,
+            content TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    """))
+    session.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_bot_conv_user "
+        f"ON {DB_SCHEMA}.bot_conversations (user_id, created_at DESC)"))
+    session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.bot_user_memory (
+            id BIGSERIAL PRIMARY KEY,
+            user_id VARCHAR(32) NOT NULL,
+            mem_key VARCHAR(80) NOT NULL,
+            mem_value TEXT,
+            source VARCHAR(12) DEFAULT 'auto',
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE (user_id, mem_key)
+        )
+    """))
+    session.commit()
+    _BOT_MEM_READY = True
+
+
+def save_bot_turn(session: Session, user_id: str, role: str, content: str) -> None:
+    """대화 한 턴 저장(실패해도 대화엔 지장 없게 호출부에서 예외 흡수)."""
+    _ensure_bot_tables(session)
+    session.execute(text(f"""
+        INSERT INTO {DB_SCHEMA}.bot_conversations (user_id, role, content)
+        VALUES (:u, :r, :c)"""), {"u": user_id, "r": role, "c": (content or "")[:6000]})
+    session.commit()
+
+
+def load_bot_history(session: Session, user_id: str, turns: int = 10) -> list:
+    """최근 대화를 OpenAI messages 형식으로(오래된 순). turns=주고받은 쌍 수."""
+    _ensure_bot_tables(session)
+    rows = session.execute(text(f"""
+        SELECT role, content FROM {DB_SCHEMA}.bot_conversations
+        WHERE user_id = :u ORDER BY created_at DESC, id DESC LIMIT :n
+    """), {"u": user_id, "n": turns * 2}).fetchall()
+    return [{"role": r[0], "content": r[1] or ""} for r in reversed(rows)]
+
+
+def get_user_memory(session: Session, user_id: str) -> dict:
+    """{키: 값} — 이 사용자에 대해 기억하는 지속 사실."""
+    _ensure_bot_tables(session)
+    rows = session.execute(text(f"""
+        SELECT mem_key, mem_value FROM {DB_SCHEMA}.bot_user_memory
+        WHERE user_id = :u ORDER BY updated_at DESC LIMIT 25
+    """), {"u": user_id}).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def upsert_user_memory(session: Session, user_id: str, key: str,
+                       value: str, source: str = "auto") -> None:
+    _ensure_bot_tables(session)
+    session.execute(text(f"""
+        INSERT INTO {DB_SCHEMA}.bot_user_memory (user_id, mem_key, mem_value, source, updated_at)
+        VALUES (:u, :k, :v, :s, NOW())
+        ON CONFLICT (user_id, mem_key) DO UPDATE
+        SET mem_value = EXCLUDED.mem_value, source = EXCLUDED.source, updated_at = NOW()
+    """), {"u": user_id, "k": key[:80], "v": (value or "")[:500], "s": source})
+    session.commit()
+
+
+def delete_user_memory(session: Session, user_id: str, key: Optional[str] = None) -> int:
+    """key 지정 시 그 항목만, 없으면 이 사용자 기억 전체 삭제. 반환: 삭제 건수."""
+    _ensure_bot_tables(session)
+    if key:
+        r = session.execute(text(
+            f"DELETE FROM {DB_SCHEMA}.bot_user_memory WHERE user_id=:u AND mem_key ILIKE :k"),
+            {"u": user_id, "k": f"%{key}%"})
+    else:
+        r = session.execute(text(
+            f"DELETE FROM {DB_SCHEMA}.bot_user_memory WHERE user_id=:u"), {"u": user_id})
+    session.commit()
+    return r.rowcount or 0
+
+
+def purge_bot_conversations(session: Session, keep_days: int = 90) -> int:
+    """오래된 대화 로그 정리(무한 증가 방지)."""
+    try:
+        r = session.execute(text(f"""
+            DELETE FROM {DB_SCHEMA}.bot_conversations
+            WHERE created_at < NOW() - (:d || ' days')::interval"""), {"d": keep_days})
+        session.commit()
+        return r.rowcount or 0
+    except Exception:
+        session.rollback()
+        return 0

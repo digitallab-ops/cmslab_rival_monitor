@@ -112,11 +112,18 @@ async def _call_mcp_tool(session, name: str, args: dict) -> str:
         return f"(툴 {name} 호출 오류: {e})"
 
 
-async def answer(question: str, history: list, on_delta) -> str:
-    """gpt-4o tool-calling 루프. on_delta(text): 스트리밍 부분답변 콜백."""
+async def answer(question: str, history: list, on_delta, memory: dict | None = None) -> str:
+    """gpt-4o tool-calling 루프. on_delta(text): 스트리밍 부분답변 콜백.
+    memory: {키:값} 이 사용자에 대해 기억하는 지속 사실 → 시스템 프롬프트에 주입(개인화)."""
+    sys_prompt = SYSTEM_PROMPT
+    if memory:
+        mem_txt = "\n".join(f"- {k}: {v}" for k, v in list(memory.items())[:12])
+        sys_prompt += (
+            "\n\n[이 사용자에 대해 기억하는 것 — 답변을 이 맥락에 맞춰 개인화하라]\n" + mem_txt +
+            "\n(기억이 질문과 무관하면 무시. 기억 내용을 굳이 되뇌지 말고 자연스럽게 반영만 하라.)")
     async with _mcp_session() as session:
         tools = await _get_openai_tools(session)
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history,
+        messages = [{"role": "system", "content": sys_prompt}, *history,
                     {"role": "user", "content": question}]
         final = ""
         for _round in range(MAX_ROUNDS):
@@ -345,6 +352,83 @@ def _mapping_command(text: str, user_id: str = ""):
         s.close()
 
 
+def _memory_command(text: str, user_id: str = ""):
+    """사용자 기억 제어 — `기억`(조회) / `기억해 <내용>`(추가) / `잊어`·`기억 삭제 <키>`(삭제).
+    본인 기억만 다루므로 관리자 권한 불필요. 명령이면 응답 문자열, 아니면 None."""
+    t = (text or "").strip()
+    if not (t.startswith("기억") or t.startswith("잊어")):
+        return None
+    from storage.repository import (get_user_memory, upsert_user_memory, delete_user_memory)
+    s = get_session()
+    try:
+        # 삭제: "잊어" / "잊어 일본" / "기억 삭제 일본"
+        if t.startswith("잊어") or t.startswith("기억 삭제") or t.startswith("기억삭제"):
+            key = t.replace("기억 삭제", "").replace("기억삭제", "").replace("잊어", "").strip()
+            n = delete_user_memory(s, user_id, key or None)
+            if not n:
+                return "지울 기억이 없어요."
+            return (f"🧹 기억 {n}건 지웠어요." if key else f"🧹 당신에 대한 기억 {n}건 전부 지웠어요.")
+        # 추가: "기억해 나는 일본 담당이야"
+        if t.startswith("기억해"):
+            val = t[3:].strip(" :·,")
+            if not val:
+                return "무엇을 기억할까요? 예) `기억해 나는 일본 시장 담당`"
+            key = ("직접 입력 " + val[:20])
+            upsert_user_memory(s, user_id, key, val, source="user")
+            return f"🧠 기억했어요 — _{val}_\n(`기억`으로 확인, `잊어`로 삭제)"
+        # 조회: "기억"
+        mem = get_user_memory(s, user_id)
+        if not mem:
+            return ("아직 당신에 대해 기억한 게 없어요. 대화를 나누면 관심 브랜드·시장 같은 걸 "
+                    "자동으로 기억합니다.\n직접 알려주려면 `기억해 나는 일본 시장 담당`")
+        lines = ["*🧠 당신에 대해 기억하는 것* — `기억해 <내용>`로 추가 · `잊어`로 전체 삭제"]
+        lines += [f"• {v}" for v in mem.values()]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"⚠️ 기억 처리 실패: {e}"
+    finally:
+        s.close()
+
+
+_MEM_EXTRACT_PROMPT = (
+    "아래는 사내 경쟁 인텔리전스 봇과 한 직원의 대화다. 이 '사용자'에 대해 앞으로도 계속 유효할 "
+    "지속적 사실만 뽑아라(담당 시장·관심 브랜드/카테고리·업무 역할·선호하는 답변 형식 등).\n"
+    "- 일회성 질문 내용, 봇이 답한 데이터는 기억이 아니다. 뽑지 마라.\n"
+    "- 확실하지 않으면 뽑지 마라. 없으면 빈 배열.\n"
+    "- 각 항목은 key(짧은 라벨)와 value(한 줄 사실). 최대 2개.\n"
+    '반드시 JSON: {"facts":[{"key":"담당 시장","value":"일본 시장을 담당한다"}]}'
+)
+
+
+def _extract_memory(user_id: str, question: str, reply: str) -> None:
+    """대화에서 지속될 사실을 추출해 저장(백그라운드·실패 무해)."""
+    try:
+        import json as _json
+        from openai import OpenAI
+        from storage.repository import get_user_memory, upsert_user_memory
+        s = get_session()
+        try:
+            known = get_user_memory(s, user_id)
+            known_txt = "\n".join(f"- {k}: {v}" for k, v in known.items()) or "(없음)"
+            cli = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            resp = cli.chat.completions.create(
+                model="gpt-4o-mini", max_tokens=200, temperature=0,
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content":
+                           f"{_MEM_EXTRACT_PROMPT}\n\n이미 아는 것:\n{known_txt}\n\n"
+                           f"[사용자] {question[:600]}\n[봇] {reply[:600]}"}])
+            facts = (_json.loads(resp.choices[0].message.content or "{}").get("facts") or [])[:2]
+            for f in facts:
+                k, v = (f.get("key") or "").strip(), (f.get("value") or "").strip()
+                if k and v and v not in known.values():
+                    upsert_user_memory(s, user_id, k, v, source="auto")
+                    logger.info("사용자 기억 저장 [%s] %s=%s", user_id, k, v)
+        finally:
+            s.close()
+    except Exception as e:
+        logger.debug("기억 추출 스킵: %s", e)
+
+
 async def _handle(event: dict, client, in_thread: bool):
     user = event.get("user", "?")
     channel = event["channel"]
@@ -353,6 +437,11 @@ async def _handle(event: dict, client, in_thread: bool):
     if not text:
         await client.chat_postMessage(channel=channel, thread_ts=thread_ts,
                                       text="무엇을 물어볼까요? 예) `아누아 최근 미국 동향`, `베트남 시장 경쟁 상황`, `앰플 카테고리 압박`\n브랜드 관리: `후보` · `추가 <브랜드>` · `제외 <브랜드>`")
+        return
+
+    _memcmd = _memory_command(text, user)
+    if _memcmd is not None:
+        await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=_memcmd)
         return
 
     _mcmd = _mapping_command(text, user)
@@ -376,9 +465,23 @@ async def _handle(event: dict, client, in_thread: bool):
             state["last"] = now
             asyncio.create_task(_safe_update(client, channel, ts, cur + " ▌"))
 
-    hist = list(_history[user])
+    # 대화 맥락·사용자 기억을 DB에서(재시작해도 이어짐). 실패 시 인메모리 폴백.
+    hist, mem = list(_history[user]), {}
     try:
-        result = await answer(text, hist, on_delta)
+        from storage.repository import load_bot_history, get_user_memory
+        _s = get_session()
+        try:
+            db_hist = load_bot_history(_s, user, turns=HISTORY_TURNS)
+            if db_hist:
+                hist = db_hist
+            mem = get_user_memory(_s, user)
+        finally:
+            _s.close()
+    except Exception as e:
+        logger.debug("대화/기억 로드 스킵(인메모리 사용): %s", e)
+
+    try:
+        result = await answer(text, hist, on_delta, memory=mem)
     except Exception as e:
         logger.exception("답변 생성 오류")
         result = f"⚠️ 처리 중 오류가 났어요: {e}"
@@ -386,6 +489,19 @@ async def _handle(event: dict, client, in_thread: bool):
     await _safe_update(client, channel, ts, result)
     _history[user].append({"role": "user", "content": text})
     _history[user].append({"role": "assistant", "content": result})
+    # 영속 저장 + 지속 사실 추출(응답 후 백그라운드 — 사용자 대기 없음)
+    try:
+        from storage.repository import save_bot_turn
+        _s = get_session()
+        try:
+            save_bot_turn(_s, user, "user", text)
+            save_bot_turn(_s, user, "assistant", result)
+        finally:
+            _s.close()
+    except Exception as e:
+        logger.debug("대화 저장 스킵: %s", e)
+    if not result.startswith("⚠️"):
+        asyncio.get_running_loop().run_in_executor(None, _extract_memory, user, text, result)
 
 
 async def _safe_update(client, channel, ts, text):

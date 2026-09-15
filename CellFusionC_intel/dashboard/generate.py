@@ -6193,6 +6193,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             _bf_to = datetime.utcnow().date().isoformat()
         # 오래된 캐시행 정리(무한 증가 방지) — 리포트 생성 1회당 1 DELETE(경미).
         purge_old_insights(insight_session, keep_days=45)
+        try:    # 슬랙봇 대화 로그도 함께 정리(기억은 유지, 원문 대화만 90일)
+            from storage.repository import purge_bot_conversations
+            purge_bot_conversations(insight_session, keep_days=90)
+        except Exception:
+            pass
     finally:
         insight_session.close()
 
