@@ -4583,7 +4583,11 @@ _BRIEF_STYLE = """<style>
 #bf2{margin-top:4px}
 #bf2 .tongp{padding:16px 18px;background:linear-gradient(135deg,#16213a,#131c2d);border:1px solid #26314e;border-left:3px solid #e0ad4a;border-radius:12px;margin:0 0 14px}
 #bf2 .tongp .tl{font-size:11px;letter-spacing:.14em;color:#e0ad4a;font-weight:800;margin-bottom:8px}
-#bf2 .tongp p{margin:0;font-size:14.5px;line-height:1.75;color:#e2e7f2}
+#bf2 .tongp p{margin:0;font-size:15.5px;line-height:1.7;color:#eef1f8;font-weight:600}
+#bf2 .tw{margin-top:12px;padding-top:11px;border-top:1px solid rgba(224,173,74,.22)}
+#bf2 .twl{font-size:10.5px;letter-spacing:.12em;color:#e0ad4a;font-weight:800}
+#bf2 .tw ul{margin:6px 0 0;padding-left:16px}
+#bf2 .tw li{font-size:13px;color:#c3cde3;line-height:1.6}
 #bf2 .bf-strip{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
 #bf2 .bf-kpi{background:#141d33;border:1px solid #26314e;border-radius:9px;padding:8px 13px;min-width:96px}
 #bf2 .bf-kpi .n{font-size:19px;font-weight:800;color:#e7ecf7;font-variant-numeric:tabular-nums}
@@ -4688,6 +4692,7 @@ def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
     why = sd.get("why", {})
     bsum = sd.get("bsum", {})
     tongp = sd.get("tongp", "")
+    watch = sd.get("watch") or []
 
     def _bko(b):
         v = BRAND_KO_NAMES.get(b)
@@ -4816,9 +4821,11 @@ def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
             f'<div class="bf-kpi"><span class="n">{nmkt}</span><span class="k">뜨는 시장(국)</span></div>'
             f'</div>')
 
-    # ── 총평 ──
-    tongp_html = (f'<div class="tongp"><div class="tl">이번 주 종합 총평</div>'
-                  f'<p>{_esc(tongp)}</p></div>') if tongp else ""
+    # ── 이번 주의 한 방(+지켜볼 것) — 슬랙 브리핑과 동일 문구(brief_strategy 단일 출처) ──
+    _wh = ("".join(f'<li>{_esc(w)}</li>' for w in watch[:2])) if watch else ""
+    watch_html = (f'<div class="tw"><span class="twl">지켜볼 것</span><ul>{_wh}</ul></div>') if _wh else ""
+    tongp_html = (f'<div class="tongp"><div class="tl">📌 이번 주의 한 방</div>'
+                  f'<p>{_esc(tongp)}</p>{watch_html}</div>') if tongp else ""
 
     # ── 조용 브랜드 ──
     quiet_html = ""

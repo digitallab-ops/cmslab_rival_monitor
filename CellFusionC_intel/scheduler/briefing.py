@@ -342,42 +342,6 @@ def _sig(r):
     return " · ".join(out[:2])
 
 
-def _theme_and_watch(moves, market_line):
-    """'매일 읽고 싶은' 편집물용 — 뾰족한 한 방(theme) + 지켜볼 것(watch). 1 LLM(json)."""
-    import json as _json
-    facts = []
-    for r, rd in moves:
-        ch = ", ".join(list((r.get("channels") or {}).keys())[:2])
-        facts.append(f"- {_bko(r['brand'])}/{_cty_ko(r['country'])} · 채널={ch or '-'} · {rd}")
-    prompt = (
-        "너는 K뷰티 경쟁 인텔리전스 애널리스트다. 아래 이번 주 무브로 '매일 아침 꼭 읽고 싶은' "
-        "브리핑의 두 요소를 써라.\n\n"
-        "1) theme('이번 주의 한 방') — 딱 2문장, 짧게(합쳐 90자 이내). **브랜드명·수치 하나도 쓰지 마라**"
-        "(아래 목록과 겹치면 안 됨).\n"
-        "   · 첫 문장 = 이번 주를 규정하는 뾰족한 헤드라인 한 방(35자 이내, 단정적). "
-        "예: '이번 주 진짜 뉴스는 브랜드가 아니라 채널이다' / 'K뷰티가 아마존 밖으로 나가기 시작했다' / "
-        "'팝업이 신제품을 이긴 한 주'.\n"
-        "   · 둘째 문장 = 그게 왜 지금 중요한지 근거 한 줄(55자 이내).\n"
-        "   · 금지어(상투어): '다변화', '모색', '전환점', '입지 강화', '시장 점유율 확대', '긍정적', '기대'. "
-        "예측·당위 금지, 관찰형.\n\n"
-        "2) watch('지켜볼 것') — 1~2개. 이 무브 중 '다음에 판가름날' 지점을 궁금증 유발하게 짧게. "
-        "예: '스킨1004 일본 팝업이 실제 판매로 이어지는지', '리쥬란 세포라가 반짝인지 안착인지'.\n\n"
-        "움직임:\n" + "\n".join(facts)
-        + (f"\n급성장 시장: {market_line}" if market_line else "")
-        + '\n\n반드시 JSON: {"theme":"...", "watch":["...","..."]}')
-    try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        resp = client.chat.completions.create(
-            model="gpt-4o", max_tokens=360, temperature=0.4,
-            response_format={"type": "json_object"},
-            messages=[{"role": "user", "content": prompt}])
-        d = _json.loads(resp.choices[0].message.content or "{}")
-        return (d.get("theme") or "").strip(), [w.strip() for w in (d.get("watch") or []) if w.strip()][:2]
-    except Exception as e:
-        logger.warning("테마/지켜볼것 생성 실패: %s", e)
-        return "", []
-
-
 def _compose_brief_body(session, weekly: bool):
     """슬랙 브리핑 본문 — 대시보드와 '무브 해석'은 동일(build_brief_strategy)하되,
     상단 '큰 그림'은 목록과 겹치지 않는 통찰(별도 생성). 흥미·밀도 위해 4~6건.
@@ -438,8 +402,9 @@ def _compose_brief_body(session, weekly: bool):
                 key=lambda z: -z["yoy_pct"])[:3]
     market_line = " · ".join(f"*{_cty_ko(m['country_code'])}* +{m['yoy_pct']:.0f}%" for m in mk)
 
-    # 편집물 훅 — 뾰족한 한 방 + 지켜볼 것(목록과 겹치지 않음)
-    theme, watch = _theme_and_watch(moves, market_line)
+    # 편집물 훅 — 대시보드와 '같은' 한 방·지켜볼 것(brief_strategy 단일 출처, 캐시 공유)
+    theme = (sd.get("tongp") or "").strip()
+    watch = list(sd.get("watch") or [])
     if not watch:                       # 비면 top 무브로 폴백(항상 훅 제공)
         watch = [f"{_bko(r['brand'])}의 {_cty_ko(r['country'])} 움직임이 실제 판매로 이어지는지"
                  for r, _ in moves[:2]]

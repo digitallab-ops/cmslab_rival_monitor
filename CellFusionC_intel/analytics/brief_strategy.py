@@ -99,11 +99,28 @@ def _p_sum(brand_ko, strat_snips, prods):
 
 
 def _p_tongp(n, topb, mktxt, strat_examples):
-    return f"""K뷰티 경쟁 인텔리전스 주간 브리핑의 '종합 총평'을 3~4문장으로 써라.
-- 이번 주 전반 흐름: 어느 시장이 급성장하고, 브랜드들이 대체로 어떤 방식(대형유통·앰배서더·신흥시장 선점 등)으로 움직이는지 큰 그림.
-- 구체 브랜드/국가 1~2개 예시 언급. 관찰·추정형(~보인다). 우리 회사 언급·우열 단정 금지.
+    """'이번 주의 한 방' — 뾰족한 헤드라인 + 근거 한 줄. 슬랙·대시보드 공용(단일 출처)."""
+    return f"""K뷰티 경쟁 인텔리전스 브리핑의 '이번 주의 한 방'을 딱 2문장(합쳐 90자 이내)으로 써라.
+- **브랜드명·수치를 하나도 쓰지 마라**(개별 브랜드는 목록에서 따로 보여주므로 겹치면 안 됨).
+- 첫 문장 = 이번 주를 규정하는 뾰족한 헤드라인 한 방(35자 이내, 단정적).
+  예: '이번 주 진짜 뉴스는 브랜드가 아니라 채널이다' / 'K뷰티가 아마존 밖으로 나가기 시작했다' /
+      '팝업이 신제품을 이긴 한 주' / '틱톡숍이 새 격전지가 됐다'
+- 둘째 문장 = 그게 지금 왜 중요한지 근거 한 줄(55자 이내).
+- 금지어(상투어): '다변화', '모색', '전환점', '입지 강화', '시장 점유율 확대', '긍정적', '기대'.
+  예측·당위 금지, 관찰형(~보인다/~읽힌다). 우리 회사 언급·우열 단정 금지.
 데이터: 신호 {n}건 / 주요 브랜드: {topb} / 급성장 시장: {mktxt}
-브랜드 움직임 예시: {' | '.join(strat_examples[:8])}"""
+브랜드 움직임: {' | '.join(strat_examples[:8])}"""
+
+
+def _p_watch(strat_examples, mktxt):
+    """'지켜볼 것' — 다음에 판가름날 지점(내일 또 열어보게 하는 훅). 줄바꿈 구분."""
+    return f"""아래 K뷰티 경쟁 브랜드 움직임 중 '다음에 판가름날' 지점 2개를 뽑아라.
+- 각 한 줄(30~45자), 궁금증을 유발하게. 브랜드명 포함 OK.
+  예: '스킨1004 일본 팝업이 실제 판매로 이어지는지' / '메디큐브 틱톡숍 매출이 지속되는지'
+- 예측·단정 금지. 확인 관점으로. 우리 회사 언급 금지.
+- 출력은 딱 2줄, 각 줄에 하나씩. 번호·불릿·따옴표 없이 문장만.
+브랜드 움직임: {' | '.join(strat_examples[:8])}
+급성장 시장: {mktxt}"""
 
 
 def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None):
@@ -182,13 +199,16 @@ def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None
         bsum[b] = _get_or_gen(f"BSUM|{b}", lambda b=b, snips=snips, prods=prods: _p_sum(bko(b), snips, prods),
                               _MODEL_LINE, 140)
 
-    # 4) 주간 총평(BTONGP)
+    # 4) '이번 주의 한 방'(BTONGP) + '지켜볼 것'(BWATCH) — 슬랙·대시보드 공용 단일 출처
     mk_g = sorted([m for m in mkt if m.get("yoy_pct") and m["exp_usd_3m"] >= 8e6],
                   key=lambda z: -z["yoy_pct"])[:4]
     mktxt = ", ".join(f"{m['country_name']} +{m['yoy_pct']:.0f}%" for m in mk_g)
     topb = ", ".join(bko(b) for b in sorted(active, key=lambda b: -sum(r.get("attn", 0) for r in by_brand[b]))[:5])
     examples = [v for v in strat.values() if is_meaningful_line(v)]
     tongp = _get_or_gen("BTONGP", lambda: _p_tongp(len(records), topb, mktxt, examples),
-                        _MODEL_TONGP, 320)
+                        _MODEL_TONGP, 200)
+    watch_raw = _get_or_gen("BWATCH", lambda: _p_watch(examples, mktxt), _MODEL_TONGP, 200)
+    watch = [w.strip(" -•\t") for w in (watch_raw or "").split("\n") if w.strip()][:2]
 
-    return {"strat": strat, "why": why, "bsum": bsum, "tongp": tongp, "active": active}
+    return {"strat": strat, "why": why, "bsum": bsum, "tongp": tongp,
+            "watch": watch, "active": active}
