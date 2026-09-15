@@ -9,7 +9,7 @@ YouTube Data API v3 수집기
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -22,6 +22,7 @@ YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search"
 YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 RESULTS_PER_QUERY = 10          # search.list 최대 50, 비용 절감 위해 10
 _PRIMARY_COUNTRY = "US"         # 이 국가 수집 시에만 실행 (전 국가 중복 방지)
+_BUZZ_WINDOW_DAYS = 30          # 버즈 측정 창(최근 N일 내 조회수 상위 영상)
 
 
 def _record_buzz(brand: str, video_ids: list, titles: dict) -> None:
@@ -65,6 +66,22 @@ def _record_buzz(brand: str, video_ids: list, titles: dict) -> None:
         logger.warning("YouTube 버즈 지표 스킵 (%s): %s", brand, e)
 
 
+def _guess_lang(text: str) -> str:
+    """제목 기준 대략적 언어(메타데이터용) — 언어 무제한 수집이라 'en' 고정은 부정확."""
+    # 첫 글자에서 즉시 반환하면 '深澤辰哉(한자)+かな' 같은 일본어가 중국어로 오판되므로
+    # 문자열 전체를 훑어 가나·한글을 먼저 판정하고, 한자는 마지막에 본다.
+    o = [ord(c) for c in (text or "")]
+    if any(0xAC00 <= c <= 0xD7A3 for c in o):           # 한글
+        return "ko"
+    if any(0x3040 <= c <= 0x30FF for c in o):           # 히라가나·가타카나 → 일본어 확정
+        return "ja"
+    if any(0x0600 <= c <= 0x06FF for c in o):           # 아랍문자
+        return "ar"
+    if any(0x4E00 <= c <= 0x9FFF for c in o):           # 한자만 → 중·일 구분 불가(zh로 추정)
+        return "zh"
+    return "en"
+
+
 def _parse_yt_date(date_str: str) -> datetime:
     try:
         return datetime.fromisoformat(date_str.replace("Z", "+00:00")).astimezone(
@@ -87,14 +104,23 @@ class YouTubeCollector(BaseCollector):
             logger.debug("YouTube API 키 미설정 — 수집 스킵")
             return []
 
+        # 최근 30일 중 '실제로 많이 본' 영상.
+        #  · order=date는 갓 올라온 영상만 잡혀 조회수가 바닥 → 바이럴/앰배서더 효과 검증 불가
+        #  · q에 'kbeauty'를 붙이면 회수율이 급감(메디힐 1건 vs 'skincare' 4건)하고
+        #    정작 앰배서더 TVCM 같은 핵심 영상이 가려짐. 브랜드명만 쓰면 동음이의 노이즈
+        #    (예: Amuse) → 'skincare' 조합이 회수율·정밀도 균형점(실측 비교로 결정).
+        #  · relevanceLanguage=en은 일본·중동 등 현지 영상을 밀어내 글로벌 모니터링에 불리
+        #    (같은 쿼터로 커버리지만 좁아짐) → 언어 무제한.
+        since = (datetime.now(timezone.utc) - timedelta(days=_BUZZ_WINDOW_DAYS)
+                 ).strftime("%Y-%m-%dT%H:%M:%SZ")
         params = {
             "key": YOUTUBE_API_KEY,
-            "q": f"{brand} kbeauty",
+            "q": f"{brand} skincare",
             "part": "snippet",
             "type": "video",
-            "order": "date",
+            "order": "viewCount",
+            "publishedAfter": since,
             "maxResults": RESULTS_PER_QUERY,
-            "relevanceLanguage": "en",
         }
 
         articles: list[RawArticle] = []
@@ -126,7 +152,7 @@ class YouTubeCollector(BaseCollector):
                     published=_parse_yt_date(sn.get("publishedAt", "")),
                     summary=desc[:500],
                     source_name=f"YouTube · {channel}" if channel else "YouTube",
-                    language="en",
+                    language=_guess_lang(f"{title} {desc}"),
                     brand_hint=brand,
                     country_hint=country.upper(),
                 ))
