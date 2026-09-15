@@ -2790,3 +2790,66 @@ def get_social_verdict(session: Session, platform: str = "youtube") -> dict:
             "delta_pct": (m.get("recent_views") or {}).get("delta_pct"),
         }
     return out
+
+
+def get_sales_velocity(session: Session, days: int = 35, min_span_days: int = 7) -> dict:
+    """리뷰 증가 속도 = '실판매 속도' 프록시.
+
+    아마존 순위는 **카테고리 내 상대값**이라 경쟁 강도가 다르면 판매량과 어긋난다
+    (실측: 'AU 뷰티 78위'가 'US 스킨케어 12위'보다 리뷰가 7배 빨리 쌓임).
+    같은 상품(ASIN)의 리뷰수 증가분/일로 절대 판매 속도를 근사한다.
+
+    설계상 주의:
+      · 키는 (ASIN, country) — 같은 ASIN이 여러 마켓에 존재(실측 58개)
+      · 같은 상품이 하루에 여러 카테고리로 동시 랭크인해 중복 행이 생기고(실측 176건)
+        리뷰수도 미세하게 어긋난다 → 날짜별로 먼저 집계(MAX)해 결정적으로 만든 뒤 비교.
+        (집계 없이 ROW_NUMBER로 뽑으면 실행마다 값이 달라짐)
+      · 리뷰수 감소분은 제외(아마존 리뷰 삭제·집계 리셋 → 음수 속도는 노이즈)
+      · 관측 간격이 min_span_days 미만이면 제외(신규 진입 등 표본 부족)
+    반환: {brand: {velocity, products, top:{product,country,category,rank,velocity,reviews}}}
+    """
+    asin = "substring(product_url from '/dp/([A-Z0-9]{10})')"
+    try:
+        rows = session.execute(text(f"""
+            WITH daily AS (      -- 상품×국가×날짜 단위로 먼저 접어 중복·비결정성 제거
+                SELECT {asin} AS asin, country, capture_date,
+                       MAX(brand) AS brand, MAX(review_count) AS review_count,
+                       MIN(rank) AS rank,
+                       (ARRAY_AGG(product_name ORDER BY rank))[1] AS product_name,
+                       (ARRAY_AGG(category ORDER BY rank))[1] AS category
+                FROM {DB_SCHEMA}.retail_rankings
+                WHERE review_count IS NOT NULL AND is_monitored
+                  AND brand IS NOT NULL AND product_url IS NOT NULL
+                  AND capture_date >= CURRENT_DATE - :days
+                GROUP BY 1, 2, 3
+            ), snap AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (PARTITION BY asin, country ORDER BY capture_date) rf,
+                       ROW_NUMBER() OVER (PARTITION BY asin, country ORDER BY capture_date DESC) rl
+                FROM daily
+            )
+            SELECT l.brand, l.product_name, l.country, l.category, l.rank, l.review_count,
+                   (l.review_count - f.review_count) AS gain,
+                   (l.capture_date - f.capture_date) AS span
+            FROM snap f
+            JOIN snap l ON f.asin = l.asin AND f.country = l.country AND f.rf = 1 AND l.rl = 1
+            WHERE (l.capture_date - f.capture_date) >= :span
+              AND l.review_count >= f.review_count
+        """), {"days": days, "span": min_span_days}).fetchall()
+    except Exception as e:
+        logger.warning("판매 속도 계산 실패: %s", e)
+        return {}
+
+    out: dict = {}
+    for brand, pname, country, cat, rank, reviews, gain, span in rows:
+        span = max(int(span or 0), 1)
+        vel = float(gain or 0) / span
+        o = out.setdefault(brand, {"velocity": 0.0, "products": 0, "top": None})
+        o["velocity"] += vel
+        o["products"] += 1
+        if o["top"] is None or vel > o["top"]["velocity"]:
+            o["top"] = {"product": pname or "", "country": country, "category": cat,
+                        "rank": rank, "velocity": round(vel, 1), "reviews": int(reviews or 0)}
+    for o in out.values():
+        o["velocity"] = round(o["velocity"], 1)
+    return out
