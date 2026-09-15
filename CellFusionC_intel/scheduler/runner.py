@@ -389,6 +389,18 @@ def job_ingredient_intel() -> None:
         logger.warning("전성분 인텔 스킵: %s", e)
 
 
+def job_youtube_buzz() -> None:
+    """유튜브 소셜 버즈 보정 — 오늘 지표 없는 브랜드(주로 Tier2)만 채워 전 브랜드 일별 시계열 확보."""
+    logger.info("=== [매일] 유튜브 버즈 보정 시작 ===")
+    try:
+        from signals.youtube_buzz import run as run_buzz
+        r = run_buzz()
+        logger.info("유튜브 버즈 보정: 대상중 %d건 수집(이미완료 %d)",
+                    r.get("collected", 0), r.get("skipped", 0))
+    except Exception as e:
+        logger.warning("유튜브 버즈 보정 스킵: %s", e)
+
+
 def job_brand_discovery() -> None:
     """신흥 브랜드 발견 — 광역 뉴스에서 미등록 브랜드 탐지 → 슬랙 후보 제안(주1회). 승인은 봇에서."""
     logger.info("=== [주간] 신흥 브랜드 발견 시작 ===")
@@ -528,6 +540,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day_of_week="mon", hour=19, minute=0),
         id="weekly_momentum",
         name="[주간] 브랜드 모멘텀 계산",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매일 11:00 KST — 유튜브 버즈 보정(아침 수집 뒤라 Tier1은 이미 완료 → Tier2만 채움)
+    scheduler.add_job(
+        job_youtube_buzz,
+        trigger=CronTrigger(hour=11, minute=0),
+        id="youtube_buzz",
+        name="[매일] 유튜브 버즈 보정(전 브랜드 커버)",
         max_instances=1,
         coalesce=True,
     )
