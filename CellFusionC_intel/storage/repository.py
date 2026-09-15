@@ -378,3 +378,75 @@ def purge_bot_conversations(session: Session, keep_days: int = 90) -> int:
     except Exception:
         session.rollback()
         return 0
+
+
+# ── 소셜 지표(유튜브·인스타·틱톡 공용) ──────────────────────────────────────
+# 뉴스(공급)·검색(수요)·리테일(실판매)에 없는 '소셜 버즈' 축. 플랫폼 무관 스키마라
+# 유튜브 조회수, IG 팔로워, 틱톡 조회수/GMV를 같은 테이블에 담는다.
+_SOCIAL_READY = False
+
+
+def _ensure_social_metrics(session: Session) -> None:
+    global _SOCIAL_READY
+    if _SOCIAL_READY:
+        return
+    session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.social_metrics (
+            id BIGSERIAL PRIMARY KEY,
+            platform VARCHAR(16) NOT NULL,
+            brand VARCHAR(100) NOT NULL,
+            metric VARCHAR(32) NOT NULL,
+            value DOUBLE PRECISION,
+            meta TEXT,
+            captured_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            UNIQUE (platform, brand, metric, captured_date)
+        )
+    """))
+    session.execute(text(
+        f"CREATE INDEX IF NOT EXISTS ix_social_metrics_key "
+        f"ON {DB_SCHEMA}.social_metrics (platform, brand, captured_date DESC)"))
+    session.commit()
+    _SOCIAL_READY = True
+
+
+def upsert_social_metric(session: Session, platform: str, brand: str, metric: str,
+                         value: float, meta: Optional[str] = None) -> None:
+    """당일 지표 upsert(같은 날 재수집 시 갱신)."""
+    _ensure_social_metrics(session)
+    session.execute(text(f"""
+        INSERT INTO {DB_SCHEMA}.social_metrics (platform, brand, metric, value, meta)
+        VALUES (:p, :b, :m, :v, :meta)
+        ON CONFLICT (platform, brand, metric, captured_date)
+        DO UPDATE SET value = EXCLUDED.value, meta = EXCLUDED.meta
+    """), {"p": platform, "b": brand, "m": metric, "v": float(value or 0),
+           "meta": (meta or "")[:300]})
+    session.commit()
+
+
+def get_social_buzz(session: Session, platform: str = "youtube", days: int = 21) -> dict:
+    """브랜드별 최신 소셜 지표 + 직전 대비 변화.
+    반환: {brand: {metric: {'latest':v, 'prev':v, 'delta_pct':float|None, 'meta':str}}}"""
+    _ensure_social_metrics(session)
+    try:
+        rows = session.execute(text(f"""
+            SELECT brand, metric, value, meta, captured_date
+            FROM {DB_SCHEMA}.social_metrics
+            WHERE platform = :p AND captured_date >= CURRENT_DATE - :d
+            ORDER BY brand, metric, captured_date DESC
+        """), {"p": platform, "d": days}).fetchall()
+    except Exception:
+        return {}
+    out: dict = {}
+    for brand, metric, value, meta, _cd in rows:
+        slot = out.setdefault(brand, {}).setdefault(metric, {"latest": None, "prev": None,
+                                                            "delta_pct": None, "meta": ""})
+        if slot["latest"] is None:
+            slot["latest"] = value
+            slot["meta"] = meta or ""
+        elif slot["prev"] is None:
+            slot["prev"] = value
+    for _b, mm in out.items():
+        for _m, s in mm.items():
+            if s["latest"] is not None and s["prev"]:
+                s["delta_pct"] = (s["latest"] - s["prev"]) / s["prev"] * 100
+    return out
