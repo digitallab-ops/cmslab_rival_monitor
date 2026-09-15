@@ -64,8 +64,12 @@ SYSTEM_PROMPT = (
     "'주의 깊게 살펴볼 필요가 있다' 같은 관용구·뻔한 말 반복 금지 — 구체적·상황특정 제안만.\n"
     "3) 간결하고 뾰족하게. 숫자(건수·모멘텀 배수·채널)를 인용하라.\n"
     "4) **근거 표기**: 기사 데이터를 근거로 썼으면 답 하단에 '📎 출처'로 근거 기사 제목과 "
-    "URL(툴 결과의 url/source_url)을 1~3개 붙여라. 데이터 없이 답하지 마라.\n"
-    "5) 슬랙용이므로 강조는 별표 하나 *굵게*, 목록은 • 로. 마크다운 헤더(###)·별표 두 개(**) 쓰지 마라.\n"
+    "URL을 1~3개 붙여라. 데이터 없이 답하지 마라.\n"
+    "   ⚠️ URL은 **툴 결과에 실제로 있던 url/source_url만** 그대로 복사하라. "
+    "URL을 지어내는 것은 절대 금지(example.com 같은 가짜·추정 링크 금지). "
+    "툴 결과에 URL이 없으면 '📎 출처' 줄 자체를 쓰지 마라.\n"
+    "5) 슬랙용이므로 강조는 별표 하나 *굵게*, 목록은 • 로. 마크다운 헤더(###)·별표 두 개(**)·"
+    "마크다운 링크([텍스트](url)) 쓰지 마라. 링크는 <url|텍스트> 형식.\n"
     "6) 한국어로 답하라."
 )
 
@@ -110,6 +114,26 @@ async def _call_mcp_tool(session, name: str, args: dict) -> str:
     except Exception as e:
         logger.warning("MCP 툴 호출 실패 [%s]: %s", name, e)
         return f"(툴 {name} 호출 오류: {e})"
+
+
+_FAKE_URL = re.compile(r"https?://(?:www\.)?(?:example\.(?:com|org)|test\.com|localhost|foo\.bar)\S*", re.I)
+
+
+def _slackify(t: str) -> str:
+    """LLM 출력 → 슬랙 mrkdwn 교정(프롬프트만으론 모델이 어김).
+    ** 볼드 → *, 마크다운 링크 → <url|text>, ### 헤더 → *헤더*, 지어낸 URL 제거."""
+    if not t:
+        return t
+    # 지어낸 예시 URL이 든 링크/각주는 통째로 제거(가짜 출처 방지)
+    t = re.sub(r"\[([^\]]+)\]\(\s*" + _FAKE_URL.pattern + r"\s*\)", r"\1", t)
+    t = _FAKE_URL.sub("", t)
+    t = re.sub(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", r"<\2|\1>", t)   # [텍스트](url) → <url|텍스트>
+    t = re.sub(r"\*\*(.+?)\*\*", r"*\1*", t, flags=re.S)                # **볼드** → *볼드*
+    t = re.sub(r"^\s*#{1,6}\s*(.+)$", r"*\1*", t, flags=re.M)           # ### 헤더 → *헤더*
+    # 실제 URL이 남지 않은 '📎 출처' 줄은 통째로 제거(가짜 출처 흔적 방지)
+    t = "\n".join(ln for ln in t.split("\n")
+                  if not (re.match(r"\s*📎\s*출처", ln) and "<http" not in ln))
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
 
 
 async def answer(question: str, history: list, on_delta, memory: dict | None = None) -> str:
@@ -171,7 +195,7 @@ async def answer(question: str, history: list, on_delta, memory: dict | None = N
                 logger.info("툴 호출: %s(%s)", b["name"], args)
                 out = await _call_mcp_tool(session, b["name"], args)
                 messages.append({"role": "tool", "tool_call_id": b["id"], "content": out})
-        return final or "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 주실래요?"
+        return _slackify(final) or "죄송해요, 답변을 만들지 못했어요. 질문을 조금 더 구체적으로 주실래요?"
 
 
 app = AsyncApp(token=SLACK_BOT_TOKEN)
