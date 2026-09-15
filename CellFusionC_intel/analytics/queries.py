@@ -2853,3 +2853,51 @@ def get_sales_velocity(session: Session, days: int = 35, min_span_days: int = 7)
     for o in out.values():
         o["velocity"] = round(o["velocity"], 1)
     return out
+
+
+def get_launch_hits(session: Session, days: int = 90, min_reviews: int = 100) -> list:
+    """'발표한 신제품이 실제 리테일에 안착했는가' — 발표→성과 연결 사례.
+
+    주의(의도적 설계): '이행률 %'는 만들지 않는다. 발표는 주로 국내 시장인데 리테일
+    데이터는 아마존 상위 랭킹뿐이라, 미등장을 '실패'로 읽으면 거짓이 된다
+    (국내 전용 출시·상위 100위 밖 판매를 구분할 수 없음). 그래서 **증명 가능한
+    positive(안착 사례)만** 반환한다.
+
+    매칭은 LLM(한글 발표명 ↔ 영문 아마존명 음차)이 필요하고 mid 신뢰도는 오매칭이
+    확인돼(마이크로니들링 세럼→Retinal Shot) high만 채택한다. 호출부에서 매칭 결과를
+    넘겨받는 구조 — 이 함수는 후보 데이터만 구성(LLM 비용은 캐시 계층에서 관리).
+    반환: [{brand, announced:[...], retail:[{product,country,category,rank,reviews}]}]
+    """
+    try:
+        ann_rows = session.execute(text(f"""
+            SELECT brand, product_name, MIN(published_date)::date AS first_seen
+            FROM {DB_SCHEMA}.news_articles
+            WHERE activity_type = '신제품_런칭' AND product_name IS NOT NULL
+              AND char_length(product_name) BETWEEN 3 AND 40
+              AND product_name !~ '[…”“?]'
+              AND published_date >= now() - (:d || ' days')::interval
+              AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
+            GROUP BY brand, product_name
+        """), {"d": days}).fetchall()
+        ret_rows = session.execute(text(f"""
+            SELECT DISTINCT ON (brand, product_name)
+                   brand, product_name, country, category, rank, review_count
+            FROM {DB_SCHEMA}.retail_rankings
+            WHERE is_monitored AND product_name IS NOT NULL
+              AND review_count >= :mr
+              AND capture_date >= CURRENT_DATE - 14
+            ORDER BY brand, product_name, rank
+        """), {"mr": min_reviews}).fetchall()
+    except Exception as e:
+        logger.warning("발표-안착 후보 조회 실패: %s", e)
+        return []
+
+    by_brand: dict = {}
+    for brand, pname, _fs in ann_rows:
+        by_brand.setdefault(brand, {"brand": brand, "announced": [], "retail": []})["announced"].append(pname)
+    for brand, pname, country, cat, rank, rc in ret_rows:
+        if brand in by_brand:
+            by_brand[brand]["retail"].append({
+                "product": pname, "country": country, "category": cat,
+                "rank": rank, "reviews": int(rc or 0)})
+    return [v for v in by_brand.values() if v["announced"] and v["retail"]]

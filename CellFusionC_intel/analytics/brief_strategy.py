@@ -212,3 +212,116 @@ def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None
 
     return {"strat": strat, "why": why, "bsum": bsum, "tongp": tongp,
             "watch": watch, "active": active}
+
+
+# ── 발표 → 안착 매칭(LLM) ────────────────────────────────────────────────────
+# 한글 발표명과 영문 아마존명은 음차 관계라 문자열 매칭이 불가(레티날 샷=Retinal Shot).
+# 실험 결과 mid 신뢰도는 오매칭(마이크로니들링 세럼→Retinal Shot)이라 high만 채택한다.
+def _p_match(brand_ko, announced, retail_names):
+    return f"""'{brand_ko}'의 발표 신제품명(한글)과 아마존 실제 판매 제품명(영문)을 대조해 같은 제품끼리 짝지어라.
+한글은 영문의 음차인 경우가 많다(예: 레티날 샷 = Retinal Shot, 마데카 크림 = Madeca Cream).
+- **확실한 것만**. 성분·제형이 다르면 짝짓지 마라(마이크로니들링 세럼 ≠ Retinal Shot).
+- 애매하면 아예 넣지 마라. 없으면 빈 배열.
+[발표] {announced}
+[리테일] {retail_names}
+JSON만: {{"matches":[{{"announced":"...","retail":"...","confidence":"high|mid"}}]}}"""
+
+
+# 제형·부위가 다르면 같은 제품일 수 없다 — LLM이 high로 붙여도 결정적으로 걸러낸다
+# (실측 오매칭: 'PDRN 아이크림' → 'PDRN Moisturizing Cream'은 아이크림≠페이스크림).
+_TYPE_GUARD = [
+    ("eye", ("아이크림", "아이 크림", "아이패치", "아이 패치", "eye ", "eye_", "eye cream", "eye patch")),
+    ("sun", ("선크림", "선스틱", "썬크림", "자외선", "sunscreen", "sunstick", "sun ", "spf")),
+    ("mask", ("마스크", "시트팩", "mask", "sheet", "マスク", "パック")),
+    ("toner", ("토너", "패드", "toner", "pad")),
+    ("serum", ("세럼", "앰플", "serum", "ampoule", "essence", "セラム", "美容液")),
+    ("cream", ("크림", "cream", "moisturizer", "balm", "로션", "lotion", "クリーム")),
+    ("cleanser", ("클렌저", "클렌징", "폼", "cleanser", "cleansing", "foam")),
+]
+# 부위·용도가 특정되는 유형 — 한쪽에만 있으면 다른 제품으로 본다(아이크림 vs 페이스크림).
+_EXCLUSIVE_TYPES = ("eye", "sun", "mask", "cleanser")
+
+
+def _type_conflict(announced: str, retail: str) -> bool:
+    """발표명과 리테일명의 제형/부위가 어긋나면 True(매칭 기각).
+
+    실측 오매칭 차단: 'PDRN 아이크림'→'PDRN Moisturizing Cream'(아이≠페이스),
+    '레티날 세럼'→'Retinal Booster Cream'(세럼≠크림).
+    """
+    a, r = (announced or "").lower(), (retail or "").lower()
+    at = {t for t, kws in _TYPE_GUARD if any(k in a for k in kws)}
+    rt = {t for t, kws in _TYPE_GUARD if any(k in r for k in kws)}
+    if not at or not rt:
+        return False              # 한쪽이 분류 불가(미커버 언어 등) → 판단 보류
+    # 부위 특정 유형은 양쪽이 일치해야 함(한쪽만 아이크림 → 기각)
+    for t in _EXCLUSIVE_TYPES:
+        if (t in at) != (t in rt):
+            return True
+    return not (at & rt)          # 공통 유형이 하나도 없으면 다른 제품
+
+
+def build_launch_hits(session, candidates, from_date, to_date, bko=None):
+    """발표→안착 사례를 LLM 매칭으로 확정(브랜드당 1콜, high만). brand_insights에 캐시.
+    반환: [{brand, announced, product, country, category, rank, reviews}]"""
+    import json as _json
+    bko = bko or (lambda b: b)
+    try:
+        cache = get_insights_cache(session, from_date, to_date)
+    except Exception:
+        cache = {}
+    cached = {k: v.get("summary", "") for k, v in cache.items()}
+
+    hits = []
+    for c in candidates:
+        brand = c["brand"]
+        ann = sorted(set(c["announced"]))[:12]
+        ret = c["retail"][:15]
+        ret_names = [r["product"][:70] for r in ret]
+        if not ann or not ret_names:
+            continue
+        key = f"BHIT|{brand}"
+        raw = cached.get(key)
+        if raw is None:
+            try:
+                raw = _llm(_MODEL_LINE, _p_match(bko(brand), ann, ret_names), 500, 0.0)
+            except Exception as e:
+                logger.warning("발표-안착 매칭 실패 [%s]: %s", brand, e)
+                raw = ""
+            if raw:
+                try:
+                    upsert_insight_cache(session, key, from_date, to_date,
+                                         {"summary": raw, "top_act": "hit", "top_pct": 0, "high_pct": 0.0})
+                except Exception:
+                    session.rollback()
+            cached[key] = raw
+        if not raw:
+            continue
+        try:
+            data = _json.loads(raw[raw.find("{"):raw.rfind("}") + 1] or "{}")
+        except Exception:
+            continue
+        for m in (data.get("matches") or []):
+            if (m.get("confidence") or "").lower() != "high":
+                continue          # mid는 오매칭 실증 — 채택 안 함
+            rname = m.get("retail") or ""
+            row = next((r for r in ret if r["product"][:70] == rname[:70]), None)
+            if not row:
+                row = next((r for r in ret if rname[:28] and rname[:28] in r["product"]), None)
+            if not row:
+                continue
+            if _type_conflict(m.get("announced", ""), row["product"]):
+                logger.debug("제형 불일치로 매칭 기각: %s ↔ %s", m.get("announced"), row["product"][:40])
+                continue
+            hits.append({"brand": brand, "announced": m.get("announced", ""),
+                         "product": row["product"], "country": row["country"],
+                         "category": row["category"], "rank": row["rank"],
+                         "reviews": row["reviews"]})
+    # 브랜드×제품 중복 제거(순위 좋은 것 우선)
+    seen, out = set(), []
+    for h in sorted(hits, key=lambda x: (x["rank"] or 999)):
+        k = (h["brand"], h["product"][:40])
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(h)
+    return out
