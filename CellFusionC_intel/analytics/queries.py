@@ -2728,3 +2728,65 @@ def get_brand_composite_score(session: Session) -> list[dict]:
     for i, o in enumerate(out):
         o["rank"] = i + 1
     return out
+
+
+# 소셜 버즈 판정 — 조회수 총량은 오판을 부른다(광고 노출·스침 언급이 섞임).
+# 구성비(전용·공식·자발)와 참여율로 '왜 뜨는지'를 가려낸다.
+_SOCIAL_VERDICT = {
+    "organic_viral": {"t": "자발 바이럴", "e": "🔥",
+                      "d": "크리에이터들이 자발적으로 다루는 중 — 광고 없이 확산"},
+    "paid_push":     {"t": "광고 주도", "e": "💰",
+                      "d": "브랜드 공식 채널(광고) 비중이 큼 — 구매한 노출"},
+    "mention_only":  {"t": "스침 언급", "e": "👀",
+                      "d": "여러 브랜드 나열 영상에만 등장 — 전용 콘텐츠 적음"},
+    "rising":        {"t": "관심 상승", "e": "📈", "d": "반응이 붙는 중"},
+    "quiet":         {"t": "조용함", "e": "😴", "d": "유튜브 노출 미미"},
+}
+
+
+def get_social_verdict(session: Session, platform: str = "youtube") -> dict:
+    """브랜드별 소셜 버즈 판정 — '왜 뜨는지'까지.
+
+    반환: {brand: {verdict, label, emoji, desc, views, focus_pct, official_pct,
+                   engagement, videos, top_title, delta_pct}}
+    """
+    from storage.repository import get_social_buzz
+    try:
+        buzz = get_social_buzz(session, platform=platform)
+    except Exception:
+        return {}
+    out: dict = {}
+    for brand, m in buzz.items():
+        def g(k, d=0.0):
+            v = (m.get(k) or {}).get("latest")
+            return d if v is None else v
+        total = g("recent_views")
+        if not total:
+            continue
+        # 구성비 지표가 없는 브랜드(지표 확장 이전 수집분)는 판정 보류 —
+        # '없음'을 0%로 읽으면 전부 '스침 언급'으로 오판된다.
+        if "focus_views" not in m or "engagement_pct" not in m:
+            continue
+        focus_pct = (g("focus_views") / total * 100) if total else 0
+        official_pct = (g("official_views") / total * 100) if total else 0
+        eng = g("engagement_pct")
+
+        if total < 50_000:
+            v = "quiet"
+        elif official_pct >= 40:
+            v = "paid_push"          # 광고비로 산 노출이 절반 가까이
+        elif focus_pct < 40:
+            v = "mention_only"       # haul/empties에만 스침
+        elif eng >= 1.5 and focus_pct >= 60:
+            v = "organic_viral"      # 전용 콘텐츠 + 높은 참여 = 진짜 확산
+        else:
+            v = "rising"
+        meta = _SOCIAL_VERDICT[v]
+        out[brand] = {
+            "verdict": v, "label": meta["t"], "emoji": meta["e"], "desc": meta["d"],
+            "views": int(total), "focus_pct": round(focus_pct), "official_pct": round(official_pct),
+            "engagement": round(eng, 2), "videos": int(g("recent_videos")),
+            "top_title": (m.get("top_video_views") or {}).get("meta", ""),
+            "delta_pct": (m.get("recent_views") or {}).get("delta_pct"),
+        }
+    return out
