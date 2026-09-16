@@ -101,11 +101,20 @@ def _match_brand(title: str) -> "str | None":
 
 
 def _parse_reviews(txt: str) -> "int | None":
-    m = re.search(r"([\d,]{1,9})", txt or "")
+    """리뷰 수 파싱 — 로케일별 천단위 구분자를 모두 처리.
+
+    기존엔 콤마만 인정해서 유럽 마켓(de/es/fr/it)의 '21.610 Bewertungen'이 21로 잘렸다
+    (실측: DE·ES·FR·IT 리뷰수가 전부 1/1000로 축소 저장 → 유럽 성과가 항상 0처럼 보임).
+    리뷰 수는 정수이므로 숫자 사이의 . , 공백(NBSP 포함)은 모두 구분자로 간주한다.
+    """
+    m = re.search(r"\d[\d.,\s  ']{0,12}\d|\d", txt or "")
     if not m:
         return None
+    digits = re.sub(r"\D", "", m.group(0))
+    if not digits:
+        return None
     try:
-        return int(m.group(1).replace(",", ""))
+        return int(digits)
     except ValueError:
         return None
 
