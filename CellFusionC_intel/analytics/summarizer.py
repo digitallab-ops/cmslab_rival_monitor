@@ -24,10 +24,15 @@ _DEFAULT_CMS_PROFILE = """[우리 회사 = 씨엠에스랩 / 브랜드 = 셀퓨�
 
 
 def _load_cms_profile() -> str:
+    """자사 프로필 로드. 파일 안의 HTML 주석은 '기획팀용 편집 안내'라 LLM엔 불필요 —
+    매 호출마다 수백 토큰이 낭비되므로 제거하고 넣는다(사람이 읽는 파일은 그대로 유지)."""
+    import re
     path = os.path.join(os.path.dirname(__file__), "..", "config", "company_profile.md")
     try:
         with open(path, encoding="utf-8") as f:
-            txt = f.read().strip()
+            txt = f.read()
+        txt = re.sub(r"<!--.*?-->", "", txt, flags=re.S)        # 사람용 주석 제거
+        txt = re.sub(r"\n{3,}", "\n\n", txt).strip()
         if txt:
             return txt
     except Exception as e:
@@ -72,18 +77,20 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
     if not article_lines:
         return _fallback_from_data(brand, articles)
 
-    prompt = f"""당신은 씨엠에스랩(더마 선케어 브랜드 '셀퓨전씨' 운영)의 경쟁사 인텔리전스 분석가입니다.
-아래는 경쟁 브랜드 **{brand}**의 최근 기사(여러 시장 종합)입니다:
-
-{article_lines}
+    # 고정 지침(프로필·포맷·톤)은 system으로, 변하는 데이터(브랜드·기사)만 user로 분리한다.
+    # OpenAI 자동 프롬프트 캐싱은 '앞부분 1024토큰 이상 동일'할 때 걸리는데, 기존처럼
+    # 브랜드명·기사가 맨 앞에 오면 매 호출 프리픽스가 달라져 캐시가 전혀 안 먹었다.
+    # 이제 23개 브랜드가 같은 system을 공유 → 2번째 호출부터 캐시 할인.
+    system_prompt = f"""당신은 씨엠에스랩(더마 선케어 브랜드 '셀퓨전씨' 운영)의 경쟁사 인텔리전스 분석가입니다.
+사용자가 경쟁 브랜드 하나와 그 브랜드의 최근 기사(여러 시장 종합)를 줍니다.
 
 {CMS_PROFILE}
 
-이 브랜드의 움직임을 **날카롭게** 분석하세요. 뭉툭한 서술("~하고 있다", "경쟁력을 강화 중") 절대 금지.
+그 브랜드의 움직임을 **날카롭게** 분석하세요. 뭉툭한 서술("~하고 있다", "경쟁력을 강화 중") 절대 금지.
 어려운 내부 용어(모멘텀·PR우세 등) 대신 쉬운 말로. 반드시 아래 3개 섹션 형식으로 (머리말은 `### `로 시작):
 
 ### 한줄 요약
-{brand}가 지금 왜 주목되는지 **한 문장**으로. 결론부터, 핵심 사실(성장세·채널·국가·수치)을 굵게(**...**).
+그 브랜드가 지금 왜 주목되는지 **한 문장**으로. 결론부터, 핵심 사실(성장세·채널·국가·수치)을 굵게(**...**).
 
 ### 전략 태그
 이 브랜드가 **어떻게·어디로 성장하는지**(성장의 방식·방향)를 12~22자 명사구 하나로 — 그래프 옆 라벨용.
@@ -108,6 +115,8 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
 
 {_TONE_GUIDE}"""
 
+    user_prompt = f"경쟁 브랜드: **{brand}**\n최근 기사:\n{article_lines}"
+
     try:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -115,7 +124,8 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
             model=_INSIGHT_MODEL,
             max_tokens=800,
             temperature=0.4,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "system", "content": system_prompt},
+                      {"role": "user", "content": user_prompt}],
         )
         content = (response.choices[0].message.content or "").strip()
         if not content:
