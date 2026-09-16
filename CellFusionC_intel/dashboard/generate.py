@@ -63,6 +63,9 @@ from analytics.queries import (
     get_self_position,
     get_retail_performance,
     get_brief_records,
+    get_sales_velocity,
+    get_social_verdict,
+    get_launch_hits,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -4607,6 +4610,14 @@ _BRIEF_STYLE = """<style>
 #bf2 .brow:hover{background:rgba(90,139,245,.06)}
 #bf2 .bhead{display:grid;grid-template-columns:20px 118px 1fr auto 76px;align-items:center;gap:12px}
 #bf2 .bsum{font-size:12.5px;color:#aeb8cf;line-height:1.55;margin:7px 0 0 32px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#bf2 .bsigs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0 32px}
+#bf2 .bsig{font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;white-space:nowrap;cursor:help}
+#bf2 .bsig em{font-style:normal;font-weight:500;opacity:.72;margin-left:5px}
+#bf2 .bsig.v{background:rgba(91,217,154,.13);color:#7fe0ab}
+#bf2 .bsig.s{background:rgba(51,197,206,.13);color:#5fd5dd}
+#bf2 .bsig.h{background:rgba(224,173,74,.13);color:#e6c179}
+#bf2 .bbasis{font-size:11px;color:#6b769a;margin:10px 2px 0;line-height:1.65}
+#bf2 .bbasis b{color:#93a0bd;font-weight:600}
 #bf2 .tri{color:#6b769a;font-size:12px;transition:transform .15s;display:inline-block}
 #bf2 .tri.op{transform:rotate(90deg);color:#e0ad4a}
 #bf2 .bname{font-size:16px;font-weight:800;color:#e7ecf7}
@@ -4680,10 +4691,38 @@ def _bf_prod_name(p):
     return p[:48] or None
 
 
+def _brand_signal_strip(brand, velocity=None, social=None, hits=None) -> str:
+    """브랜드 신호 한 줄 — 판매속도·소셜판정·발표안착을 기존 카드에 얇게 얹는다.
+    각 지표는 출처·기준이 다르므로 칩에 근거를 함께 적고, 섹션 하단에 기준 캡션을 둔다."""
+    chips = []
+    v = (velocity or {}).get(brand)
+    if v and v.get("velocity"):
+        t = v.get("top") or {}
+        tip = f"리뷰 증가/일 · 최근 35일 · 상품 {v.get('products',0)}개(ASIN 중복 제거)"
+        chips.append(f'<span class="bsig v" title="{_esc(tip)}">⚡ 리뷰 +{v["velocity"]:,.0f}/일'
+                     f'<em>상품당 {v.get("median",0):,.0f}</em></span>')
+    s = (social or {}).get(brand)
+    if s and s.get("views"):
+        tip = (f"유튜브 최근 30일 조회 {s['views']:,} · 전용 콘텐츠 {s['focus_pct']}% · "
+               f"공식(광고) {s['official_pct']}% · 참여율 {s['engagement']}%")
+        chips.append(f'<span class="bsig s" title="{_esc(tip)}">{s["emoji"]} {_esc(s["label"])}'
+                     f'<em>{s["views"]/10000:,.0f}만 조회</em></span>')
+    hb = [h for h in (hits or []) if h.get("brand") == brand]
+    if hb:
+        top = min(hb, key=lambda x: x.get("rank") or 999)
+        tip = "발표한 신제품이 실제 리테일 상위에 진입(리뷰 100+ 기준) · " + \
+              " / ".join(f"{h['announced']}→{h['country']} {h['rank']}위" for h in hb[:3])
+        chips.append(f'<span class="bsig h" title="{_esc(tip)}">🎯 발표 안착 {len(hb)}건'
+                     f'<em>최고 {_esc(top["country"])} {top["rank"]}위</em></span>')
+    return f'<div class="bsigs">{"".join(chips)}</div>' if chips else ""
+
+
 def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
-                       monitored=None, days_label="") -> str:
+                       monitored=None, days_label="", velocity=None, social=None,
+                       launch_hits=None) -> str:
     """브리핑 — 종합 총평 + 급성장 시장 + 브랜드별 국가 공략(접힘/펼침, 나라별 제품·왜·전략).
-    strat_data: build_brief_strategy 반환({strat,why,bsum,tongp,active}). 없으면 총평·해석 생략."""
+    strat_data: build_brief_strategy 반환({strat,why,bsum,tongp,active}). 없으면 총평·해석 생략.
+    velocity/social/launch_hits: 브랜드 단위 보조 신호(있으면 카드에 한 줄로 얹음)."""
     if not records:
         return _BRIEF_STYLE + '<div id="bf2"><p class="bf-empty">최근 기간에 잡힌 경쟁 활동이 없습니다.</p></div>'
     rp = rp or {}
@@ -4782,6 +4821,7 @@ def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
             blocks += (f'<div class="ccb"><div class="cch"><span class="cdot"></span>'
                        f'<b>{_esc(_bf_cty(cc))}</b> {lab}</div>{prodhtml}{strat_h}</div>')
         bs = _esc(bsum.get(b) or "")
+        sig_strip = _brand_signal_strip(b, velocity, social, launch_hits)
         rows_html += (
             f'<div class="brow" onclick="bf2tg({idx})"><div class="bhead">'
             f'<span class="tri" id="bf2t{idx}">▸</span>'
@@ -4789,7 +4829,7 @@ def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
             f'<span class="bflags">{ctrytxt}</span>'
             f'<span class="bctry">{len(ccs)}개국</span>'
             f'<span class="battn"><span style="width:{aw:.0f}%"></span></span></div>'
-            f'<div class="bsum">{bs}</div></div>'
+            f'<div class="bsum">{bs}</div>{sig_strip}</div>'
             f'<div class="bexp" id="bf2e{idx}">{blocks}</div>')
 
     # ── 급성장 시장(성장률 순, $8M+) ──
@@ -4840,9 +4880,19 @@ def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
     basis = f'{days_label}'
     if asof:
         basis += f' · 데이터 기준 {asof}(KST) · 매일 자동 수집'
+    # 신호 칩은 출처·기준이 제각각이라(아마존/유튜브/뉴스) 반드시 기준을 같이 표기
+    _has_sig = any([velocity, social, launch_hits])
+    _sig_basis = (
+        '<p class="bbasis">'
+        '<b>⚡ 리뷰 +N/일</b> 아마존 리뷰 증가 속도(최근 35일, 같은 상품 ASIN 기준·마켓 중복 제거). '
+        '판매 규모가 아니라 <b>반응이 쌓이는 속도</b>이며 국가별 리뷰 전환율 차이는 보정되지 않음 · '
+        '<b>🔥 소셜 판정</b> 유튜브 최근 30일 조회수 구성(전용 콘텐츠·공식채널 비중·참여율)으로 분류 · '
+        '<b>🎯 발표 안착</b> 최근 90일 신제품 발표가 리테일 상위(리뷰 100+)에 등장한 사례. '
+        '미등장은 실패가 아님(국내 전용·순위 밖 판매 구분 불가)'
+        '</p>') if _has_sig else ""
     brand_sec = (f'<div class="bsec">🎯 브랜드별 국가 공략 <span class="sub">'
                  f'브랜드를 누르면 나라별 주력 제품·왜 잘나가나·전략이 펼쳐집니다{(" · " + basis) if basis else ""}</span></div>'
-                 f'<div class="list">{rows_html}</div>{quiet_html}'
+                 f'<div class="list">{rows_html}</div>{quiet_html}{_sig_basis}'
                  f'<p class="bhint">▸ 브랜드 행을 클릭해 상세를 펼쳐 보세요 · '
                  f'모니터링 {mon_n}개 중 이번 주 활동 {len(shown_brands)}개</p>')
 
@@ -5925,6 +5975,19 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             brief_rp      = get_retail_performance(session)
         except Exception:
             brief_records, brief_rp = [], {}
+        # 브랜드 보조 신호(판매속도·소셜판정·발표안착) — 실패해도 브리핑은 그대로
+        try:
+            brief_velocity = get_sales_velocity(session)
+        except Exception:
+            brief_velocity = {}
+        try:
+            brief_social = get_social_verdict(session)
+        except Exception:
+            brief_social = {}
+        try:
+            brief_hit_cand = get_launch_hits(session)
+        except Exception:
+            brief_hit_cand = []
         # 승인된 국가 매핑(value_mappings active)을 런타임 병합 — 코드배포 없이 반영
         try:
             from storage.repository import get_active_mappings
@@ -6196,9 +6259,17 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                 return (v[0] if isinstance(v, list) and v else (v or b))
             brief_strat = build_brief_strategy(insight_session, brief_records, brief_rp,
                                                export_growth, _bf_from, _bf_to, bko=_bf_bko)
+            try:    # 발표→안착 매칭(브랜드당 1콜, BHIT| 캐시)
+                from analytics.brief_strategy import build_launch_hits
+                brief_hits = build_launch_hits(insight_session, brief_hit_cand,
+                                               _bf_from, _bf_to, bko=_bf_bko)
+            except Exception as _e:
+                logger.warning("발표-안착 매칭 스킵: %s", _e)
+                brief_hits = []
         except Exception as _e:
             logger.warning("브리핑 전략 생성 실패: %s", _e)
             brief_strat = {}
+            brief_hits = []
             _bf_from = (datetime.utcnow() - timedelta(days=7)).date().isoformat()
             _bf_to = datetime.utcnow().date().isoformat()
         # 오래된 캐시행 정리(무한 증가 방지) — 리포트 생성 1회당 1 DELETE(경미).
@@ -6215,7 +6286,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
     _bf_days_label = f"최근 7일({_bf_from[5:].replace('-', '.')}~{_bf_to[5:].replace('-', '.')})"
     brief_feed_html = _render_brief_feed(
         brief_records, rp=brief_rp, mkt=export_growth, strat_data=brief_strat,
-        asof=brief_asof, monitored=brief_monitored, days_label=_bf_days_label)
+        asof=brief_asof, monitored=brief_monitored, days_label=_bf_days_label,
+        velocity=brief_velocity, social=brief_social, launch_hits=brief_hits)
 
     # 현재 기간 brand_insights (하위 호환용)
     brand_insights = period_data.get(days, {}).get("insights", {})
