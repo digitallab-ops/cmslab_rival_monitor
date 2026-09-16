@@ -6104,9 +6104,16 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             p_raw    = period_insights_raw[p]
             cached_p = period_cache[p]
             p_brand_insights: dict = {}
+            # 비용 최적화: 기본 기간만 미리 생성한다. 다른 기간(60·90일) 인사이트는
+            # 숨겨진 #insight-grid에만 렌더돼 화면에 안 나오는데도 브랜드마다 gpt-4o를
+            # 호출해 23×3=69콜/일이 나갔다(2/3 낭비). 캐시가 있으면 쓰고, 없으면 비워둔다
+            # — 관리자가 실제로 그 구간을 조회하면 /api/insights가 온디맨드로 생성.
+            _pregen = (p == days)
             for brand, data in p_raw.items():
                 if brand in cached_p and cached_p[brand].get("summary"):
                     summary = cached_p[brand]["summary"]
+                elif not _pregen:
+                    summary = ""          # 지연 생성(온디맨드)
                 else:
                     summary = generate_brand_strategy_summary(brand, data.get("articles", []))
                     _from, _to = period_date_ranges[p]
@@ -6130,6 +6137,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             m_cached = cached_p.get("__MARKET__", {}).get("summary")
             if m_cached:
                 market = m_cached
+            elif not _pregen:
+                market = ""               # 기본 기간 외에는 지연 생성(위와 동일 이유)
             else:
                 market = generate_market_overview(
                     p_raw, momentum=market_momentum,
