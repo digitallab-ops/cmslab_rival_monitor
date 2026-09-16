@@ -2792,21 +2792,31 @@ def get_social_verdict(session: Session, platform: str = "youtube") -> dict:
     return out
 
 
-def get_sales_velocity(session: Session, days: int = 35, min_span_days: int = 7) -> dict:
-    """리뷰 증가 속도 = '실판매 속도' 프록시.
+def get_sales_velocity(session: Session, days: int = 35, min_span_days: int = 7,
+                       stale_days: int = 7) -> dict:
+    """리뷰 증가 속도 — 판매 '규모'가 아니라 **반응이 쌓이는 속도**의 프록시.
 
-    아마존 순위는 **카테고리 내 상대값**이라 경쟁 강도가 다르면 판매량과 어긋난다
-    (실측: 'AU 뷰티 78위'가 'US 스킨케어 12위'보다 리뷰가 7배 빨리 쌓임).
-    같은 상품(ASIN)의 리뷰수 증가분/일로 절대 판매 속도를 근사한다.
+    아마존 순위는 카테고리 내 상대값이라 경쟁 강도가 다르면 체감과 어긋나는데,
+    리뷰 증가분/일은 카테고리·국가를 가로질러 비교 가능한 절대값이라 보완재가 된다.
+    ※ 한계(과장 금지): 실판매량 ground truth와 대조된 적이 없고, 국가별 리뷰 전환율도
+      다르다(중앙값 GB 41 / US 11 / JP 1.3). '순위보다 정확하다'가 아니라
+      '순위가 놓치는 면을 보여준다' 정도로만 해석할 것.
 
-    설계상 주의:
-      · 키는 (ASIN, country) — 같은 ASIN이 여러 마켓에 존재(실측 58개)
-      · 같은 상품이 하루에 여러 카테고리로 동시 랭크인해 중복 행이 생기고(실측 176건)
-        리뷰수도 미세하게 어긋난다 → 날짜별로 먼저 집계(MAX)해 결정적으로 만든 뒤 비교.
-        (집계 없이 ROW_NUMBER로 뽑으면 실행마다 값이 달라짐)
-      · 리뷰수 감소분은 제외(아마존 리뷰 삭제·집계 리셋 → 음수 속도는 노이즈)
-      · 관측 간격이 min_span_days 미만이면 제외(신규 진입 등 표본 부족)
-    반환: {brand: {velocity, products, top:{product,country,category,rank,velocity,reviews}}}
+    QA로 교정한 설계(모두 실측 근거):
+      · 같은 ASIN이 여러 마켓에 동시 랭크인하는데 아마존은 **리뷰풀을 공유**한다.
+        (ASIN,country)로 더하면 같은 리뷰를 국가 수만큼 중복 가산(실측 속도합의 40%).
+        → ASIN당 최고 속도 1건만 채택.
+      · 같은 상품이 하루에 여러 카테고리로 랭크인해 중복 행(실측 176건)·리뷰수 불일치 →
+        날짜별 선집계(MAX)로 결정성 확보.
+      · 리뷰수 감소는 제외가 아니라 **0으로 클램프** — 제외하면 성과 나쁜 쪽만 빠져
+        브랜드 속도가 구조적으로 위로 편향된다.
+      · 마지막 관측이 오래된 상품은 제외(stale_days) — 이미 랭킹에서 사라진 과거 속도가
+        '현재 속도'로 섞이던 문제(실측 22/146건).
+      · 관측 간격 min_span_days 미만 제외(표본 부족).
+    반환: {brand: {velocity(합), median(상품당 중앙값), products(고유 ASIN 수),
+                   top:{product,country,category,rank,velocity,reviews}}}
+      velocity는 합이라 랭킹에 많이 걸린 브랜드가 커진다(노출 폭 × 반응률).
+      브랜드 간 '상품 하나의 힘'을 비교하려면 median을 봐라.
     """
     asin = "substring(product_url from '/dp/([A-Z0-9]{10})')"
     try:
@@ -2828,30 +2838,47 @@ def get_sales_velocity(session: Session, days: int = 35, min_span_days: int = 7)
                        ROW_NUMBER() OVER (PARTITION BY asin, country ORDER BY capture_date DESC) rl
                 FROM daily
             )
-            SELECT l.brand, l.product_name, l.country, l.category, l.rank, l.review_count,
+            SELECT l.brand, l.asin, l.product_name, l.country, l.category, l.rank, l.review_count,
                    (l.review_count - f.review_count) AS gain,
-                   (l.capture_date - f.capture_date) AS span
+                   (l.capture_date - f.capture_date) AS span,
+                   (CURRENT_DATE - l.capture_date) AS staleness
             FROM snap f
             JOIN snap l ON f.asin = l.asin AND f.country = l.country AND f.rf = 1 AND l.rl = 1
             WHERE (l.capture_date - f.capture_date) >= :span
-              AND l.review_count >= f.review_count
-        """), {"days": days, "span": min_span_days}).fetchall()
+              AND (CURRENT_DATE - l.capture_date) <= :stale
+        """), {"days": days, "span": min_span_days, "stale": stale_days}).fetchall()
     except Exception as e:
         logger.warning("판매 속도 계산 실패: %s", e)
         return {}
 
-    out: dict = {}
-    for brand, pname, country, cat, rank, reviews, gain, span in rows:
+    # 1) ASIN당 최고 속도만 채택 — 마켓 간 리뷰풀 공유라 국가별 합산은 중복 가산
+    best: dict = {}
+    for brand, asin_v, pname, country, cat, rank, reviews, gain, span, _st in rows:
         span = max(int(span or 0), 1)
-        vel = float(gain or 0) / span
-        o = out.setdefault(brand, {"velocity": 0.0, "products": 0, "top": None})
-        o["velocity"] += vel
+        vel = max(float(gain or 0), 0.0) / span      # 감소는 0으로 클램프(제외하면 편향)
+        key = (brand, asin_v)
+        cur = best.get(key)
+        if cur is None or vel > cur["velocity"]:
+            best[key] = {"brand": brand, "velocity": vel, "product": pname or "",
+                         "country": country, "category": cat, "rank": rank,
+                         "reviews": int(reviews or 0)}
+
+    # 2) 브랜드 집계 — 합(노출 폭 반영) + 중앙값(상품 하나의 힘)
+    out: dict = {}
+    for v in best.values():
+        o = out.setdefault(v["brand"], {"velocity": 0.0, "median": 0.0,
+                                        "products": 0, "_vals": [], "top": None})
+        o["velocity"] += v["velocity"]
         o["products"] += 1
-        if o["top"] is None or vel > o["top"]["velocity"]:
-            o["top"] = {"product": pname or "", "country": country, "category": cat,
-                        "rank": rank, "velocity": round(vel, 1), "reviews": int(reviews or 0)}
+        o["_vals"].append(v["velocity"])
+        if o["top"] is None or v["velocity"] > o["top"]["velocity"]:
+            o["top"] = {"product": v["product"], "country": v["country"],
+                        "category": v["category"], "rank": v["rank"],
+                        "velocity": round(v["velocity"], 1), "reviews": v["reviews"]}
+    import statistics as _st_mod
     for o in out.values():
         o["velocity"] = round(o["velocity"], 1)
+        o["median"] = round(_st_mod.median(o.pop("_vals")), 1)
     return out
 
 
