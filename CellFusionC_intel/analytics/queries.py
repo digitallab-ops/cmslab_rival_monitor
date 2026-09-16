@@ -2732,6 +2732,7 @@ def get_brand_composite_score(session: Session) -> list[dict]:
 
 # 소셜 버즈 판정 — 조회수 총량은 오판을 부른다(광고 노출·스침 언급이 섞임).
 # 구성비(전용·공식·자발)와 참여율로 '왜 뜨는지'를 가려낸다.
+_VIRAL_MIN_VIEWS = 300_000      # '바이럴'로 부르려면 최소 이 정도 확산은 있어야
 _SOCIAL_VERDICT = {
     "organic_viral": {"t": "자발 바이럴", "e": "🔥",
                       "d": "크리에이터들이 자발적으로 다루는 중 — 광고 없이 확산"},
@@ -2771,16 +2772,18 @@ def get_social_verdict(session: Session, platform: str = "youtube") -> dict:
         official_pct = (g("official_views") / total * 100) if total else 0
         eng = g("engagement_pct")
 
+        # 볼륨을 안 보면 6만 조회와 1,230만 조회가 같은 '바이럴' 딱지를 받는다(190배 차이).
+        # '바이럴'은 확산 규모까지 있어야 성립 → 최소 볼륨(_VIRAL_MIN_VIEWS) 요구.
         if total < 50_000:
             v = "quiet"
         elif official_pct >= 40:
             v = "paid_push"          # 광고비로 산 노출이 절반 가까이
         elif focus_pct < 40:
             v = "mention_only"       # haul/empties에만 스침
-        elif eng >= 1.5 and focus_pct >= 60:
-            v = "organic_viral"      # 전용 콘텐츠 + 높은 참여 = 진짜 확산
+        elif eng >= 1.5 and focus_pct >= 60 and total >= _VIRAL_MIN_VIEWS:
+            v = "organic_viral"      # 전용 콘텐츠 + 높은 참여 + 확산 규모 = 진짜 바이럴
         else:
-            v = "rising"
+            v = "rising"             # 조건은 좋으나 규모가 아직 작음
         meta = _SOCIAL_VERDICT[v]
         out[brand] = {
             "verdict": v, "label": meta["t"], "emoji": meta["e"], "desc": meta["d"],

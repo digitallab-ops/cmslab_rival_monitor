@@ -4610,12 +4610,14 @@ _BRIEF_STYLE = """<style>
 #bf2 .brow:hover{background:rgba(90,139,245,.06)}
 #bf2 .bhead{display:grid;grid-template-columns:20px 118px 1fr auto 76px;align-items:center;gap:12px}
 #bf2 .bsum{font-size:12.5px;color:#aeb8cf;line-height:1.55;margin:7px 0 0 32px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-#bf2 .bsigs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0 32px}
-#bf2 .bsig{font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;white-space:nowrap;cursor:help}
-#bf2 .bsig em{font-style:normal;font-weight:500;opacity:.72;margin-left:5px}
-#bf2 .bsig.v{background:rgba(91,217,154,.13);color:#7fe0ab}
-#bf2 .bsig.s{background:rgba(51,197,206,.13);color:#5fd5dd}
-#bf2 .bsig.h{background:rgba(224,173,74,.13);color:#e6c179}
+#bf2 .bsigs{margin:7px 0 0 32px;font-size:11.5px;color:#8d98b3;display:flex;flex-wrap:wrap;
+  align-items:baseline;gap:0 18px}
+#bf2 .bsigs span{white-space:nowrap;cursor:help;position:relative;padding-left:11px}
+#bf2 .bsigs span::before{content:"";position:absolute;left:0;top:50%;width:3px;height:3px;
+  border-radius:50%;background:#4a5772;transform:translateY(-50%)}
+#bf2 .bsigs i{font-style:normal;color:#6b769a}
+#bf2 .bsigs b{color:#cfd7e8;font-weight:700;font-variant-numeric:tabular-nums}
+#bf2 .bsigs u{text-decoration:none;color:#6b769a;margin-left:6px}
 #bf2 .bbasis{font-size:11px;color:#6b769a;margin:10px 2px 0;line-height:1.65}
 #bf2 .bbasis b{color:#93a0bd;font-weight:600}
 #bf2 .tri{color:#6b769a;font-size:12px;transition:transform .15s;display:inline-block}
@@ -4692,29 +4694,36 @@ def _bf_prod_name(p):
 
 
 def _brand_signal_strip(brand, velocity=None, social=None, hits=None) -> str:
-    """브랜드 신호 한 줄 — 판매속도·소셜판정·발표안착을 기존 카드에 얇게 얹는다.
-    각 지표는 출처·기준이 다르므로 칩에 근거를 함께 적고, 섹션 하단에 기준 캡션을 둔다."""
-    chips = []
+    """브랜드 신호 한 줄 — 판매속도·소셜판정·발표안착.
+
+    색칠한 배지를 옆으로 늘어놓으면 난잡하고 '이 숫자가 어디서 온 건지'가 안 보인다.
+    → 출처를 접두어로 앞세우고(아마존 리뷰 / 유튜브 / 발표→안착), 값만 강조하는
+      한 줄 텍스트로. 상세 근거는 title 툴팁 + 섹션 하단 기준 캡션.
+    """
+    parts = []
     v = (velocity or {}).get(brand)
     if v and v.get("velocity"):
-        t = v.get("top") or {}
-        tip = f"리뷰 증가/일 · 최근 35일 · 상품 {v.get('products',0)}개(ASIN 중복 제거)"
-        chips.append(f'<span class="bsig v" title="{_esc(tip)}">⚡ 리뷰 +{v["velocity"]:,.0f}/일'
-                     f'<em>상품당 {v.get("median",0):,.0f}</em></span>')
+        tip = (f"아마존 리뷰 증가 속도 · 최근 35일 · 상품 {v.get('products',0)}개"
+               f"(같은 ASIN의 마켓 중복 제거) · 상품당 중앙값 {v.get('median',0):,.0f}/일")
+        parts.append(f'<span title="{_esc(tip)}"><i>아마존 리뷰</i> '
+                     f'<b>+{v["velocity"]:,.0f}</b>/일'
+                     f'<u>상품당 {v.get("median",0):,.0f}</u></span>')
     s = (social or {}).get(brand)
     if s and s.get("views"):
-        tip = (f"유튜브 최근 30일 조회 {s['views']:,} · 전용 콘텐츠 {s['focus_pct']}% · "
-               f"공식(광고) {s['official_pct']}% · 참여율 {s['engagement']}%")
-        chips.append(f'<span class="bsig s" title="{_esc(tip)}">{s["emoji"]} {_esc(s["label"])}'
-                     f'<em>{s["views"]/10000:,.0f}만 조회</em></span>')
+        tip = (f"유튜브 최근 30일 조회 {s['views']:,}회 · 전용 콘텐츠 {s['focus_pct']}% · "
+               f"공식채널(광고) {s['official_pct']}% · 참여율 {s['engagement']}% → {s['desc']}")
+        parts.append(f'<span title="{_esc(tip)}"><i>유튜브</i> '
+                     f'<b>{s["views"]/10000:,.0f}만</b>회'
+                     f'<u>{_esc(s["label"])}</u></span>')
     hb = [h for h in (hits or []) if h.get("brand") == brand]
     if hb:
         top = min(hb, key=lambda x: x.get("rank") or 999)
-        tip = "발표한 신제품이 실제 리테일 상위에 진입(리뷰 100+ 기준) · " + \
-              " / ".join(f"{h['announced']}→{h['country']} {h['rank']}위" for h in hb[:3])
-        chips.append(f'<span class="bsig h" title="{_esc(tip)}">🎯 발표 안착 {len(hb)}건'
-                     f'<em>최고 {_esc(top["country"])} {top["rank"]}위</em></span>')
-    return f'<div class="bsigs">{"".join(chips)}</div>' if chips else ""
+        tip = "뉴스로 출시를 알린 신제품이 실제 아마존 판매 순위에 오른 사례(리뷰 100+ 기준) · " + \
+              " / ".join(f"{h['announced']}→{_bf_cty(h['country'])} {h['rank']}위" for h in hb[:3])
+        parts.append(f'<span title="{_esc(tip)}"><i>신제품 순위 진입</i> '
+                     f'<b>{len(hb)}</b>건'
+                     f'<u>최고 {_esc(_bf_cty(top["country"]))} {top["rank"]}위</u></span>')
+    return f'<div class="bsigs">{"".join(parts)}</div>' if parts else ""
 
 
 def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
@@ -4884,11 +4893,14 @@ def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
     _has_sig = any([velocity, social, launch_hits])
     _sig_basis = (
         '<p class="bbasis">'
-        '<b>⚡ 리뷰 +N/일</b> 아마존 리뷰 증가 속도(최근 35일, 같은 상품 ASIN 기준·마켓 중복 제거). '
-        '판매 규모가 아니라 <b>반응이 쌓이는 속도</b>이며 국가별 리뷰 전환율 차이는 보정되지 않음 · '
-        '<b>🔥 소셜 판정</b> 유튜브 최근 30일 조회수 구성(전용 콘텐츠·공식채널 비중·참여율)으로 분류 · '
-        '<b>🎯 발표 안착</b> 최근 90일 신제품 발표가 리테일 상위(리뷰 100+)에 등장한 사례. '
-        '미등장은 실패가 아님(국내 전용·순위 밖 판매 구분 불가)'
+        '<b>아마존 리뷰 +N/일</b> 그 브랜드 상품의 리뷰가 하루 몇 개씩 늘어나는지(최근 35일). '
+        '같은 상품은 ASIN 기준으로 묶어 마켓 중복을 뺐다. 판매 '
+        '<b>규모</b>가 아니라 <b>반응이 쌓이는 속도</b>이고, 나라마다 리뷰 남기는 비율이 달라 그대로 비교하면 안 된다.<br>'
+        '<b>유튜브</b> 최근 30일 조회수와 그 성격 — 브랜드 전용 영상 비중·공식채널(광고) 비중·참여율로 '
+        '<b>자발 바이럴 / 광고 주도 / 스침 언급</b>을 가른다(바이럴은 30만 조회 이상일 때만).<br>'
+        '<b>신제품 순위 진입</b> 뉴스로 출시를 알린 신제품(최근 90일)이 실제 아마존 판매 순위(리뷰 100+)에 '
+        '오른 건수 — <b>발표만 하고 마는 것</b>과 구분하려는 지표. '
+        '순위에 없다고 실패는 아니다(국내 전용 출시·상위권 밖 판매는 확인할 수 없음).'
         '</p>') if _has_sig else ""
     brand_sec = (f'<div class="bsec">🎯 브랜드별 국가 공략 <span class="sub">'
                  f'브랜드를 누르면 나라별 주력 제품·왜 잘나가나·전략이 펼쳐집니다{(" · " + basis) if basis else ""}</span></div>'
