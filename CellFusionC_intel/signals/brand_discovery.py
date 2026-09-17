@@ -110,16 +110,49 @@ def _known_set(session) -> tuple[set, set]:
                 ko.add(a)
     except Exception:
         pass
-    try:  # 이미 제안/처리된 후보도 재제안 안 함
+    try:  # 이미 제안/처리(제외 포함)된 후보는 재제안 안 함.
+        # 변형까지 넣어야 'A.P.R.'을 제외해도 'APR'로 다시 올라오는 일이 없다.
         for r in session.execute(text(
                 f"SELECT name, ko_name FROM {DB_SCHEMA}.brand_candidates")).fetchall():
             if r[0]:
-                en.add(r[0].lower())
+                en |= {v.lower() for v in _corp_variants(r[0])}
             if r[1]:
-                ko.add(r[1])
+                ko |= set(_corp_variants(r[1]))
+    except Exception:
+        pass
+    # 운영사·지주사 이름은 브랜드가 아니다. '에이피알·구다이·달바글로벌, K-뷰티 엇갈린
+    # 성장 셈법' 같은 운영사 비교 기사에서 회사명이 브랜드로 잡혀 올라온다(A.P.R. 실제 사례).
+    # 승인하면 회사 뉴스(실적·M&A·주가)가 브랜드 활동으로 섞이고, 이미 등록된 산하
+    # 브랜드(메디큐브)와 중복 집계된다. NICE 매핑에 있는 회사명을 그대로 제외어로 쓴다.
+    # 단, 회사명이 곧 브랜드명인 곳((주)논픽션→논픽션, (주)토리든→토리든)은 빼면 안 된다.
+    # 그 회사의 브랜드 태그 안에 회사 이름이 들어 있으면 '회사=브랜드'로 보고 건너뛴다.
+    try:
+        for co, tags in session.execute(text(
+                f"SELECT DISTINCT company, COALESCE(brand_tags,'') FROM {DB_SCHEMA}.nice_company_brands "
+                f"WHERE COALESCE(brand_tags,'') <> '' OR COALESCE(matched_brands,'') <> ''")):
+            variants = _corp_variants(co)
+            base = variants[0] if variants else ""
+            for v in variants:      # 가장 짧은 형태가 브랜드명일 가능성이 높다
+                if len(v) < len(base):
+                    base = v
+            if base and base in (tags or ""):
+                continue            # 회사=브랜드 → 제외어로 쓰면 진짜 브랜드를 막는다
+            for v in variants:
+                en.add(v.lower())
+                ko.add(v)
     except Exception:
         pass
     return en, ko
+
+
+def _corp_variants(name: str) -> list:
+    """'(주)에이피알' → ['(주)에이피알','에이피알','A.P.R.'처럼 점 제거한 형태'] 비교용 변형."""
+    import re as _re
+    base = _re.sub(r"\(주\)|\(유\)|㈜|주식회사|유한회사", "", name or "").strip()
+    out = {name or "", base}
+    out.add(base.replace(" ", ""))
+    out.add(base.replace(".", ""))       # A.P.R. ↔ APR
+    return [v for v in out if len(v) >= 2]
 
 
 def _extract_brands(headlines: list[str]) -> list[dict]:
@@ -134,7 +167,13 @@ def _extract_brands(headlines: list[str]) -> list[dict]:
 
 규칙:
 - 브랜드명만. 유통사(올리브영·쿠팡·무신사·세포라·아마존·큐텐), 성분(나이아신아마이드 등),
-  일반명사(선크림·앰플·토너), 대기업 모회사(아모레퍼시픽·LG생활건강), 인물·매체명은 제외.
+  일반명사(선크림·앰플·토너), 인물·매체명은 제외.
+- **운영사·제조사·지주사 이름은 브랜드가 아니다.** 대기업(아모레퍼시픽·LG생활건강)뿐 아니라
+  신흥 운영사도 제외한다 — 에이피알(A.P.R.), 구다이글로벌, 달바글로벌, 더파운더즈,
+  크레이버코퍼레이션, 엘앤피코스메틱, 해브앤비, 서린컴퍼니, 코스맥스, 한국콜마 등.
+  판단 기준: '○○사(社)가 ~했다', '○○·○○·○○, 엇갈린 성장' 처럼 **기업 실적·M&A·상장·투자**
+  맥락에서 나오는 이름은 회사다. 소비자가 제품에서 보는 이름만 브랜드다.
+  (예: '에이피알'은 회사 → 제외, 그 회사의 '메디큐브'가 브랜드)
 - 한 브랜드는 한 번만. 한글·영문 혼용이면 대표표기 하나로.
 - 확실치 않으면 넣지 말 것(정밀도 우선).
 JSON 배열만 출력: [{{"name":"영문 또는 대표표기","ko":"한글표기(없으면 빈문자열)"}}]"""
@@ -177,7 +216,10 @@ def run() -> dict:
                 continue
             if _is_block(name, ko):
                 continue
-            if name.lower() in known_en or (ko and ko in known_ko):
+            # 'A.P.R.'과 '에이피알'이 같은 것으로 걸리도록 점·공백을 뗀 형태까지 대조한다
+            forms_en = {v.lower() for v in _corp_variants(name)}
+            forms_ko = set(_corp_variants(ko)) if ko else set()
+            if (forms_en & known_en) or (forms_ko & known_ko):
                 continue
             # 언급수 = 이 이름/한글이 등장한 헤드라인 수
             keys = [k for k in {name, ko} if k]
