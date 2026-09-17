@@ -6442,29 +6442,35 @@ _ALLCO_STYLE = """<style>
 #allco .ac-tog button{background:rgba(255,255,255,.04);border:1px solid #26314e;color:#93a0bd;
   border-radius:6px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
 #allco .ac-tog button.on{background:rgba(74,143,212,.18);border-color:rgba(74,143,212,.5);color:#8fb4ff}
-#allco .ac-meta{font-size:12px;color:#6b769a;margin-left:auto}
-#allco .ac-wrap{max-height:520px;overflow:auto;border:1px solid #26314e;border-radius:10px}
-#allco table{border-collapse:collapse;width:100%;font-size:13px}
-#allco thead th{position:sticky;top:0;background:#141d33;color:#93a0bd;font-size:11.5px;font-weight:700;
-  padding:9px 10px;text-align:right;border-bottom:1px solid #26314e;white-space:nowrap;cursor:pointer}
+#allco .ac-meta{font-size:13px;color:#93a0bd;margin-left:auto}
+#allco .ac-unit{display:inline-block;font-size:12.5px;color:#e6c179;background:rgba(224,173,74,.12);
+  border:1px solid rgba(224,173,74,.28);border-radius:6px;padding:3px 10px;margin:0 0 10px}
+#allco .ac-wrap{max-height:600px;overflow:auto;border:1px solid #26314e;border-radius:10px}
+#allco table{border-collapse:collapse;width:100%;font-size:15px}
+#allco thead th{position:sticky;top:0;z-index:2;background:#141d33;color:#aab6d4;font-size:13px;font-weight:700;
+  padding:11px 12px;text-align:right;border-bottom:2px solid #2f3c60;white-space:nowrap;cursor:pointer}
+#allco thead th:hover{color:#cfe0ff}
 #allco thead th:first-child,#allco thead th:nth-child(2){text-align:left}
-#allco tbody td{padding:8px 10px;border-bottom:1px solid rgba(38,49,78,.5);text-align:right;
-  font-variant-numeric:tabular-nums;color:#cfd7e8;white-space:nowrap}
-#allco tbody td:first-child{text-align:left;color:#e7ecf7;font-weight:600}
-#allco tbody td:nth-child(2){text-align:left;color:#6b769a;font-size:11.5px}
-#allco tbody tr:hover{background:rgba(74,143,212,.06)}
-#allco .yoy-up{color:#5bd99a;font-weight:700}
-#allco .yoy-dn{color:#e8654e;font-weight:700}
-#allco .ac-dart{font-size:11px;color:#e6c179;background:rgba(224,173,74,.12);padding:1px 6px;border-radius:5px;margin-left:6px}
-#allco .ac-sub{display:block;font-size:10.5px;color:#6b769a;font-weight:400;margin-top:2px}
-#allco .ac-brand{display:block;font-size:11px;color:#8fb4ff;font-weight:500;margin-top:3px;
-  max-width:280px;white-space:normal;line-height:1.4}
-#allco thead th .ac-sub{color:#5a6486;font-weight:400}
-#allco td.ac-dcol{background:rgba(224,173,74,.045)}
-#allco th.ac-dcol{background:#17203a}
-#allco .ac-more{text-align:center;padding:10px;color:#6b769a;font-size:12.5px;cursor:pointer}
+#allco tbody td{padding:11px 12px;border-bottom:1px solid rgba(38,49,78,.55);text-align:right;
+  font-variant-numeric:tabular-nums;color:#dbe3f4;white-space:nowrap;letter-spacing:.2px}
+#allco tbody tr:nth-child(even){background:rgba(255,255,255,.018)}
+#allco tbody td:first-child{text-align:left;color:#f2f5fc;font-weight:700;font-size:15px}
+#allco tbody td:nth-child(2){text-align:left;color:#8490b0;font-size:12.5px}
+#allco tbody tr:hover{background:rgba(74,143,212,.10)}
+/* 최신 연도 매출 = 표를 훑을 때 기준이 되는 값이라 흰색으로 세워둔다 */
+#allco .ac-lead{color:#ffffff;font-weight:700}
+#allco .yoy-up{color:#63e3a5;font-weight:700;font-size:15.5px}
+#allco .yoy-dn{color:#ff7a62;font-weight:700;font-size:15.5px}
+#allco .ac-sub{display:block;font-size:12px;color:#8490b0;font-weight:400;margin-top:3px}
+#allco .ac-brand{display:block;font-size:12.5px;color:#8fb4ff;font-weight:500;margin-top:4px;
+  max-width:300px;white-space:normal;line-height:1.45}
+#allco thead th .ac-sub{color:#6b769a;font-weight:600;font-size:11.5px}
+#allco td.ac-dcol{background:rgba(224,173,74,.06)}
+#allco th.ac-dcol{background:#1b2440;color:#e6c179}
+#allco .ac-more{text-align:center;padding:12px;color:#93a0bd;font-size:13.5px;cursor:pointer;font-weight:600}
 #allco .ac-more:hover{color:#8fb4ff}
-#allco .ac-note{font-size:11.5px;color:#6b769a;margin-top:8px;line-height:1.6}
+#allco .ac-note{font-size:12.5px;color:#8490b0;margin-top:10px;line-height:1.75}
+#allco .ac-note b{color:#b9c4dd}
 </style>"""
 
 
@@ -6505,7 +6511,9 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
                    "g": d["yoy"], "pv": d["prev"]} if d else None),
         })
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    yhead = "".join(f"<th data-k='r{i}'>{y} 매출</th>" for i, y in enumerate(years))
+    # 단위를 각 열 머리에 직접 박는다 — 표 밑 각주는 스크롤하면 안 보여서 '얼마 기준'인지 놓친다
+    yhead = "".join(f"<th data-k='r{i}'>{y} 매출<span class='ac-sub'>억원</span></th>"
+                    for i, y in enumerate(years))
     last_y = years[-1] if years else ""
     n_cos = sum(1 for r in rows if r["cosmetic"])
     return (_ALLCO_STYLE + f'''
@@ -6520,18 +6528,20 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
         <input class="ac-q" id="ac-q" placeholder="회사명·브랜드명 검색 (예: 아모레, 설화수, 아누아)" oninput="acRender()">
         <span class="ac-meta" id="ac-meta"></span>
       </div>
+      <div class="ac-unit">모든 금액 단위 <b>억원</b> — 억원 미만은 반올림.
+        예를 들어 <b>26,537</b>은 2조 6,537억원(≈ 2,653,700,000,000원)이다.</div>
       <div class="ac-wrap">
         <table><thead><tr>
           <th data-k="c">회사</th><th data-k="i">업종</th>{yhead}
-          <th data-k="o">영업이익<span class="ac-sub">{last_y}</span></th>
-          <th data-k="a">광고비<span class="ac-sub">{last_y}</span></th>
-          <th data-k="v" class="ac-dcol">최신 실적<span class="ac-sub">DART 공시</span></th>
+          <th data-k="o">{last_y} 영업이익<span class="ac-sub">억원</span></th>
+          <th data-k="a">{last_y} 광고비<span class="ac-sub">억원</span></th>
+          <th data-k="v" class="ac-dcol">최신 실적<span class="ac-sub">억원 · DART 공시</span></th>
           <th data-k="g" class="ac-dcol">전년 같은 기간 대비<span class="ac-sub">성장률</span></th>
         </tr></thead><tbody id="ac-body"></tbody></table>
       </div>
       <div class="ac-more" id="ac-more" onclick="acMore()"></div>
-      <p class="ac-note">단위 억원 · <b>{years[0] if years else ''}~{last_y} 매출·영업이익·광고비</b>는 NICE BizLine
-        <b>연간(1~12월)</b> 확정 실적이다(비상장 포함).<br>
+      <p class="ac-note"><b>{years[0] if years else ''}~{last_y} 매출·영업이익·광고비</b>는 NICE BizLine
+        <b>연간(1~12월)</b> 확정 실적이다(비상장 포함). 원본은 천원 단위이며 화면에는 억원으로 환산했다.<br>
         오른쪽 <b>주황 두 칸</b>은 상장사만 — 금융감독원 전자공시(DART)에 올라온 <b>가장 최근 보고서</b>다.
         분기 보고서는 연초부터의 <b>누적</b>이므로, 성장률은 언제나 <b>같은 누적 구간끼리</b> 비교한다
         (예: 2026년 1~6월 vs 2025년 1~6월). 아직 연간 실적 공시 전이면 분기 누적이 뜨고, 비교 대상 금액은 칸 안에 함께 적었다.<br>
@@ -6541,7 +6551,9 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
     <script>
     var AC_DATA={js}, AC_YEARS={json.dumps(years)}, AC_COS=1, AC_LIMIT=60, AC_SORT='r{max(len(years)-1,0)}', AC_DESC=true;
     function acFmt(v){{ return (v===null||v===undefined)?'—':(v/100000).toLocaleString(undefined,{{maximumFractionDigits:0}}); }}
-    function acDart(v){{ return (v===null||v===undefined)?'—':(v/100000000).toLocaleString(undefined,{{maximumFractionDigits:0}})+'억'; }}
+    // DART는 원 단위라 ÷1억. suffix=0이면 '억' 생략(열 머리에 단위가 이미 있음)
+    function acDart(v,noSuffix){{ if(v===null||v===undefined) return '—';
+      return (v/100000000).toLocaleString(undefined,{{maximumFractionDigits:0}})+(noSuffix===0?'':'억'); }}
     // 분기 보고서는 '연초부터 누적'이라 몇 월까지인지 적어줘야 오해가 없다
     var AC_SPAN={{'1분기':'1~3월 누적','상반기':'1~6월 누적','3분기누적':'1~9월 누적','연간':'연간(1~12월)'}};
     function acSpan(p){{ return AC_SPAN[p]||p; }}
@@ -6570,12 +6582,14 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
         return AC_DESC?(bv-av):(av-bv); }});
       var shown=list.slice(0,AC_LIMIT);
       document.getElementById('ac-body').innerHTML=shown.map(function(r){{
-        var tds=r.r.map(function(v){{ return '<td>'+acFmt(v)+'</td>'; }}).join('');
+        // 맨 오른쪽 = 최신 연도 매출. 표를 훑는 기준값이라 밝게 세운다
+        var tds=r.r.map(function(v,i){{
+          return '<td'+(i===r.r.length-1?' class="ac-lead"':'')+'>'+acFmt(v)+'</td>'; }}).join('');
         var op=r.o[r.o.length-1], ad=r.a[r.a.length-1];
         var dv='<td class="ac-dcol">—</td><td class="ac-dcol">—</td>';
         if(r.d){{
           // 좌: 이번 실적이 '언제 것'인지, 우: '무엇 대비'인지를 각각 칸 안에 적는다
-          var cur='<b>'+acDart(r.d.v)+'</b><span class="ac-sub">'+r.d.y+'년 '+acSpan(r.d.p)+'</span>';
+          var cur='<b class="ac-lead">'+acDart(r.d.v,0)+'</b><span class="ac-sub">'+r.d.y+'년 '+acSpan(r.d.p)+'</span>';
           var cmp='—';
           if(r.d.g!==null && r.d.g!==undefined){{
             cmp='<span class="'+(r.d.g>=0?'yoy-up':'yoy-dn')+'">'+(r.d.g>=0?'+':'')+r.d.g+'%</span>'+
