@@ -5176,6 +5176,7 @@ def _build_full_html(
     <button class="tab-btn" data-tab="finance" onclick="switchTab('finance')">재무</button>
     <button class="tab-btn" data-tab="feed" onclick="switchTab('feed')">기록</button>
     <button class="tab-btn" data-tab="search" onclick="switchTab('search')">검색</button>
+    <button class="tab-btn" data-tab="data" onclick="switchTab('data')">데이터</button>
   </div>
   <button class="admin-unlock" id="admin-unlock" onclick="adminUnlock()">🔒 관리자</button>
   <div class="period-row" id="admin-bar" style="display:none">
@@ -5361,6 +5362,39 @@ def _build_full_html(
       {financials_nice_html}
     </div>
     {all_companies_html}
+  </div>
+
+  <!-- ===== 탭: 데이터 (기획팀 전체 조회·내려받기) ===== -->
+  <div class="tab-panel" id="tab-data">
+    {_DX_STYLE}
+    <div class="section" id="dx">
+      <div class="section-title">📦 데이터 탐색 <span class="section-sub">
+        지금까지 모은 데이터를 종류·기간·브랜드·국가로 걸러 보고 엑셀로 받아간다</span></div>
+
+      <div class="dx-cards" id="dx-cards"></div>
+
+      <div class="dx-bar">
+        <label>기간<input type="date" id="dx-from"> ~ <input type="date" id="dx-to"></label>
+        <span class="dx-quick">
+          <button onclick="dxSpan(7)">최근 7일</button>
+          <button onclick="dxSpan(30)">30일</button>
+          <button onclick="dxSpan(90)">90일</button>
+          <button onclick="dxSpan(0)">전체</button>
+        </span>
+        <input class="dx-f" id="dx-brand" placeholder="브랜드 (예: Anua)">
+        <input class="dx-f" id="dx-country" placeholder="국가 (예: US)">
+        <button class="dx-go" onclick="dxLoad(0)">조회</button>
+        <button class="dx-csv" onclick="dxCsv()">CSV 내려받기</button>
+      </div>
+
+      <div class="dx-meta" id="dx-meta">위에서 데이터 종류를 고르세요.</div>
+      <div class="dx-wrap"><table id="dx-tbl"><thead id="dx-head"></thead><tbody id="dx-body"></tbody></table></div>
+      <div class="dx-page" id="dx-page"></div>
+      <p class="dx-note">한 번에 200행씩 보여준다. <b>CSV 내려받기</b>는 지금 걸어둔 조건 그대로
+        최대 5만 행을 받는다(엑셀에서 바로 열린다). 기간을 비우면 전체 구간이다.<br>
+        뉴스는 중복·자사 기사를 뺀 수, 아마존 순위는 모니터링 대상만, 해외 상표는 타사 출원분만 나온다.</p>
+    </div>
+    {_DX_SCRIPT}
   </div>
 
   <!-- ===== 탭: 검색 (MCP+챗봇 자연어 질의) ===== -->
@@ -5733,6 +5767,8 @@ function switchTab(name) {{
   }});
   // 숨겨진 탭에서 width=0으로 그려진 캔버스 차트 재그리기
   if (name === 'brands' && window._drawStacked) {{ window._drawStacked(); }}
+  // 데이터 탐색은 첫 진입 때 적재 현황을 불러온다(첫 로딩 부담을 피하려고 지연 초기화)
+  if (name === 'data' && window.dxInit) {{ window.dxInit(); }}
   try {{ window.dispatchEvent(new Event('resize')); }} catch (e) {{}}
   window.scrollTo({{ top: 0, behavior: 'smooth' }});
 }}
@@ -6432,6 +6468,147 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
 
     logger.info("보고서 생성 완료: %s (%.1f KB)", abs_path, len(html_content) / 1024)
     return abs_path
+
+
+# 데이터 탐색 탭 — f-string 밖의 평문 상수로 둔다(CSS/JS 중괄호를 일일이 escape 하지 않으려고).
+_DX_STYLE = """<style>
+#dx .dx-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;margin:0 0 16px}
+#dx .dx-card{background:#0f1726;border:1px solid #26314e;border-radius:10px;padding:12px 14px;cursor:pointer;
+  transition:border-color .12s,background .12s}
+#dx .dx-card:hover{border-color:#3d5266;background:#131d31}
+#dx .dx-card.on{border-color:rgba(74,143,212,.65);background:rgba(74,143,212,.12)}
+#dx .dx-card .n{font-size:14.5px;font-weight:700;color:#e7ecf7}
+#dx .dx-card.on .n{color:#8fb4ff}
+#dx .dx-card .c{font-size:17px;font-weight:700;color:#dbe3f4;font-variant-numeric:tabular-nums;margin-top:6px}
+#dx .dx-card .s{font-size:11.5px;color:#6b769a;margin-top:3px}
+#dx .dx-bar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:0 0 12px}
+#dx .dx-bar label{font-size:13px;color:#93a0bd;display:flex;align-items:center;gap:6px}
+#dx input[type=date],#dx input.dx-f{background:#0f1726;border:1px solid #26314e;border-radius:6px;
+  color:#e7ecf7;padding:7px 11px;font-size:13.5px;font-family:inherit}
+#dx input.dx-f{width:150px}
+#dx input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.7)}
+#dx .dx-quick{display:flex;gap:5px}
+#dx .dx-quick button{background:rgba(255,255,255,.04);border:1px solid #26314e;color:#93a0bd;border-radius:6px;
+  padding:6px 11px;font-size:12.5px;cursor:pointer;font-family:inherit}
+#dx .dx-quick button:hover{color:#8fb4ff;border-color:#3d5266}
+#dx .dx-go,#dx .dx-csv{border-radius:6px;padding:7px 16px;font-size:13.5px;font-weight:700;cursor:pointer;
+  font-family:inherit;border:1px solid}
+#dx .dx-go{background:rgba(74,143,212,.2);border-color:rgba(74,143,212,.55);color:#8fb4ff}
+#dx .dx-csv{background:rgba(91,217,154,.12);border-color:rgba(91,217,154,.42);color:#63e3a5;margin-left:auto}
+#dx .dx-go:hover{background:rgba(74,143,212,.32)}
+#dx .dx-csv:hover{background:rgba(91,217,154,.22)}
+#dx .dx-meta{font-size:13px;color:#93a0bd;margin:0 0 8px}
+#dx .dx-wrap{max-height:620px;overflow:auto;border:1px solid #26314e;border-radius:10px}
+#dx table{border-collapse:collapse;width:100%;font-size:14px}
+#dx thead th{position:sticky;top:0;z-index:2;background:#141d33;color:#aab6d4;font-size:12.5px;font-weight:700;
+  padding:10px 12px;text-align:left;border-bottom:2px solid #2f3c60;white-space:nowrap}
+#dx tbody td{padding:9px 12px;border-bottom:1px solid rgba(38,49,78,.55);color:#dbe3f4;
+  vertical-align:top;max-width:420px}
+#dx tbody tr:nth-child(even){background:rgba(255,255,255,.018)}
+#dx tbody tr:hover{background:rgba(74,143,212,.09)}
+#dx tbody td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+#dx tbody td a{color:#8fb4ff;text-decoration:none}
+#dx tbody td a:hover{text-decoration:underline}
+#dx .dx-page{display:flex;gap:8px;align-items:center;justify-content:center;padding:12px;font-size:13px;color:#93a0bd}
+#dx .dx-page button{background:rgba(255,255,255,.04);border:1px solid #26314e;color:#93a0bd;border-radius:6px;
+  padding:6px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+#dx .dx-page button:hover:not(:disabled){color:#8fb4ff;border-color:#3d5266}
+#dx .dx-page button:disabled{opacity:.35;cursor:default}
+#dx .dx-note{font-size:12.5px;color:#8490b0;margin-top:10px;line-height:1.75}
+#dx .dx-note b{color:#b9c4dd}
+</style>"""
+
+
+_DX_SCRIPT = """<script>
+var DX_DS='news', DX_OFF=0, DX_LIMIT=200, DX_TOTAL=0, DX_LABEL='';
+
+function dxEsc(s){ return String(s==null?'':s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function dxCards(){
+  fetch('/api/explore/summary').then(function(r){ return r.json(); }).then(function(d){
+    var el=document.getElementById('dx-cards');
+    el.innerHTML=(d.datasets||[]).map(function(x){
+      var span = x.from ? (x.from.slice(2)+' ~ '+x.to.slice(2)) : '기간 없음';
+      return '<div class="dx-card'+(x.key===DX_DS?' on':'')+'" data-k="'+x.key+'" onclick="dxPick(\\''+x.key+'\\')">'+
+             '<div class="n">'+dxEsc(x.label)+'</div>'+
+             '<div class="c">'+(x.count||0).toLocaleString()+'</div>'+
+             '<div class="s">'+span+'</div></div>';
+    }).join('');
+    dxLoad(0);
+  }).catch(function(){ document.getElementById('dx-meta').textContent='적재 현황을 불러오지 못했습니다.'; });
+}
+
+function dxPick(k){
+  DX_DS=k;
+  document.querySelectorAll('#dx .dx-card').forEach(function(c){ c.classList.toggle('on', c.dataset.k===k); });
+  dxLoad(0);
+}
+
+function dxSpan(days){
+  var f=document.getElementById('dx-from'), t=document.getElementById('dx-to');
+  if(!days){ f.value=''; t.value=''; dxLoad(0); return; }
+  var to=new Date(), from=new Date(to.getTime()-(days-1)*86400000);
+  var iso=function(d){ return d.toISOString().slice(0,10); };
+  f.value=iso(from); t.value=iso(to); dxLoad(0);
+}
+
+function dxParams(){
+  var p=new URLSearchParams({dataset:DX_DS});
+  var v;
+  if((v=document.getElementById('dx-from').value)) p.set('from', v);
+  if((v=document.getElementById('dx-to').value)) p.set('to', v);
+  if((v=document.getElementById('dx-brand').value.trim())) p.set('brand', v);
+  if((v=document.getElementById('dx-country').value.trim())) p.set('country', v);
+  return p;
+}
+
+function dxLoad(off){
+  DX_OFF=off||0;
+  var meta=document.getElementById('dx-meta');
+  meta.textContent='불러오는 중…';
+  var p=dxParams(); p.set('limit', DX_LIMIT); p.set('offset', DX_OFF);
+  fetch('/api/explore?'+p.toString()).then(function(r){ return r.json(); }).then(function(d){
+    if(d.error){ meta.textContent='오류: '+d.error; return; }
+    DX_TOTAL=d.total||0; DX_LABEL=d.label||'';
+    document.getElementById('dx-head').innerHTML =
+      '<tr>'+(d.cols||[]).map(function(c){ return '<th>'+dxEsc(c)+'</th>'; }).join('')+'</tr>';
+    document.getElementById('dx-body').innerHTML=(d.rows||[]).map(function(row){
+      return '<tr>'+row.map(function(v){
+        var s=String(v==null?'':v);
+        // 링크 칸은 눌러서 원문으로 갈 수 있게, 숫자 칸은 오른쪽 정렬로
+        if(/^https?:\\/\\//.test(s)) return '<td><a href="'+dxEsc(s)+'" target="_blank" rel="noopener">원문 →</a></td>';
+        var num = s!=='' && !isNaN(s) && s.indexOf('-')!==0;
+        return '<td'+(num?' class="num"':'')+'>'+dxEsc(s)+'</td>';
+      }).join('')+'</tr>';
+    }).join('');
+    var shown=(d.rows||[]).length;
+    meta.innerHTML = shown
+      ? '<b>'+dxEsc(DX_LABEL)+'</b> — 조건에 맞는 '+DX_TOTAL.toLocaleString()+'건 중 '+
+        (DX_OFF+1).toLocaleString()+'~'+(DX_OFF+shown).toLocaleString()+'번째 표시'
+      : '<b>'+dxEsc(DX_LABEL)+'</b> — 조건에 맞는 데이터가 없습니다. 기간이나 필터를 넓혀보세요.';
+    dxPager(shown);
+  }).catch(function(){ meta.textContent='조회에 실패했습니다. 잠시 후 다시 시도해 주세요.'; });
+}
+
+function dxPager(shown){
+  var hasPrev=DX_OFF>0, hasNext=(DX_OFF+shown)<DX_TOTAL;
+  document.getElementById('dx-page').innerHTML =
+    '<button onclick="dxLoad(Math.max(0,DX_OFF-DX_LIMIT))"'+(hasPrev?'':' disabled')+'>← 이전</button>'+
+    '<span>'+(DX_TOTAL?Math.floor(DX_OFF/DX_LIMIT)+1:0)+' / '+Math.max(1,Math.ceil(DX_TOTAL/DX_LIMIT))+' 쪽</span>'+
+    '<button onclick="dxLoad(DX_OFF+DX_LIMIT)"'+(hasNext?'':' disabled')+'>다음 →</button>';
+}
+
+function dxCsv(){ window.location.href='/api/explore/csv?'+dxParams().toString(); }
+
+// 탭을 처음 열 때만 불러온다 — 대시보드 첫 로딩을 무겁게 만들지 않으려고
+var DX_INIT=false;
+function dxInit(){ if(DX_INIT) return; DX_INIT=true; dxCards(); }
+['dx-brand','dx-country'].forEach(function(id){
+  var el=document.getElementById(id);
+  if(el) el.addEventListener('keydown', function(e){ if(e.key==='Enter') dxLoad(0); });
+});
+</script>"""
 
 
 _ALLCO_STYLE = """<style>

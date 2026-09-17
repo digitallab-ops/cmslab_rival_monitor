@@ -456,6 +456,104 @@ async def api_cell_insight(
     })
 
 
+# ── 데이터 탐색 API ──────────────────────────────────────────────────────────
+# 기획팀이 누적 데이터 전체를 기간·브랜드·국가로 직접 뒤져보고 엑셀로 받아가는 통로.
+# 조회 대상 테이블·컬럼은 analytics.queries.EXPLORE_DATASETS 화이트리스트에만 있고
+# 사용자 입력은 전부 바인딩 파라미터로 들어가므로 임의 SQL은 실행되지 않는다.
+
+_EXPLORE_MAX = 5000        # 화면 표시 상한
+_EXPLORE_CSV_MAX = 50000   # 내려받기 상한 — 엑셀이 감당하는 선
+
+
+def _explore_fetch(dataset: str, date_from: str, date_to: str,
+                   brand: str, country: str, limit: int, offset: int) -> dict:
+    from analytics.queries import explore_query
+    from storage.models import get_session
+    session = get_session()
+    try:
+        return explore_query(session, dataset, date_from=date_from, date_to=date_to,
+                             brand=brand, country=country, limit=limit, offset=offset)
+    finally:
+        session.close()
+
+
+@app.get("/api/explore")
+async def api_explore(dataset: str = Query("news"),
+                      from_date: str = Query("", alias="from"),
+                      to_date: str = Query("", alias="to"),
+                      brand: str = Query(""), country: str = Query(""),
+                      limit: int = Query(200), offset: int = Query(0)):
+    """데이터 탐색 — 화이트리스트 데이터셋을 기간·브랜드·국가로 조회."""
+    import re as _re
+    for d in (from_date, to_date):
+        if d and not _re.match(r"^\d{4}-\d{2}-\d{2}$", d):
+            return JSONResponse({"error": "날짜 형식 오류(YYYY-MM-DD)"}, status_code=400)
+    if from_date and to_date and from_date > to_date:
+        return JSONResponse({"error": "시작일이 종료일보다 늦습니다"}, status_code=400)
+    try:
+        data = await asyncio.to_thread(
+            _explore_fetch, dataset, from_date, to_date, brand[:60], country[:40],
+            max(1, min(limit, _EXPLORE_MAX)), max(0, offset))
+        return JSONResponse(data)
+    except Exception as e:
+        logger.warning("데이터 탐색 실패: %s", e)
+        return JSONResponse({"error": "조회 중 오류가 발생했습니다."}, status_code=500)
+
+
+@app.get("/api/explore/summary")
+async def api_explore_summary():
+    """데이터셋별 적재 현황(건수·기간) — 무엇이 얼마나 쌓였는지 한눈에."""
+    def _run():
+        from analytics.queries import explore_summary
+        from storage.models import get_session
+        session = get_session()
+        try:
+            return explore_summary(session)
+        finally:
+            session.close()
+    try:
+        return JSONResponse({"datasets": await asyncio.to_thread(_run)})
+    except Exception as e:
+        logger.warning("적재 현황 조회 실패: %s", e)
+        return JSONResponse({"datasets": []})
+
+
+@app.get("/api/explore/csv")
+async def api_explore_csv(dataset: str = Query("news"),
+                          from_date: str = Query("", alias="from"),
+                          to_date: str = Query("", alias="to"),
+                          brand: str = Query(""), country: str = Query("")):
+    """지금 보고 있는 조건 그대로 CSV로 내려받기(최대 5만 행)."""
+    import csv
+    import io
+    import re as _re
+    from fastapi.responses import StreamingResponse
+
+    for d in (from_date, to_date):
+        if d and not _re.match(r"^\d{4}-\d{2}-\d{2}$", d):
+            return JSONResponse({"error": "날짜 형식 오류(YYYY-MM-DD)"}, status_code=400)
+    try:
+        data = await asyncio.to_thread(
+            _explore_fetch, dataset, from_date, to_date, brand[:60], country[:40],
+            _EXPLORE_CSV_MAX, 0)
+    except Exception as e:
+        logger.warning("CSV 내려받기 실패: %s", e)
+        return JSONResponse({"error": "내려받기 중 오류가 발생했습니다."}, status_code=500)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(data.get("cols") or [])
+    for row in (data.get("rows") or []):
+        w.writerow(row)
+    # 엑셀이 UTF-8을 인식하려면 BOM이 필요하다 — 없으면 한글이 전부 깨진다
+    body = ("﻿" + buf.getvalue()).encode("utf-8")
+    span = f"_{from_date}_{to_date}" if (from_date or to_date) else ""
+    fname = f"{dataset}{span}.csv"
+    return StreamingResponse(
+        io.BytesIO(body), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
 # ── 로컬 실행 ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
