@@ -49,7 +49,6 @@ from analytics.queries import (
     get_pending_brand_candidates,
     get_brand_products_map,
     get_opportunity_stories,
-    get_nice_financials,
     get_brand_signal_summary,
     get_collection_stats_range,
     get_brand_insights_raw_by_range,
@@ -776,60 +775,6 @@ def _eok(thousands) -> str:
 
 
 _NICE_LISTED = {"동국제약(주)", "(주)파마리서치", "(주)클리오", "(주)브이티", "(주)에이피알"}
-
-
-def _render_financials_nice(fins: list) -> str:
-    """NICE BizLine 재무 — 브랜드별 매출·영업이익·광고비 2023~25(비상장 포함). 연 단위."""
-    if not fins:
-        return ('<p class="no-data">재무 데이터 없음 (NICE BizLine 적재 전 · '
-                'python -m signals.nice_financials)</p>')
-    YRS = [2023, 2024, 2025]
-    body = []
-    for f in fins:
-        yrs = f["years"]
-        company = f["company"]
-        listed = ('<span class="fin-tag fin-listed">상장</span>' if company in _NICE_LISTED
-                  else '<span class="fin-tag fin-unlisted">비상장</span>')
-        scope = ('<span class="fin-tag fin-single">단일브랜드</span>' if f["is_single_brand"]
-                 else '<span class="fin-whole">회사전체</span>')
-        # 매출 3개년 + 최신 YoY + 추이 스파크라인
-        rev = [yrs.get(y, {}).get("revenue") for y in YRS]
-        _rv = [float(v) for v in rev if v is not None]
-        _spk = f'<span class="fin-spark">{_sparkline_svg(_rv, w=58, h=18)}</span>' if len(_rv) >= 2 else ""
-        rev_cells = " → ".join(_eok(v) for v in rev) + (" " + _spk if _spk else "")
-        yoy_html = "—"
-        if rev[2] and rev[1]:
-            yoy = (rev[2] / rev[1] - 1) * 100
-            c = "#4ab884" if yoy >= 10 else ("#e05353" if yoy <= -5 else "var(--mid)")
-            yoy_html = f'<span style="color:{c}">{"+" if yoy >= 0 else ""}{yoy:.0f}%</span>'
-        # 영업이익'25 + OPM
-        op25 = yrs.get(2025, {}).get("op_income")
-        opm = (f'{op25 / rev[2] * 100:.0f}%' if op25 and rev[2] else "—")
-        # 광고비'25 + 매출대비
-        ad25 = yrs.get(2025, {}).get("ad_spend")
-        adr = (f'{ad25 / rev[2] * 100:.0f}%' if ad25 and rev[2] else "—")
-        body.append(
-            f'<tr><td class="fin-brand">{_esc(f["brand"])}</td>'
-            f'<td class="fin-corp">{_esc(company)} {listed}{scope}</td>'
-            f'<td class="fin-num fin-rev">{rev_cells}</td>'
-            f'<td class="fin-num">{yoy_html}</td>'
-            f'<td class="fin-num">{_eok(op25)} <span class="fin-sub">({opm})</span></td>'
-            f'<td class="fin-num">{_eok(ad25)} <span class="fin-sub">({adr})</span></td></tr>'
-        )
-    return (
-        '<div class="fin-basis">📅 기준: 연 결산 · 매출 2023~2025 · 영업이익·광고비 2025년 기준 '
-        '<span class="fin-basis-src">(NICE BizLine · 단위 억원)</span></div>'
-        '<div class="table-wrap"><table class="data-table fin-table">'
-        '<thead><tr><th>브랜드</th><th>운영사</th>'
-        '<th>매출 2023 → 2024 → 2025</th><th>매출 YoY</th>'
-        '<th>영업이익 2025 <span class="fin-sub">(이익률)</span></th>'
-        '<th>광고비 2025 <span class="fin-sub">(매출比)</span></th></tr></thead>'
-        f'<tbody>{"".join(body)}</tbody></table></div>'
-        '<div class="fin-note">※ NICE BizLine 산업경쟁현황(연 단위, 단위 억원). '
-        '‘회사전체’는 브랜드가 대기업 일부라 수치가 회사 전체(예: 구달=클리오, 센텔리안24=동국제약). '
-        '‘단일브랜드’는 회사≈브랜드(예: 아누아=더파운더즈). '
-        'Cos de Baha·b.plain·에스트라·제로이드는 NICE 미포함.</div>'
-    )
 
 
 def _render_rank_trends(history: list) -> str:
@@ -4977,7 +4922,6 @@ def _build_full_html(
     export_total_series: list = None,
     export_stacked: dict = None,
     growth_story: dict = None,
-    nice_financials: list = None,
     ingredient_trends: list = None,
     ingredient_intel: list = None,
     self_position: dict = None,
@@ -5037,7 +4981,6 @@ def _build_full_html(
     export_growth_html = _render_export_growth(export_growth or [], export_period or {}, export_stacked or {})
     growth_story_html  = _render_growth_story(growth_story or {})
     all_companies_html = _render_all_companies(all_companies or {}, dart_yoy or {})
-    financials_nice_html = _render_financials_nice(nice_financials or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
     self_position_html = _render_self_position(self_position or {})
@@ -5355,12 +5298,6 @@ def _build_full_html(
 
   <!-- ===== 탭: 재무 (NICE BizLine · 연 단위 · 비상장 포함) ===== -->
   <div class="tab-panel" id="tab-finance">
-    <div class="section">
-      <div class="section-title">
-        💰 재무 현황 <span class="section-sub">NICE BizLine 산업경쟁현황 · 매출·영업이익·광고비 (2023~2025, 연 단위) · 상장·비상장 통합</span>
-      </div>
-      {financials_nice_html}
-    </div>
     {all_companies_html}
   </div>
 
@@ -6112,12 +6049,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                           if _last_col else "")
         except Exception:
             brief_asof = ""
-        # NICE BizLine 재무(비상장 포함, 연 단위) — 재무 탭
-        try:
-            nice_financials = get_nice_financials(session)
-        except Exception:
-            nice_financials = []
-        # 기획팀 요구 — 전체 기업(화장품업 필터) + DART 최신 실적/YoY
+        # 재무 탭 — NICE BizLine 전체 기업(비상장 포함, 연 단위) + DART 최신 실적/YoY.
+        # 모니터링 브랜드 / 화장품업 / 전체를 한 표에서 전환하므로 조회도 한 번이면 된다.
         try:
             all_companies = get_all_company_financials(session)
             dart_yoy = get_dart_yoy(session)
@@ -6433,7 +6366,6 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         export_total_series=export_total_series,
         export_stacked=export_stacked,
         growth_story=growth_story,
-        nice_financials=nice_financials,
         ingredient_trends=ingredient_trends,
         ingredient_intel=ingredient_intel,
         self_position=self_position,
@@ -6705,6 +6637,14 @@ _ALLCO_STYLE = """<style>
 #allco .ac-sub{display:block;font-size:12px;color:#8490b0;font-weight:400;margin-top:3px}
 #allco .ac-brand{display:block;font-size:12.5px;color:#8fb4ff;font-weight:500;margin-top:4px;
   max-width:300px;white-space:normal;line-height:1.45}
+#allco .ac-mon{font-size:15.5px;font-weight:700;color:#ffffff}
+#allco .ac-co{font-size:12.5px;color:#8490b0;font-weight:500;margin-left:7px}
+#allco .ac-tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;
+  border-radius:4px;margin-left:5px;vertical-align:middle}
+#allco .ac-listed{background:rgba(91,217,154,.14);color:#63e3a5}
+#allco .ac-single{background:rgba(74,143,212,.16);color:#8fb4ff}
+#allco .ac-whole{background:rgba(255,255,255,.06);color:#8490b0}
+#allco .ac-pct{font-size:11.5px;color:#8490b0;font-weight:400}
 #allco thead th .ac-sub{color:#6b769a;font-weight:600;font-size:11.5px}
 #allco td.ac-dcol{background:rgba(224,173,74,.06)}
 #allco th.ac-dcol{background:#1b2440;color:#e6c179}
@@ -6744,6 +6684,9 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
         payload.append({
             "c": r["company"], "i": (r["industry"] or "")[:24], "k": 1 if r["cosmetic"] else 0,
             "b": (r.get("brands") or "")[:90],
+            # m: 모니터링 중인 경쟁 브랜드 / s: 회사≈브랜드 / l: 상장
+            "m": r.get("matched") or "", "s": 1 if r.get("single") else 0,
+            "l": 1 if (r["company"] in _NICE_LISTED or dart_by_corp.get(_norm_co(r["company"]))) else 0,
             "r": [r["rev"].get(y) for y in years],
             "o": [r["op"].get(y) for y in years],
             "a": [r["ad"].get(y) for y in years],
@@ -6757,18 +6700,21 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
                     for i, y in enumerate(years))
     last_y = years[-1] if years else ""
     n_cos = sum(1 for r in rows if r["cosmetic"])
+    n_mon = sum(1 for r in rows if r.get("matched"))
     # 안내 문구의 커버리지는 하드코딩하지 않는다 — 태그가 늘면 문구가 거짓이 된다
     top100 = sorted((r for r in rows if r["cosmetic"]),
                     key=lambda r: -(r["rev"].get(last_y) or 0))[:100]
     n_tag100 = sum(1 for r in top100 if r.get("brands"))
     return (_ALLCO_STYLE + f'''
     <div class="section" id="allco">
-      <div class="section-title">🏢 전체 기업 재무 <span class="section-sub">
-        NICE BizLine 적재분 — 화장품업 {n_cos:,}개사 / 전체 {len(rows):,}개사 · 회사명 검색·열 클릭 정렬</span></div>
+      <div class="section-title">💰 재무 현황 <span class="section-sub">
+        모니터링 브랜드 {n_mon}개 · 화장품업 {n_cos:,}개사 · 전체 {len(rows):,}개사 —
+        NICE BizLine 연 결산(비상장 포함) + DART 최신 공시 · 브랜드/회사명 검색·열 클릭 정렬</span></div>
       <div class="ac-bar">
         <div class="ac-tog">
-          <button id="ac-cos" class="on" onclick="acSetCos(1)">화장품업만</button>
-          <button id="ac-all" onclick="acSetCos(0)">전체 기업</button>
+          <button id="ac-mon" class="on" onclick="acSetScope('mon')">모니터링 브랜드</button>
+          <button id="ac-cos" onclick="acSetScope('cos')">화장품업 전체</button>
+          <button id="ac-all" onclick="acSetScope('all')">전체 기업</button>
         </div>
         <input class="ac-q" id="ac-q" placeholder="회사명·브랜드명 검색 (예: 아모레, 설화수, 아누아)" oninput="acRender()">
         <span class="ac-meta" id="ac-meta"></span>
@@ -6777,9 +6723,9 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
         예를 들어 <b>26,537</b>은 2조 6,537억원(≈ 2,653,700,000,000원)이다.</div>
       <div class="ac-wrap">
         <table><thead><tr>
-          <th data-k="c">회사</th><th data-k="i">업종</th>{yhead}
-          <th data-k="o">{last_y} 영업이익<span class="ac-sub">억원</span></th>
-          <th data-k="a">{last_y} 광고비<span class="ac-sub">억원</span></th>
+          <th data-k="c">브랜드 · 회사</th><th data-k="i">업종</th>{yhead}
+          <th data-k="o">{last_y} 영업이익<span class="ac-sub">억원 (이익률)</span></th>
+          <th data-k="a">{last_y} 광고비<span class="ac-sub">억원 (매출비)</span></th>
           <th data-k="v" class="ac-dcol">최신 실적<span class="ac-sub">억원 · DART 공시</span></th>
           <th data-k="g" class="ac-dcol">전년 같은 기간 대비<span class="ac-sub">성장률</span></th>
         </tr></thead><tbody id="ac-body"></tbody></table>
@@ -6794,10 +6740,15 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
         <b>연결</b>인 경우가 많다(칸 안에 표기). 지주·해외법인을 거느린 회사일수록 오른쪽이 크게 나오므로
         두 숫자를 직접 빼서 증감으로 읽으면 안 된다.<br>
         회사명 아래 <b style="color:#8fb4ff">파란 글씨</b>는 그 회사의 대표 브랜드로, NICE 원본에 기재된 것만 표시한다
-        (화장품업 매출 상위 100개사 중 {n_tag100}개사). 확인되지 않은 회사는 <b>추측하지 않고 비워둔다</b>.</p>
+        (화장품업 매출 상위 100개사 중 {n_tag100}개사). 확인되지 않은 회사는 <b>추측하지 않고 비워둔다</b>.<br>
+        <b class="ac-tag ac-single">회사=브랜드</b>는 회사 수치가 곧 그 브랜드다(아누아=더파운더즈).
+        <b class="ac-tag ac-whole">회사전체</b>는 브랜드가 대기업의 일부라 <b>회사 전체 수치</b>이니
+        브랜드 실적으로 읽으면 안 된다(구달=클리오, 센텔리안24=동국제약).
+        Cos de Baha·b.plain·에스트라·제로이드는 NICE 미포함이다.</p>
     </div>
     <script>
-    var AC_DATA={js}, AC_YEARS={json.dumps(years)}, AC_COS=1, AC_LIMIT=60, AC_SORT='r{max(len(years)-1,0)}', AC_DESC=true;
+    var AC_DATA={js}, AC_YEARS={json.dumps(years)}, AC_SCOPE='mon', AC_LIMIT=60,
+        AC_SORT='r{max(len(years)-1,0)}', AC_DESC=true;
     // 원본에 음수 광고비·음수 영업이익이 실제로 섞여 있다. 억원으로 반올림하면 -0.5억이
     // '-0'으로 찍혀 옆 칸의 '—'(결측)와 구분이 안 된다. 억 미만은 소수 1자리를 살려
     // 적자인지 결측인지 바로 읽히게 한다. 정확히 0일 때만 '0'.
@@ -6812,16 +6763,19 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
     // 분기 보고서는 '연초부터 누적'이라 몇 월까지인지 적어줘야 오해가 없다
     var AC_SPAN={{'1분기':'1~3월 누적','상반기':'1~6월 누적','3분기누적':'1~9월 누적','연간':'연간(1~12월)'}};
     function acSpan(p){{ return AC_SPAN[p]||p; }}
-    function acSetCos(v){{ AC_COS=v; AC_LIMIT=60;
-      document.getElementById('ac-cos').className=v?'on':'';
-      document.getElementById('ac-all').className=v?'':'on'; acRender(); }}
+    function acSetScope(v){{ AC_SCOPE=v; AC_LIMIT=(v==='mon')?999:60;
+      ['mon','cos','all'].forEach(function(k){{
+        document.getElementById('ac-'+k).className=(k===v)?'on':''; }});
+      acRender(); }}
     function acMore(){{ AC_LIMIT+=100; acRender(); }}
     function acRender(){{
       var q=(document.getElementById('ac-q').value||'').trim().toLowerCase();
       var list=AC_DATA.filter(function(r){{
-        if(AC_COS && !r.k) return false;
-        // 회사명이 낯설어도 브랜드명('설화수')으로 찾을 수 있어야 한다
-        if(q && r.c.toLowerCase().indexOf(q)<0 && (r.b||'').toLowerCase().indexOf(q)<0) return false;
+        if(AC_SCOPE==='mon' && !r.m) return false;      // 우리가 추적 중인 경쟁 브랜드만
+        if(AC_SCOPE==='cos' && !r.k) return false;      // 화장품업 해당 기업
+        // 회사명이 낯설어도 브랜드명('설화수','Anua')으로 찾을 수 있어야 한다
+        if(q && r.c.toLowerCase().indexOf(q)<0 && (r.b||'').toLowerCase().indexOf(q)<0
+             && (r.m||'').toLowerCase().indexOf(q)<0) return false;
         return true; }});
       var si=AC_SORT;
       list.sort(function(a,b){{
@@ -6840,7 +6794,10 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
         // 맨 오른쪽 = 최신 연도 매출. 표를 훑는 기준값이라 밝게 세운다
         var tds=r.r.map(function(v,i){{
           return '<td'+(i===r.r.length-1?' class="ac-lead"':'')+'>'+acFmt(v)+'</td>'; }}).join('');
-        var op=r.o[r.o.length-1], ad=r.a[r.a.length-1];
+        var op=r.o[r.o.length-1], ad=r.a[r.a.length-1], rv=r.r[r.r.length-1];
+        // 기존 브랜드별 표에 있던 이익률·매출대비를 그대로 흡수 — 금액만으론 규모 비교가 안 된다
+        var pct=function(v){{ return (v!==null&&v!==undefined&&rv)?
+          '<span class="ac-pct">'+Math.round(v/rv*100)+'%</span>':''; }};
         var dv='<td class="ac-dcol">—</td><td class="ac-dcol">—</td>';
         if(r.d){{
           // 좌: 이번 실적이 '언제 것'인지, 우: '무엇 대비'인지를 각각 칸 안에 적는다
@@ -6854,9 +6811,16 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
           }}
           dv='<td class="ac-dcol">'+cur+'</td><td class="ac-dcol">'+cmp+'</td>';
         }}
-        var co=r.c+(r.b?'<span class="ac-brand">'+r.b+'</span>':'');
+        // 모니터링 브랜드는 브랜드명을 앞세운다 — 기획팀이 회사명보다 브랜드로 기억한다
+        var head = r.m
+          ? '<span class="ac-mon">'+r.m+'</span><span class="ac-co">'+r.c+'</span>'
+          : r.c;
+        var tag = (r.l?'<span class="ac-tag ac-listed">상장</span>':'')
+                + (r.m ? (r.s?'<span class="ac-tag ac-single">회사=브랜드</span>'
+                             :'<span class="ac-tag ac-whole">회사전체</span>') : '');
+        var co = head + tag + (r.b?'<span class="ac-brand">'+r.b+'</span>':'');
         return '<tr><td>'+co+'</td><td>'+r.i+'</td>'+tds+
-               '<td>'+acFmt(op)+'</td><td>'+acFmt(ad)+'</td>'+dv+'</tr>'; }}).join('');
+               '<td>'+acFmt(op)+' '+pct(op)+'</td><td>'+acFmt(ad)+' '+pct(ad)+'</td>'+dv+'</tr>'; }}).join('');
       document.getElementById('ac-meta').textContent=list.length.toLocaleString()+'개사 중 '+shown.length+'개 표시';
       document.getElementById('ac-more').textContent = list.length>AC_LIMIT ? ('+ 더 보기 ('+(list.length-AC_LIMIT).toLocaleString()+'개 남음)') : '';
     }}

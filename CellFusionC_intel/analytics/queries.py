@@ -2978,13 +2978,22 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
     # 회사명만 있으면 기획팀이 어느 회사인지 모른다 → 대표 브랜드를 같이 보여준다.
     # 출처는 NICE 원본 엑셀의 태그 시트뿐이다(109개사). LLM 추정은 오답률이 높아 쓰지 않는다 —
     # 모르는 회사는 빈칸으로 두는 편이 틀린 브랜드를 띄우는 것보다 낫다.
+    # matched: 우리가 모니터링하는 경쟁 브랜드명(있으면 그 회사가 추적 대상).
+    # single: 회사≈브랜드인지(아누아=더파운더즈) 아니면 회사 전체 수치인지(구달=클리오).
     brands: dict = {}
+    matched: dict = {}
+    single: dict = {}
     try:
-        for co, bt in session.execute(text(
-                f"SELECT company, brand_tags FROM {DB_SCHEMA}.nice_company_brands "
-                f"WHERE COALESCE(brand_tags,'') <> ''")).fetchall():
-            brands.setdefault(co, (bt or "").strip())
+        for co, bt, mb, sb in session.execute(text(
+                f"SELECT company, brand_tags, matched_brands, is_single_brand "
+                f"FROM {DB_SCHEMA}.nice_company_brands")).fetchall():
+            if (bt or "").strip():
+                brands.setdefault(co, bt.strip())
+            if (mb or "").strip():
+                matched.setdefault(co, mb.strip())
+                single.setdefault(co, bool(sb))
     except Exception as e:
+        session.rollback()
         logger.warning("기업 브랜드 태그 조회 실패: %s", e)
 
     _M = {"매출액": "rev", "영업이익": "op", "광고비": "ad"}
@@ -2999,6 +3008,8 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
                            {"company": company, "industry": industry or "",
                             "cosmetic": bool(cosmetic),
                             "brands": brands.get(company, ""),
+                            "matched": matched.get(company, ""),
+                            "single": single.get(company, False),
                             "rev": {}, "op": {}, "ad": {}})
         o[key][int(year)] = int(amount)
     ys = sorted(years)
