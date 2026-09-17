@@ -4,6 +4,7 @@
 모든 함수는 SQLAlchemy Session을 받아 순수 Python dict/list를 반환.
 """
 
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -11,6 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from config.settings import DB_SCHEMA
+
+logger = logging.getLogger(__name__)
 
 try:
     from config.brands import COUNTRIES as _COUNTRIES
@@ -2950,7 +2953,8 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
     기존 get_nice_financials는 우리 모니터링 브랜드와 매칭된 회사만 반환해 전체 시장을
     볼 수 없었다. 여기서는 적재된 7천여 개사를 연도×지표로 피벗해 그대로 돌려준다.
     (단위: 원본 그대로. 화장품업 해당 여부는 is_cosmetic 플래그로 필터)
-    반환: {years:[...], rows:[{company, industry, cosmetic, rev:{yr:amt}, op:{yr:amt}, ad:{yr:amt}}]}
+    반환: {years:[...], rows:[{company, industry, cosmetic, brands,
+                               rev:{yr:amt}, op:{yr:amt}, ad:{yr:amt}}]}
     """
     try:
         where = "WHERE is_cosmetic" if cosmetic_only else ""
@@ -2965,6 +2969,18 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
         logger.warning("전체 기업 재무 조회 실패: %s", e)
         return {"years": [], "rows": []}
 
+    # 회사명만 있으면 기획팀이 어느 회사인지 모른다 → 대표 브랜드를 같이 보여준다.
+    # 출처는 NICE 원본 엑셀의 태그 시트뿐이다(109개사). LLM 추정은 오답률이 높아 쓰지 않는다 —
+    # 모르는 회사는 빈칸으로 두는 편이 틀린 브랜드를 띄우는 것보다 낫다.
+    brands: dict = {}
+    try:
+        for co, bt in session.execute(text(
+                f"SELECT company, brand_tags FROM {DB_SCHEMA}.nice_company_brands "
+                f"WHERE COALESCE(brand_tags,'') <> ''")).fetchall():
+            brands.setdefault(co, (bt or "").strip())
+    except Exception as e:
+        logger.warning("기업 브랜드 태그 조회 실패: %s", e)
+
     _M = {"매출액": "rev", "영업이익": "op", "광고비": "ad"}
     acc: dict = {}
     years: set = set()
@@ -2974,7 +2990,9 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
             continue
         years.add(int(year))
         o = acc.setdefault(company, {"company": company, "industry": industry or "",
-                                     "cosmetic": bool(cosmetic), "rev": {}, "op": {}, "ad": {}})
+                                     "cosmetic": bool(cosmetic),
+                                     "brands": brands.get(company, ""),
+                                     "rev": {}, "op": {}, "ad": {}})
         o[key][int(year)] = int(amount)
     ys = sorted(years)
     out = list(acc.values())
@@ -3012,4 +3030,115 @@ def get_dart_yoy(session: Session) -> dict:
                       "revenue": int(rev), "prev": int(prev) if prev else None,
                       "yoy": round(yoy, 1) if yoy is not None else None,
                       "op": int(op) if op else None}
+    return out
+
+
+# ── 데이터 탐색(기획팀 전체 조회) ───────────────────────────────────────────
+# 누적 데이터를 한 곳에서 기간·브랜드·국가로 걸러 보고 CSV로 받기 위한 화이트리스트.
+# 사용자 입력이 SQL에 직접 들어가지 않도록 테이블·컬럼은 여기 정의된 것만 허용한다.
+EXPLORE_DATASETS = {
+    "news": {
+        "label": "뉴스·활동", "table": "news_articles", "date": "published_date",
+        "cols": [("published_date::date::text", "날짜"), ("brand", "브랜드"), ("country", "국가"),
+                 ("activity_type", "활동유형"), ("importance", "중요도"),
+                 ("COALESCE(NULLIF(title_ko,''), title)", "제목"), ("channel", "채널"),
+                 ("product_name", "제품"), ("source_url", "링크")],
+        "brand": "brand", "country": "country",
+        "where": "is_duplicate IS NOT TRUE AND is_self IS NOT TRUE",
+    },
+    "retail": {
+        "label": "아마존 순위", "table": "retail_rankings", "date": "capture_date",
+        "cols": [("capture_date::text", "날짜"), ("brand", "브랜드"), ("country", "국가"),
+                 ("category", "카테고리"), ("rank", "순위"), ("product_name", "제품"),
+                 ("review_count", "리뷰수"), ("rating", "별점")],
+        "brand": "brand", "country": "country", "where": "is_monitored",
+    },
+    "oliveyoung": {
+        "label": "올리브영 순위", "table": "oliveyoung_rankings", "date": "capture_date",
+        "cols": [("capture_date::text", "날짜"), ("brand", "브랜드"), ("category", "카테고리"),
+                 ("rank_position", "순위"), ("goods_name", "제품")],
+        "brand": "brand", "country": None, "where": "",
+    },
+    "export": {
+        "label": "수출(관세청)", "table": "export_stats", "date": "period",
+        "cols": [("period::text", "기간"), ("country_name", "국가"), ("hs_cd", "HS코드"),
+                 ("exp_usd", "수출액USD")],
+        "brand": None, "country": "country_code", "where": "",
+    },
+    "finance": {
+        "label": "재무(NICE)", "table": "nice_financials", "date": None,
+        "cols": [("year::text", "연도"), ("company", "회사"), ("industry_name", "업종"),
+                 ("metric", "지표"), ("amount", "금액(천원)"), ("is_cosmetic", "화장품업")],
+        "brand": None, "country": None, "where": "",
+    },
+    "social": {
+        "label": "소셜(유튜브)", "table": "social_metrics", "date": "captured_date",
+        "cols": [("captured_date::text", "날짜"), ("platform", "플랫폼"), ("brand", "브랜드"),
+                 ("metric", "지표"), ("value", "값"), ("meta", "비고")],
+        "brand": "brand", "country": None, "where": "",
+    },
+    "trademark": {
+        "label": "해외 상표", "table": "trademark_filings", "date": "app_date",
+        "cols": [("app_date::text", "출원일"), ("brand", "브랜드"), ("country", "국가"),
+                 ("mark_name", "상표명"), ("applicant", "출원인"),
+                 ("cls_code", "분류"), ("reg_date::text", "등록일")],
+        "brand": "brand", "country": "country", "where": "is_own IS NOT TRUE",
+    },
+}
+
+
+def explore_query(session: Session, dataset: str, date_from: str = "", date_to: str = "",
+                  brand: str = "", country: str = "", limit: int = 500,
+                  offset: int = 0) -> dict:
+    """데이터 탐색 — 화이트리스트 기반 안전 조회. 반환 {cols, rows, total, label}."""
+    spec = EXPLORE_DATASETS.get(dataset)
+    if not spec:
+        return {"cols": [], "rows": [], "total": 0, "label": "", "error": "알 수 없는 데이터셋"}
+    conds, params = [], {}
+    if spec["where"]:
+        conds.append(spec["where"])
+    if spec["date"] and date_from:
+        conds.append(f"{spec['date']} >= :df"); params["df"] = date_from
+    if spec["date"] and date_to:
+        conds.append(f"{spec['date']} <= :dt"); params["dt"] = date_to + " 23:59:59"
+    if spec["brand"] and brand:
+        conds.append(f"{spec['brand']} ILIKE :b"); params["b"] = f"%{brand}%"
+    if spec["country"] and country:
+        conds.append(f"{spec['country']} ILIKE :c"); params["c"] = f"%{country}%"
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    sel = ", ".join(f"{expr} AS c{i}" for i, (expr, _lbl) in enumerate(spec["cols"]))
+    order = f"ORDER BY {spec['date']} DESC" if spec["date"] else "ORDER BY 1 DESC"
+    try:
+        total = session.execute(text(
+            f"SELECT count(*) FROM {DB_SCHEMA}.{spec['table']} {where}"), params).scalar() or 0
+        params.update({"lim": max(1, min(int(limit), 5000)), "off": max(0, int(offset))})
+        rows = session.execute(text(
+            f"SELECT {sel} FROM {DB_SCHEMA}.{spec['table']} {where} {order} "
+            f"LIMIT :lim OFFSET :off"), params).fetchall()
+    except Exception as e:
+        logger.warning("데이터 탐색 실패 [%s]: %s", dataset, e)
+        return {"cols": [], "rows": [], "total": 0, "label": spec["label"], "error": str(e)[:120]}
+    return {"cols": [lbl for _e, lbl in spec["cols"]],
+            "rows": [[("" if v is None else v) for v in r] for r in rows],
+            "total": int(total), "label": spec["label"]}
+
+
+def explore_summary(session: Session) -> list:
+    """데이터셋별 적재 현황(건수·기간) — '전체 흐름'을 한눈에."""
+    out = []
+    for key, spec in EXPLORE_DATASETS.items():
+        try:
+            if spec["date"]:
+                r = session.execute(text(
+                    f"SELECT count(*), MIN({spec['date']})::date::text, MAX({spec['date']})::date::text "
+                    f"FROM {DB_SCHEMA}.{spec['table']}")).fetchone()
+                out.append({"key": key, "label": spec["label"], "count": int(r[0] or 0),
+                            "from": r[1] or "", "to": r[2] or ""})
+            else:
+                n = session.execute(text(
+                    f"SELECT count(*) FROM {DB_SCHEMA}.{spec['table']}")).scalar()
+                out.append({"key": key, "label": spec["label"], "count": int(n or 0),
+                            "from": "", "to": ""})
+        except Exception:
+            out.append({"key": key, "label": spec["label"], "count": 0, "from": "", "to": ""})
     return out

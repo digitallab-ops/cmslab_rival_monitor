@@ -594,12 +594,14 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # 매월 4일 06:40 KST — DART 경쟁사 재무(성과 신호). 수출통계(3일) 다음날.
+    # 매월 4일·19일 06:40 KST — DART 경쟁사 재무(성과 신호). 수출통계(3일) 다음날.
+    # 19일을 함께 도는 이유: 분기보고서 법정기한이 분기말+45일(11/14, 5/15 등)이라
+    # 4일만 돌면 최대 3주 늦게 잡힌다. 19일을 끼우면 지연이 닷새로 줄어든다.
     scheduler.add_job(
         job_dart_financials,
-        trigger=CronTrigger(day=4, hour=6, minute=40),
+        trigger=CronTrigger(day="4,19", hour=6, minute=40),
         id="dart_financials",
-        name="[월간] DART 경쟁사 재무 수집",
+        name="[월2회] DART 경쟁사 재무 수집",
         max_instances=1,
         coalesce=True,
     )
