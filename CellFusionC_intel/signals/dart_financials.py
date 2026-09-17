@@ -110,13 +110,21 @@ def _resolve(cands: list[str], idx: dict) -> "tuple[str, str, str] | None":
     return None
 
 
-def _fetch_financials(corp_code: str, year: int) -> "dict | None":
-    """연간 재무(연결 우선, 없으면 별도). 반환 {revenue, op_income, net_income} 또는 None."""
+# 보고서 코드 — 분기 누적(당해 1월부터). 연간이 아직 없는 해는 최신 분기 누적으로 비교한다.
+# 주의: 누적 기준이므로 YoY는 반드시 '같은 reprt_code끼리' 비교해야 한다
+# (2026 반기 vs 2025 반기). 연간(11011)과 반기를 섞으면 성장률이 엉터리가 된다.
+REPRT = {"11013": "1분기", "11012": "반기", "11014": "3분기", "11011": "연간"}
+_REPRT_ORDER = ["11011", "11014", "11012", "11013"]   # 최신성 우선순위(연간 > 3Q > 반기 > 1Q)
+
+
+def _fetch_financials(corp_code: str, year: int, reprt_code: str = "11011") -> "dict | None":
+    """재무(연결 우선, 없으면 별도). reprt_code로 연간/분기누적 선택.
+    반환 {revenue, op_income, net_income, fs_div, reprt_code} 또는 None."""
     for fs_div in ("CFS", "OFS"):        # 연결 → 별도
         try:
             r = requests.get(_FIN_URL, params={
                 "crtfc_key": _key(), "corp_code": corp_code,
-                "bsns_year": str(year), "reprt_code": "11011", "fs_div": fs_div,
+                "bsns_year": str(year), "reprt_code": reprt_code, "fs_div": fs_div,
             }, timeout=30)
             data = r.json()
         except Exception as e:
@@ -136,7 +144,18 @@ def _fetch_financials(corp_code: str, year: int) -> "dict | None":
                 pass
         if out.get("revenue"):
             out["fs_div"] = fs_div
+            out["reprt_code"] = reprt_code
             return out
+    return None
+
+
+def _fetch_latest(corp_code: str, year: int) -> "dict | None":
+    """해당 연도의 '가장 최신 확보 가능한' 실적 — 연간이 없으면 3분기→반기→1분기 누적 순.
+    올해처럼 사업보고서가 아직 안 나온 해도 비교 가능한 값을 얻는다."""
+    for rc in _REPRT_ORDER:
+        fin = _fetch_financials(corp_code, year, rc)
+        if fin:
+            return fin
     return None
 
 
@@ -155,9 +174,23 @@ def _ensure_table(session) -> None:
             op_income BIGINT,
             net_income BIGINT,
             fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            UNIQUE(brand, bsns_year)
+            reprt_code VARCHAR(8) DEFAULT '11011',
+            UNIQUE(brand, bsns_year, reprt_code)
         )
     """))
+    # 기존 테이블 마이그레이션 — 컬럼 추가 + UNIQUE 키를 (brand,year,reprt) 로 교체.
+    # 연간만 담던 시절의 UNIQUE(brand,bsns_year)가 남아 있으면 분기 누적이 연간을 덮어쓴다.
+    try:
+        session.execute(text(f"ALTER TABLE {DB_SCHEMA}.competitor_financials "
+                             f"ADD COLUMN IF NOT EXISTS reprt_code VARCHAR(8) DEFAULT '11011'"))
+        session.execute(text(f"UPDATE {DB_SCHEMA}.competitor_financials "
+                             f"SET reprt_code='11011' WHERE reprt_code IS NULL"))
+        session.execute(text(f"ALTER TABLE {DB_SCHEMA}.competitor_financials "
+                             f"DROP CONSTRAINT IF EXISTS competitor_financials_brand_bsns_year_key"))
+        session.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS ux_compfin_brand_year_reprt "
+                             f"ON {DB_SCHEMA}.competitor_financials (brand, bsns_year, reprt_code)"))
+    except Exception as e:
+        logger.warning("competitor_financials 마이그레이션 스킵: %s", e)
     session.commit()
 
 
@@ -165,16 +198,17 @@ def _save(session, brand, meta, year, fin) -> None:
     session.execute(text(f"""
         INSERT INTO {DB_SCHEMA}.competitor_financials
             (brand, corp_name, corp_code, stock_code, is_brand_level,
-             bsns_year, fs_div, revenue, op_income, net_income)
-        VALUES (:b, :cn, :cc, :sc, :bl, :yr, :fd, :rev, :op, :net)
-        ON CONFLICT (brand, bsns_year) DO UPDATE SET
+             bsns_year, fs_div, revenue, op_income, net_income, reprt_code)
+        VALUES (:b, :cn, :cc, :sc, :bl, :yr, :fd, :rev, :op, :net, :rc)
+        ON CONFLICT (brand, bsns_year, reprt_code) DO UPDATE SET
             revenue = EXCLUDED.revenue, op_income = EXCLUDED.op_income,
             net_income = EXCLUDED.net_income, fs_div = EXCLUDED.fs_div,
             corp_name = EXCLUDED.corp_name, fetched_at = NOW()
     """), {"b": brand, "cn": meta["corp_name"], "cc": meta["corp_code"],
            "sc": meta["stock_code"], "bl": meta["brand_level"], "yr": year,
            "fd": fin.get("fs_div"), "rev": fin.get("revenue"),
-           "op": fin.get("op_income"), "net": fin.get("net_income")})
+           "op": fin.get("op_income"), "net": fin.get("net_income"),
+           "rc": fin.get("reprt_code", "11011")})
     session.commit()
 
 
@@ -188,6 +222,8 @@ def run(years: int = 3) -> dict:
     idx = _load_corp_index()
     logger.info("corpCode 로드: 법인 %d개", len(idx))
     cur_year = datetime.utcnow().year
+    # 연간(확정) 3년 + 올해·작년의 '최신 분기 누적'까지. 올해는 사업보고서가 아직 없으므로
+    # 분기 누적을 잡고, 같은 분기의 작년 값도 함께 받아 동일 기간 YoY가 가능하게 한다.
     target_years = list(range(cur_year - 1, cur_year - 1 - years, -1))  # 전년부터 역순
 
     resolved, saved, unmatched, no_data = 0, 0, [], []
@@ -209,13 +245,29 @@ def run(years: int = 3) -> dict:
             meta = {"corp_name": corp_name, "corp_code": corp_code,
                     "stock_code": stock_code, "brand_level": spec["brand_level"]}
             got_any = False
-            for yr in target_years:
-                fin = _fetch_financials(corp_code, yr)
+            for yr in target_years:                      # 확정 연간
+                fin = _fetch_financials(corp_code, yr, "11011")
                 if fin:
                     _save(session, brand, meta, yr, fin)
                     saved += 1
                     got_any = True
                 time.sleep(0.15)          # API 예의(초당 제한 회피)
+            # 올해 최신 분기 누적 + 같은 분기의 작년 값(동일 기간 YoY용)
+            cur = _fetch_latest(corp_code, cur_year)
+            if cur:
+                _save(session, brand, meta, cur_year, cur)
+                saved += 1
+                got_any = True
+                rc = cur.get("reprt_code", "11011")
+                prev = None
+                if rc != "11011":         # 연간이면 위에서 이미 받음
+                    prev = _fetch_financials(corp_code, cur_year - 1, rc)
+                    if prev:
+                        _save(session, brand, meta, cur_year - 1, prev)
+                        saved += 1
+                logger.info("     %d년 %s 확보(전년 동기 %s)", cur_year,
+                            REPRT.get(rc, rc), "O" if (rc == "11011" or prev) else "X")
+            time.sleep(0.15)
             tag = "상장" if stock_code else "비상장"
             logger.info("  ✓ %-18s → %s(%s) %s%s", brand, corp_name, tag,
                         "데이터 O" if got_any else "데이터 X",
