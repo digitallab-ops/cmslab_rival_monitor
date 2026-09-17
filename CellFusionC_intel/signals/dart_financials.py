@@ -137,7 +137,14 @@ def _fetch_financials(corp_code: str, year: int, reprt_code: str = "11011") -> "
             key = _ACCOUNTS.get((row.get("account_nm") or "").strip())
             if not key or key in out:
                 continue
-            amt = (row.get("thstrm_amount") or "").replace(",", "").strip()
+            # 분기·반기 보고서의 손익계산서에서 thstrm_amount는 '당기 3개월' 단독이고,
+            # 연초부터의 누적은 thstrm_add_amount다. 연간 보고서는 add가 없고 thstrm이
+            # 곧 연간치라 티가 안 나지만, 분기에서 thstrm을 쓰면 반기가 2분기 단독으로
+            # 저장돼 실제의 절반이 된다(아모레 2025 반기 1.0조 vs 실제 누적 2.07조).
+            raw = row.get("thstrm_add_amount") if reprt_code != "11011" else None
+            if not (raw or "").strip():
+                raw = row.get("thstrm_amount")
+            amt = (raw or "").replace(",", "").strip()
             try:
                 out[key] = int(amt)
             except ValueError:
@@ -284,7 +291,10 @@ def run(years: int = 3) -> dict:
 
 
 if __name__ == "__main__":
+    import sys
+
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
     logging.basicConfig(level=logging.INFO)
+    sys.stdout.reconfigure(encoding="utf-8")   # 윈도우 콘솔(cp1252)에서 한글 출력 깨짐 방지
     print(run())

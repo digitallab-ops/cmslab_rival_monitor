@@ -466,13 +466,15 @@ _EXPLORE_CSV_MAX = 50000   # 내려받기 상한 — 엑셀이 감당하는 선
 
 
 def _explore_fetch(dataset: str, date_from: str, date_to: str,
-                   brand: str, country: str, limit: int, offset: int) -> dict:
+                   brand: str, country: str, limit: int, offset: int,
+                   max_rows: int = _EXPLORE_MAX) -> dict:
     from analytics.queries import explore_query
     from storage.models import get_session
     session = get_session()
     try:
         return explore_query(session, dataset, date_from=date_from, date_to=date_to,
-                             brand=brand, country=country, limit=limit, offset=offset)
+                             brand=brand, country=country, limit=limit, offset=offset,
+                             max_rows=max_rows)
     finally:
         session.close()
 
@@ -522,36 +524,81 @@ async def api_explore_summary():
 async def api_explore_csv(dataset: str = Query("news"),
                           from_date: str = Query("", alias="from"),
                           to_date: str = Query("", alias="to"),
-                          brand: str = Query(""), country: str = Query("")):
-    """지금 보고 있는 조건 그대로 CSV로 내려받기(최대 5만 행)."""
+                          brand: str = Query(""), country: str = Query(""),
+                          key: str = Query("")):
+    """지금 보고 있는 조건 그대로 CSV로 내려받기(최대 5만 행). 관리자 전용.
+
+    화면 조회는 열어두되 대량 추출만 막는다 — 무인증으로 6만여 행 원본을 반복해서
+    받아갈 수 있으면 데이터 유출이자 부하 공격 경로가 된다.
+    """
     import csv
     import io
     import re as _re
     from fastapi.responses import StreamingResponse
 
+    from analytics.queries import EXPLORE_DATASETS
+
+    if not _admin_ok(key):
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+    # 파일명에 쓰이므로 화이트리스트 검증을 여기서 먼저 한다. 검증 없이 보간하면
+    # 비ASCII 데이터셋명이 Content-Disposition(latin-1)에 들어가 500이 되고,
+    # 따옴표가 섞이면 filename 파라미터가 쪼개진다.
+    if dataset not in EXPLORE_DATASETS:
+        return JSONResponse({"error": "알 수 없는 데이터셋"}, status_code=400)
     for d in (from_date, to_date):
         if d and not _re.match(r"^\d{4}-\d{2}-\d{2}$", d):
             return JSONResponse({"error": "날짜 형식 오류(YYYY-MM-DD)"}, status_code=400)
+    if from_date and to_date and from_date > to_date:
+        return JSONResponse({"error": "시작일이 종료일보다 늦습니다"}, status_code=400)
     try:
         data = await asyncio.to_thread(
-            _explore_fetch, dataset, from_date, to_date, brand[:60], country[:40],
-            _EXPLORE_CSV_MAX, 0)
+            _explore_fetch, dataset, from_date, to_date, brand[:200], country[:200],
+            _EXPLORE_CSV_MAX, 0, _EXPLORE_CSV_MAX)
     except Exception as e:
         logger.warning("CSV 내려받기 실패: %s", e)
         return JSONResponse({"error": "내려받기 중 오류가 발생했습니다."}, status_code=500)
 
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(data.get("cols") or [])
-    for row in (data.get("rows") or []):
-        w.writerow(row)
-    # 엑셀이 UTF-8을 인식하려면 BOM이 필요하다 — 없으면 한글이 전부 깨진다
-    body = ("﻿" + buf.getvalue()).encode("utf-8")
-    span = f"_{from_date}_{to_date}" if (from_date or to_date) else ""
-    fname = f"{dataset}{span}.csv"
-    return StreamingResponse(
-        io.BytesIO(body), media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+    rows = data.get("rows") or []
+    total = data.get("total") or 0
+    ignored = data.get("ignored") or []
+
+    def _stream():
+        # 5만 행을 통째로 메모리에 담지 않고 흘려보낸다(재무 CSV 1건당 35MB 점유였다).
+        buf = io.StringIO()
+        w = csv.writer(buf)
+
+        def _flush():
+            out = buf.getvalue()
+            buf.seek(0); buf.truncate(0)
+            return out
+
+        yield "﻿".encode("utf-8")      # 엑셀이 UTF-8로 읽게 하는 BOM. 없으면 한글이 깨진다
+        w.writerow(data.get("cols") or [])
+        yield _flush().encode("utf-8")
+        for i, row in enumerate(rows, 1):
+            w.writerow(row)
+            if i % 500 == 0:
+                yield _flush().encode("utf-8")
+        tail = _flush()
+        if tail:
+            yield tail.encode("utf-8")
+
+    # 파일명은 '실제로 적용된' 조건만 담는다. 무시된 축을 파일명에 쓰면
+    # 2일치를 요청했는데 전체가 담긴 파일이 기간이 걸린 것처럼 보인다.
+    parts = [dataset]
+    if from_date or to_date:
+        if "기간" not in ignored:
+            parts.append(f"{from_date or 'all'}_{to_date or 'all'}")
+        else:
+            parts.append("nodatefilter")
+    if len(rows) < total:
+        parts.append(f"partial{len(rows)}of{total}")   # ASCII만 — 헤더는 latin-1이다
+    fname = "-".join(parts) + ".csv"
+    headers = {"Content-Disposition": f'attachment; filename="{fname}"'}
+    if ignored:
+        headers["X-Explore-Ignored"] = ",".join(
+            {"기간": "date", "브랜드": "brand", "국가": "country"}.get(x, x) for x in ignored)
+    return StreamingResponse(_stream(), media_type="text/csv; charset=utf-8", headers=headers)
 
 
 # ── 로컬 실행 ────────────────────────────────────────────────────────────────

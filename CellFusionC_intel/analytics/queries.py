@@ -2956,16 +2956,22 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
     반환: {years:[...], rows:[{company, industry, cosmetic, brands,
                                rev:{yr:amt}, op:{yr:amt}, ad:{yr:amt}}]}
     """
+    # 같은 상호가 여러 업종코드로 등재된 별개 법인이 13개사 있다. metric별로 MAX를 잡으면
+    # 매출은 도매 법인, 영업이익은 제조 법인에서 오는 식으로 한 행에 섞인다(실측 7건).
+    # 업종코드까지 키에 넣어 법인을 분리한 뒤, 회사당 '최신연도 매출이 가장 큰 법인' 하나만
+    # 고른다. 화장품업 여부도 그 법인의 값을 그대로 쓴다(BOOL_OR로 뭉개면 비화장품 법인
+    # 매출이 '화장품업만' 화면에 들어온다 — (주)바로 도매 424억이 화장품 매출로 잡히던 건).
     try:
         where = "WHERE is_cosmetic" if cosmetic_only else ""
         rows = session.execute(text(f"""
-            SELECT company, MAX(industry_name) AS industry, BOOL_OR(is_cosmetic) AS cosmetic,
-                   metric, year, MAX(amount) AS amount
+            SELECT company, industry_code, MAX(industry_name) AS industry,
+                   BOOL_OR(is_cosmetic) AS cosmetic, metric, year, MAX(amount) AS amount
             FROM {DB_SCHEMA}.nice_financials
             {where}
-            GROUP BY company, metric, year
+            GROUP BY company, industry_code, metric, year
         """)).fetchall()
     except Exception as e:
+        session.rollback()
         logger.warning("전체 기업 재무 조회 실패: %s", e)
         return {"years": [], "rows": []}
 
@@ -2984,21 +2990,32 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
     _M = {"매출액": "rev", "영업이익": "op", "광고비": "ad"}
     acc: dict = {}
     years: set = set()
-    for company, industry, cosmetic, metric, year, amount in rows:
+    for company, ind_code, industry, cosmetic, metric, year, amount in rows:
         key = _M.get(metric)
         if not key or amount is None:
             continue
         years.add(int(year))
-        o = acc.setdefault(company, {"company": company, "industry": industry or "",
-                                     "cosmetic": bool(cosmetic),
-                                     "brands": brands.get(company, ""),
-                                     "rev": {}, "op": {}, "ad": {}})
+        o = acc.setdefault((company, ind_code),
+                           {"company": company, "industry": industry or "",
+                            "cosmetic": bool(cosmetic),
+                            "brands": brands.get(company, ""),
+                            "rev": {}, "op": {}, "ad": {}})
         o[key][int(year)] = int(amount)
     ys = sorted(years)
-    out = list(acc.values())
-    # 최신 연도 매출 내림차순(없으면 뒤로) — 기획팀이 규모 순으로 훑기 편하게
     last = ys[-1] if ys else None
-    out.sort(key=lambda r: -(r["rev"].get(last) or 0))
+
+    # 상호가 같은 법인이 여럿이면 최신 연도 매출이 가장 큰 쪽 하나만 남긴다.
+    # 매출이 없으면 결정적으로 고르기 위해 업종코드를 2차 기준으로 쓴다.
+    best: dict = {}
+    for (company, ind_code), o in acc.items():
+        cur = best.get(company)
+        keyv = ((o["rev"].get(last) or 0), ind_code or "")
+        if cur is None or keyv > cur[0]:
+            best[company] = (keyv, o)
+    out = [o for _k, o in best.values()]
+    # 최신 연도 매출 내림차순(없으면 뒤로) — 기획팀이 규모 순으로 훑기 편하게.
+    # 동률에서 순서가 흔들리지 않도록 회사명을 2차 기준으로 고정한다.
+    out.sort(key=lambda r: (-(r["rev"].get(last) or 0), r["company"]))
     return {"years": ys, "rows": out}
 
 
@@ -3010,26 +3027,34 @@ def get_dart_yoy(session: Session) -> dict:
     try:
         rows = session.execute(text(f"""
             SELECT c.brand, c.corp_name, c.bsns_year, c.reprt_code, c.revenue, c.op_income,
-                   p.revenue AS prev_rev
+                   p.revenue AS prev_rev, c.fs_div
             FROM {DB_SCHEMA}.competitor_financials c
             LEFT JOIN {DB_SCHEMA}.competitor_financials p
               ON p.brand = c.brand AND p.reprt_code = c.reprt_code
              AND p.bsns_year = c.bsns_year - 1
             WHERE c.revenue IS NOT NULL
-            ORDER BY c.bsns_year DESC
+            -- 같은 연도에 연간·반기가 함께 있으면 어느 것을 '최신'으로 볼지 규칙이 필요하다.
+            -- 정렬이 연도뿐이면 브랜드마다 다른 보고서가 뽑혀(실측) 한 열에 연간과 반기가 섞인다.
+            ORDER BY c.bsns_year DESC,
+                     array_position(ARRAY['11011','11014','11012','11013'], c.reprt_code)
         """)).fetchall()
-    except Exception:
+    except Exception as e:
+        session.rollback()
+        logger.warning("DART YoY 조회 실패: %s", e)
         return {}
     _RC = {"11013": "1분기", "11012": "상반기", "11014": "3분기누적", "11011": "연간"}
     out: dict = {}
-    for brand, corp, yr, rc, rev, op, prev in rows:
+    for brand, corp, yr, rc, rev, op, prev, fs in rows:
         if brand in out:            # 최신 연도 1건만
             continue
         yoy = ((rev - prev) / prev * 100) if (prev and prev > 0) else None
         out[brand] = {"corp": corp or "", "year": int(yr), "reprt": _RC.get(rc, rc),
                       "revenue": int(rev), "prev": int(prev) if prev else None,
                       "yoy": round(yoy, 1) if yoy is not None else None,
-                      "op": int(op) if op else None}
+                      "op": int(op) if op else None,
+                      # 연결(CFS)이면 자회사 합산이라 NICE 별도 기준보다 크다.
+                      # 아모레는 60% 차이가 나므로 어느 기준인지 화면에 밝혀야 한다.
+                      "fs": "연결" if (fs or "").upper() == "CFS" else "별도"}
     return out
 
 
@@ -3089,56 +3114,116 @@ EXPLORE_DATASETS = {
 
 def explore_query(session: Session, dataset: str, date_from: str = "", date_to: str = "",
                   brand: str = "", country: str = "", limit: int = 500,
-                  offset: int = 0) -> dict:
-    """데이터 탐색 — 화이트리스트 기반 안전 조회. 반환 {cols, rows, total, label}."""
+                  offset: int = 0, max_rows: int = 5000) -> dict:
+    """데이터 탐색 — 화이트리스트 기반 안전 조회.
+
+    반환 {cols, rows, total, label, ignored}. ignored는 이 데이터셋에 적용할 수
+    없어 무시된 필터 이름 목록이다(예: 재무는 기간·브랜드 축이 없다).
+    max_rows는 한 번에 가져올 상한 — 화면은 5천, CSV 내려받기는 더 크게 준다.
+    """
     spec = EXPLORE_DATASETS.get(dataset)
     if not spec:
         return {"cols": [], "rows": [], "total": 0, "label": "", "error": "알 수 없는 데이터셋"}
     conds, params = [], {}
+    # ignored: 사용자가 걸었지만 이 데이터셋에는 적용할 축이 없는 필터.
+    # 조용히 버리면 '2099년 재무 46,719건'처럼 전체를 필터 결과로 오독하게 된다.
+    ignored = []
     if spec["where"]:
         conds.append(spec["where"])
-    if spec["date"] and date_from:
-        conds.append(f"{spec['date']} >= :df"); params["df"] = date_from
-    if spec["date"] and date_to:
-        conds.append(f"{spec['date']} <= :dt"); params["dt"] = date_to + " 23:59:59"
-    if spec["brand"] and brand:
-        conds.append(f"{spec['brand']} ILIKE :b"); params["b"] = f"%{brand}%"
-    if spec["country"] and country:
-        conds.append(f"{spec['country']} ILIKE :c"); params["c"] = f"%{country}%"
+    if date_from or date_to:
+        if spec["date"]:
+            if date_from:
+                conds.append(f"{spec['date']} >= :df"); params["df"] = date_from
+            if date_to:
+                conds.append(f"{spec['date']} <= :dt"); params["dt"] = date_to + " 23:59:59"
+        else:
+            ignored.append("기간")
+    if brand:
+        if spec["brand"]:
+            # 부분일치는 'Cos'가 VT Cosmetics까지 긁어오므로(실측 527건 중 507건) 정확일치로 건다.
+            conds.append(f"lower({spec['brand']}) = lower(:b)"); params["b"] = brand.strip()
+        else:
+            ignored.append("브랜드")
+    if country:
+        if spec["country"]:
+            conds.append(f"lower({spec['country']}) = lower(:c)"); params["c"] = country.strip()
+        else:
+            ignored.append("국가")
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     sel = ", ".join(f"{expr} AS c{i}" for i, (expr, _lbl) in enumerate(spec["cols"]))
-    order = f"ORDER BY {spec['date']} DESC" if spec["date"] else "ORDER BY 1 DESC"
+    # 날짜만으로 정렬하면 동률군(예: 같은 날 135행)의 순서가 페이지마다 달라져
+    # 1쪽과 2쪽에 같은 행이 나오고 어떤 쪽에도 안 나오는 행이 생긴다.
+    # id를 tie-breaker로 붙여 전체 순서를 유일하게 고정한다. NULL 날짜는 뒤로.
+    order = (f"ORDER BY {spec['date']} DESC NULLS LAST, id DESC"
+             if spec["date"] else "ORDER BY id DESC")
     try:
         total = session.execute(text(
             f"SELECT count(*) FROM {DB_SCHEMA}.{spec['table']} {where}"), params).scalar() or 0
-        params.update({"lim": max(1, min(int(limit), 5000)), "off": max(0, int(offset))})
+        cap = max(1, int(max_rows))
+        params.update({"lim": max(1, min(int(limit), cap)), "off": max(0, int(offset))})
         rows = session.execute(text(
             f"SELECT {sel} FROM {DB_SCHEMA}.{spec['table']} {where} {order} "
             f"LIMIT :lim OFFSET :off"), params).fetchall()
     except Exception as e:
+        # 실패한 트랜잭션을 되돌려야 같은 세션의 다음 쿼리가 InFailedSqlTransaction으로
+        # 연쇄 실패하지 않는다. 예외 원문은 스키마·SQL이 노출되므로 로그에만 남긴다.
+        session.rollback()
         logger.warning("데이터 탐색 실패 [%s]: %s", dataset, e)
-        return {"cols": [], "rows": [], "total": 0, "label": spec["label"], "error": str(e)[:120]}
+        return {"cols": [], "rows": [], "total": 0, "label": spec["label"],
+                "ignored": [], "error": "조회 중 오류가 발생했습니다."}
     return {"cols": [lbl for _e, lbl in spec["cols"]],
             "rows": [[("" if v is None else v) for v in r] for r in rows],
-            "total": int(total), "label": spec["label"]}
+            "total": int(total), "label": spec["label"], "ignored": ignored}
+
+
+def _explore_distinct(session: Session, spec: dict, col: str) -> list:
+    """필터 후보값 — 자유 입력 대신 실제 존재하는 값에서 고르게 하려고."""
+    if not spec.get(col):
+        return []
+    conds = [f"{spec[col]} IS NOT NULL"]
+    if spec["where"]:
+        conds.append(spec["where"])
+    try:
+        rows = session.execute(text(
+            f"SELECT DISTINCT {spec[col]} FROM {DB_SCHEMA}.{spec['table']} "
+            f"WHERE {' AND '.join(conds)}")).fetchall()
+    except Exception as e:
+        session.rollback()
+        logger.warning("필터 후보 조회 실패 [%s.%s]: %s", spec["table"], col, e)
+        return []
+    vals = sorted({str(r[0]).strip() for r in rows if r[0] is not None and str(r[0]).strip()})
+    return vals[:300]
 
 
 def explore_summary(session: Session) -> list:
-    """데이터셋별 적재 현황(건수·기간) — '전체 흐름'을 한눈에."""
+    """데이터셋별 적재 현황(건수·기간·필터 축·후보값) — '전체 흐름'을 한눈에."""
     out = []
     for key, spec in EXPLORE_DATASETS.items():
+        # 카드 건수는 표와 같은 기준이어야 한다. raw count(*)를 세면 '아마존 6,629건'을
+        # 보고 눌렀는데 3,197건이 나온다(중복·비모니터링·자사분 제외 차이).
+        where = f"WHERE {spec['where']}" if spec["where"] else ""
         try:
             if spec["date"]:
                 r = session.execute(text(
                     f"SELECT count(*), MIN({spec['date']})::date::text, MAX({spec['date']})::date::text "
-                    f"FROM {DB_SCHEMA}.{spec['table']}")).fetchone()
+                    f"FROM {DB_SCHEMA}.{spec['table']} {where}")).fetchone()
                 out.append({"key": key, "label": spec["label"], "count": int(r[0] or 0),
                             "from": r[1] or "", "to": r[2] or ""})
             else:
                 n = session.execute(text(
-                    f"SELECT count(*) FROM {DB_SCHEMA}.{spec['table']}")).scalar()
+                    f"SELECT count(*) FROM {DB_SCHEMA}.{spec['table']} {where}")).scalar()
                 out.append({"key": key, "label": spec["label"], "count": int(n or 0),
                             "from": "", "to": ""})
-        except Exception:
+        except Exception as e:
+            # rollback 없이 넘어가면 트랜잭션이 aborted로 남아 나머지 6개 데이터셋이
+            # 전부 연쇄 실패한다 → 카드가 전멸해 '수집 전면 중단'으로 오독된다.
+            session.rollback()
+            logger.warning("적재 현황 조회 실패 [%s]: %s", key, e)
             out.append({"key": key, "label": spec["label"], "count": 0, "from": "", "to": ""})
+        # 어떤 필터를 걸 수 있는 데이터셋인지 화면이 알아야 쓸 수 없는 칸을 감출 수 있다
+        out[-1].update({
+            "has_date": bool(spec["date"]),
+            "brands": _explore_distinct(session, spec, "brand"),
+            "countries": _explore_distinct(session, spec, "country"),
+        })
     return out

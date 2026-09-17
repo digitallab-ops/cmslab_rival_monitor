@@ -5374,25 +5374,30 @@ def _build_full_html(
       <div class="dx-cards" id="dx-cards"></div>
 
       <div class="dx-bar">
-        <label>기간<input type="date" id="dx-from"> ~ <input type="date" id="dx-to"></label>
-        <span class="dx-quick">
-          <button onclick="dxSpan(7)">최근 7일</button>
-          <button onclick="dxSpan(30)">30일</button>
-          <button onclick="dxSpan(90)">90일</button>
-          <button onclick="dxSpan(0)">전체</button>
+        <span id="dx-datewrap">
+          <label>기간<input type="date" id="dx-from"> ~ <input type="date" id="dx-to"></label>
+          <span class="dx-quick">
+            <button onclick="dxSpan(7)">최근 7일</button>
+            <button onclick="dxSpan(30)">30일</button>
+            <button onclick="dxSpan(90)">90일</button>
+            <button onclick="dxSpan(0)">전체</button>
+          </span>
         </span>
-        <input class="dx-f" id="dx-brand" placeholder="브랜드 (예: Anua)">
-        <input class="dx-f" id="dx-country" placeholder="국가 (예: US)">
+        <select class="dx-f" id="dx-brand"><option value="">브랜드 전체</option></select>
+        <select class="dx-f" id="dx-country"><option value="">국가 전체</option></select>
         <button class="dx-go" onclick="dxLoad(0)">조회</button>
-        <button class="dx-csv" onclick="dxCsv()">CSV 내려받기</button>
+        <button class="dx-csv" onclick="dxCsv()">🔒 CSV 내려받기</button>
       </div>
 
       <div class="dx-meta" id="dx-meta">위에서 데이터 종류를 고르세요.</div>
       <div class="dx-wrap"><table id="dx-tbl"><thead id="dx-head"></thead><tbody id="dx-body"></tbody></table></div>
       <div class="dx-page" id="dx-page"></div>
-      <p class="dx-note">한 번에 200행씩 보여준다. <b>CSV 내려받기</b>는 지금 걸어둔 조건 그대로
-        최대 5만 행을 받는다(엑셀에서 바로 열린다). 기간을 비우면 전체 구간이다.<br>
-        뉴스는 중복·자사 기사를 뺀 수, 아마존 순위는 모니터링 대상만, 해외 상표는 타사 출원분만 나온다.</p>
+      <p class="dx-note">한 번에 200행씩 보여준다. <b>🔒 CSV 내려받기</b>는 지금 걸어둔 조건 그대로
+        최대 5만 행을 받는다(엑셀에서 바로 열린다). 대량 추출이라 <b>관리자 비밀번호</b>가 필요하고,
+        상한에 걸려 일부만 담기면 파일명에 <code>partial</code>로 표시된다.<br>
+        모든 건수는 <b>분석에 쓰는 기준</b>으로 걸러진 수다 — 뉴스는 중복·자사 기사를 빼고,
+        아마존 순위는 모니터링 대상만, 해외 상표는 타사 출원분만 센다.<br>
+        기간을 비우면 전체 구간이다. 해외 상표 321건 중 <b>36건은 출원일이 공란</b>이라 기간을 걸면 빠진다.</p>
     </div>
     {_DX_SCRIPT}
   </div>
@@ -6483,9 +6488,11 @@ _DX_STYLE = """<style>
 #dx .dx-card .s{font-size:11.5px;color:#6b769a;margin-top:3px}
 #dx .dx-bar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin:0 0 12px}
 #dx .dx-bar label{font-size:13px;color:#93a0bd;display:flex;align-items:center;gap:6px}
-#dx input[type=date],#dx input.dx-f{background:#0f1726;border:1px solid #26314e;border-radius:6px;
+#dx input[type=date],#dx select.dx-f{background:#0f1726;border:1px solid #26314e;border-radius:6px;
   color:#e7ecf7;padding:7px 11px;font-size:13.5px;font-family:inherit}
-#dx input.dx-f{width:150px}
+#dx select.dx-f{min-width:150px;max-width:220px;cursor:pointer}
+#dx #dx-datewrap{display:inline-flex;gap:9px;align-items:center;flex-wrap:wrap}
+#dx .dx-warn{color:#e6c179;font-size:12.5px}
 #dx input[type=date]::-webkit-calendar-picker-indicator{filter:invert(.7)}
 #dx .dx-quick{display:flex;gap:5px}
 #dx .dx-quick button{background:rgba(255,255,255,.04);border:1px solid #26314e;color:#93a0bd;border-radius:6px;
@@ -6520,36 +6527,69 @@ _DX_STYLE = """<style>
 
 
 _DX_SCRIPT = """<script>
-var DX_DS='news', DX_OFF=0, DX_LIMIT=200, DX_TOTAL=0, DX_LABEL='';
+var DX_DS='news', DX_OFF=0, DX_LIMIT=200, DX_TOTAL=0, DX_LABEL='', DX_SPEC={};
 
 function dxEsc(s){ return String(s==null?'':s)
-  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 function dxCards(){
   fetch('/api/explore/summary').then(function(r){ return r.json(); }).then(function(d){
     var el=document.getElementById('dx-cards');
+    (d.datasets||[]).forEach(function(x){ DX_SPEC[x.key]=x; });
     el.innerHTML=(d.datasets||[]).map(function(x){
       var span = x.from ? (x.from.slice(2)+' ~ '+x.to.slice(2)) : '기간 없음';
-      return '<div class="dx-card'+(x.key===DX_DS?' on':'')+'" data-k="'+x.key+'" onclick="dxPick(\\''+x.key+'\\')">'+
+      return '<div class="dx-card'+(x.key===DX_DS?' on':'')+'" data-k="'+dxEsc(x.key)+'">'+
              '<div class="n">'+dxEsc(x.label)+'</div>'+
              '<div class="c">'+(x.count||0).toLocaleString()+'</div>'+
              '<div class="s">'+span+'</div></div>';
     }).join('');
+    // onclick 속성에 값을 끼워넣지 않고 이벤트로 붙인다(값이 코드가 될 여지를 없앤다)
+    el.querySelectorAll('.dx-card').forEach(function(c){
+      c.addEventListener('click', function(){ dxPick(c.dataset.k); });
+    });
+    dxSyncFilters();
     dxLoad(0);
-  }).catch(function(){ document.getElementById('dx-meta').textContent='적재 현황을 불러오지 못했습니다.'; });
+  }).catch(function(){
+    // 래치를 풀어야 탭을 다시 눌렀을 때 재시도된다. 안 풀면 새로고침 전까지 빈 화면이다.
+    DX_INIT=false;
+    document.getElementById('dx-meta').innerHTML=
+      '적재 현황을 불러오지 못했습니다. <b>데이터 탭을 다시 눌러</b> 재시도하세요.';
+  });
+}
+
+// 이 데이터셋에 없는 필터는 감춘다 — 걸어도 무시되는 칸을 보여주면
+// 전체 결과를 필터 결과로 오독한다(재무에 '2099년' 걸어도 46,719건이 그대로 떴다)
+function dxSyncFilters(){
+  var sp=DX_SPEC[DX_DS]||{};
+  var dw=document.getElementById('dx-datewrap');
+  if(dw) dw.style.display = sp.has_date ? '' : 'none';
+  [['dx-brand','brands','브랜드'],['dx-country','countries','국가']].forEach(function(t){
+    var sel=document.getElementById(t[0]), vals=sp[t[1]]||[];
+    if(!sel) return;
+    sel.style.display = vals.length ? '' : 'none';
+    var keep=sel.value;
+    sel.innerHTML='<option value="">'+t[2]+' 전체</option>'+vals.map(function(v){
+      return '<option value="'+dxEsc(v)+'">'+dxEsc(v)+'</option>'; }).join('');
+    if(vals.indexOf(keep)>=0) sel.value=keep;
+  });
 }
 
 function dxPick(k){
   DX_DS=k;
   document.querySelectorAll('#dx .dx-card').forEach(function(c){ c.classList.toggle('on', c.dataset.k===k); });
+  dxSyncFilters();
   dxLoad(0);
 }
 
 function dxSpan(days){
   var f=document.getElementById('dx-from'), t=document.getElementById('dx-to');
   if(!days){ f.value=''; t.value=''; dxLoad(0); return; }
+  // toISOString()은 UTC라 한국 오전 9시 이전에는 하루 전 날짜가 나온다.
+  // 사용자가 보는 '오늘'과 어긋나면 당일 수집분이 통째로 빠진다 → 현지 날짜로 만든다.
+  var iso=function(d){
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
   var to=new Date(), from=new Date(to.getTime()-(days-1)*86400000);
-  var iso=function(d){ return d.toISOString().slice(0,10); };
   f.value=iso(from); t.value=iso(to); dxLoad(0);
 }
 
@@ -6578,35 +6618,59 @@ function dxLoad(off){
         var s=String(v==null?'':v);
         // 링크 칸은 눌러서 원문으로 갈 수 있게, 숫자 칸은 오른쪽 정렬로
         if(/^https?:\\/\\//.test(s)) return '<td><a href="'+dxEsc(s)+'" target="_blank" rel="noopener">원문 →</a></td>';
-        var num = s!=='' && !isNaN(s) && s.indexOf('-')!==0;
+        // 음수도 숫자다. 앞자리 '-'를 배제하면 같은 금액 열에서 적자만 좌측으로 떨어져
+        // 자릿수가 어긋난다(재무 1쪽 200행 중 42칸). 날짜(2026-09-17)는 Number()가 NaN이라 걸러진다.
+        var num = s!=='' && s.trim()!=='' && !isNaN(Number(s));
         return '<td'+(num?' class="num"':'')+'>'+dxEsc(s)+'</td>';
       }).join('')+'</tr>';
     }).join('');
     var shown=(d.rows||[]).length;
-    meta.innerHTML = shown
+    // 적용되지 않은 필터는 반드시 알린다 — 조용히 무시되면 전체를 필터 결과로 읽는다
+    var ig=(d.ignored||[]).length
+      ? ' <span class="dx-warn">※ 이 데이터에는 '+dxEsc((d.ignored||[]).join('·'))+' 구분이 없어 해당 조건은 적용되지 않았습니다</span>' : '';
+    meta.innerHTML = (shown
       ? '<b>'+dxEsc(DX_LABEL)+'</b> — 조건에 맞는 '+DX_TOTAL.toLocaleString()+'건 중 '+
         (DX_OFF+1).toLocaleString()+'~'+(DX_OFF+shown).toLocaleString()+'번째 표시'
-      : '<b>'+dxEsc(DX_LABEL)+'</b> — 조건에 맞는 데이터가 없습니다. 기간이나 필터를 넓혀보세요.';
+      : '<b>'+dxEsc(DX_LABEL)+'</b> — 조건에 맞는 데이터가 없습니다. 기간이나 필터를 넓혀보세요.') + ig;
     dxPager(shown);
   }).catch(function(){ meta.textContent='조회에 실패했습니다. 잠시 후 다시 시도해 주세요.'; });
 }
 
 function dxPager(shown){
+  var pg=document.getElementById('dx-page');
+  if(!DX_TOTAL){ pg.innerHTML=''; return; }   // 결과 0건에 '1쪽 중 0쪽'은 없는 상태다
+  var last=Math.ceil(DX_TOTAL/DX_LIMIT);
+  // 필터가 바뀌어 total이 줄면 offset이 남아 '3 / 2 쪽'이 될 수 있어 상한으로 묶는다
+  var cur=Math.min(Math.floor(DX_OFF/DX_LIMIT)+1, last);
   var hasPrev=DX_OFF>0, hasNext=(DX_OFF+shown)<DX_TOTAL;
-  document.getElementById('dx-page').innerHTML =
+  pg.innerHTML =
     '<button onclick="dxLoad(Math.max(0,DX_OFF-DX_LIMIT))"'+(hasPrev?'':' disabled')+'>← 이전</button>'+
-    '<span>'+(DX_TOTAL?Math.floor(DX_OFF/DX_LIMIT)+1:0)+' / '+Math.max(1,Math.ceil(DX_TOTAL/DX_LIMIT))+' 쪽</span>'+
+    '<span>'+cur+' / '+last+' 쪽</span>'+
     '<button onclick="dxLoad(DX_OFF+DX_LIMIT)"'+(hasNext?'':' disabled')+'>다음 →</button>';
 }
 
-function dxCsv(){ window.location.href='/api/explore/csv?'+dxParams().toString(); }
+// CSV는 대량 추출이라 관리자만 — 잠겨 있으면 여기서 바로 비밀번호를 받는다
+function dxCsv(){
+  var go=function(){ window.location.href='/api/explore/csv?'+dxParams().toString()
+    +'&key='+encodeURIComponent(window.ADMIN_KEY||''); };
+  if(window.ADMIN_KEY){ go(); return; }
+  var k=prompt('CSV 내려받기는 관리자 전용입니다. 관리자 비밀번호를 입력하세요');
+  if(k===null) return;
+  fetch('/api/admin-check?key='+encodeURIComponent(k))
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){ window.ADMIN_KEY=k; go(); }
+      else alert('비밀번호가 틀렸습니다.');
+    })
+    .catch(function(){ alert('확인 실패 — 잠시 후 다시 시도하세요.'); });
+}
 
 // 탭을 처음 열 때만 불러온다 — 대시보드 첫 로딩을 무겁게 만들지 않으려고
 var DX_INIT=false;
 function dxInit(){ if(DX_INIT) return; DX_INIT=true; dxCards(); }
-['dx-brand','dx-country'].forEach(function(id){
+['dx-brand','dx-country','dx-from','dx-to'].forEach(function(id){
   var el=document.getElementById(id);
-  if(el) el.addEventListener('keydown', function(e){ if(e.key==='Enter') dxLoad(0); });
+  if(el) el.addEventListener('change', function(){ dxLoad(0); });
 });
 </script>"""
 
@@ -6685,7 +6749,7 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
             "a": [r["ad"].get(y) for y in years],
             # pv = 비교 대상(전년 같은 기간) 매출 — '무엇 대비'인지 화면에 그대로 적기 위해 같이 넘긴다
             "d": ({"y": d["year"], "p": d["reprt"], "v": d["revenue"],
-                   "g": d["yoy"], "pv": d["prev"]} if d else None),
+                   "g": d["yoy"], "pv": d["prev"], "fs": d.get("fs", "")} if d else None),
         })
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     # 단위를 각 열 머리에 직접 박는다 — 표 밑 각주는 스크롤하면 안 보여서 '얼마 기준'인지 놓친다
@@ -6693,6 +6757,10 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
                     for i, y in enumerate(years))
     last_y = years[-1] if years else ""
     n_cos = sum(1 for r in rows if r["cosmetic"])
+    # 안내 문구의 커버리지는 하드코딩하지 않는다 — 태그가 늘면 문구가 거짓이 된다
+    top100 = sorted((r for r in rows if r["cosmetic"]),
+                    key=lambda r: -(r["rev"].get(last_y) or 0))[:100]
+    n_tag100 = sum(1 for r in top100 if r.get("brands"))
     return (_ALLCO_STYLE + f'''
     <div class="section" id="allco">
       <div class="section-title">🏢 전체 기업 재무 <span class="section-sub">
@@ -6722,12 +6790,22 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
         오른쪽 <b>주황 두 칸</b>은 상장사만 — 금융감독원 전자공시(DART)에 올라온 <b>가장 최근 보고서</b>다.
         분기 보고서는 연초부터의 <b>누적</b>이므로, 성장률은 언제나 <b>같은 누적 구간끼리</b> 비교한다
         (예: 2026년 1~6월 vs 2025년 1~6월). 아직 연간 실적 공시 전이면 분기 누적이 뜨고, 비교 대상 금액은 칸 안에 함께 적었다.<br>
+        <b>왼쪽(NICE)과 오른쪽(DART)은 기준이 다르다</b> — NICE는 그 법인 단독(별도), DART는 자회사를 합친
+        <b>연결</b>인 경우가 많다(칸 안에 표기). 지주·해외법인을 거느린 회사일수록 오른쪽이 크게 나오므로
+        두 숫자를 직접 빼서 증감으로 읽으면 안 된다.<br>
         회사명 아래 <b style="color:#8fb4ff">파란 글씨</b>는 그 회사의 대표 브랜드로, NICE 원본에 기재된 것만 표시한다
-        (화장품업 상위 100개사 중 70개사). 확인되지 않은 회사는 <b>추측하지 않고 비워둔다</b>.</p>
+        (화장품업 매출 상위 100개사 중 {n_tag100}개사). 확인되지 않은 회사는 <b>추측하지 않고 비워둔다</b>.</p>
     </div>
     <script>
     var AC_DATA={js}, AC_YEARS={json.dumps(years)}, AC_COS=1, AC_LIMIT=60, AC_SORT='r{max(len(years)-1,0)}', AC_DESC=true;
-    function acFmt(v){{ return (v===null||v===undefined)?'—':(v/100000).toLocaleString(undefined,{{maximumFractionDigits:0}}); }}
+    // 원본에 음수 광고비·음수 영업이익이 실제로 섞여 있다. 억원으로 반올림하면 -0.5억이
+    // '-0'으로 찍혀 옆 칸의 '—'(결측)와 구분이 안 된다. 억 미만은 소수 1자리를 살려
+    // 적자인지 결측인지 바로 읽히게 한다. 정확히 0일 때만 '0'.
+    function acFmt(v){{ if(v===null||v===undefined) return '—';
+      var n=v/100000;
+      if(Math.abs(n)<0.05) return '0';          // 소수1자리로도 0이면 부호 없이 0
+      if(Math.abs(n)<1) return n.toFixed(1);    // -0.5억을 '-0'이 아니라 '-0.5'로
+      return n.toLocaleString(undefined,{{maximumFractionDigits:0}}); }}
     // DART는 원 단위라 ÷1억. suffix=0이면 '억' 생략(열 머리에 단위가 이미 있음)
     function acDart(v,noSuffix){{ if(v===null||v===undefined) return '—';
       return (v/100000000).toLocaleString(undefined,{{maximumFractionDigits:0}})+(noSuffix===0?'':'억'); }}
@@ -6766,10 +6844,12 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
         var dv='<td class="ac-dcol">—</td><td class="ac-dcol">—</td>';
         if(r.d){{
           // 좌: 이번 실적이 '언제 것'인지, 우: '무엇 대비'인지를 각각 칸 안에 적는다
-          var cur='<b class="ac-lead">'+acDart(r.d.v,0)+'</b><span class="ac-sub">'+r.d.y+'년 '+acSpan(r.d.p)+'</span>';
+          var cur='<b class="ac-lead">'+acDart(r.d.v,0)+'</b><span class="ac-sub">'+r.d.y+'년 '+
+                  acSpan(r.d.p)+(r.d.fs?' · '+r.d.fs:'')+'</span>';
           var cmp='—';
           if(r.d.g!==null && r.d.g!==undefined){{
-            cmp='<span class="'+(r.d.g>=0?'yoy-up':'yoy-dn')+'">'+(r.d.g>=0?'+':'')+r.d.g+'%</span>'+
+            // toFixed(1) — 안 하면 '+16%'와 '+11.5%'가 한 열에 섞여 자릿수가 들쭉날쭉해진다
+            cmp='<span class="'+(r.d.g>=0?'yoy-up':'yoy-dn')+'">'+(r.d.g>=0?'+':'')+r.d.g.toFixed(1)+'%</span>'+
                 '<span class="ac-sub">'+(r.d.y-1)+'년 '+acSpan(r.d.p)+' '+acDart(r.d.pv)+'</span>';
           }}
           dv='<td class="ac-dcol">'+cur+'</td><td class="ac-dcol">'+cmp+'</td>';
