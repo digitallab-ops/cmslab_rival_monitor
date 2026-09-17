@@ -2942,3 +2942,74 @@ def get_launch_hits(session: Session, days: int = 90, min_reviews: int = 100) ->
                 "product": pname, "country": country, "category": cat,
                 "rank": rank, "reviews": int(rc or 0)})
     return [v for v in by_brand.values() if v["announced"] and v["retail"]]
+
+
+def get_all_company_financials(session: Session, cosmetic_only: bool = False) -> dict:
+    """NICE BizLine 전체 기업 재무 — 기획팀 '전체 데이터 조회'용.
+
+    기존 get_nice_financials는 우리 모니터링 브랜드와 매칭된 회사만 반환해 전체 시장을
+    볼 수 없었다. 여기서는 적재된 7천여 개사를 연도×지표로 피벗해 그대로 돌려준다.
+    (단위: 원본 그대로. 화장품업 해당 여부는 is_cosmetic 플래그로 필터)
+    반환: {years:[...], rows:[{company, industry, cosmetic, rev:{yr:amt}, op:{yr:amt}, ad:{yr:amt}}]}
+    """
+    try:
+        where = "WHERE is_cosmetic" if cosmetic_only else ""
+        rows = session.execute(text(f"""
+            SELECT company, MAX(industry_name) AS industry, BOOL_OR(is_cosmetic) AS cosmetic,
+                   metric, year, MAX(amount) AS amount
+            FROM {DB_SCHEMA}.nice_financials
+            {where}
+            GROUP BY company, metric, year
+        """)).fetchall()
+    except Exception as e:
+        logger.warning("전체 기업 재무 조회 실패: %s", e)
+        return {"years": [], "rows": []}
+
+    _M = {"매출액": "rev", "영업이익": "op", "광고비": "ad"}
+    acc: dict = {}
+    years: set = set()
+    for company, industry, cosmetic, metric, year, amount in rows:
+        key = _M.get(metric)
+        if not key or amount is None:
+            continue
+        years.add(int(year))
+        o = acc.setdefault(company, {"company": company, "industry": industry or "",
+                                     "cosmetic": bool(cosmetic), "rev": {}, "op": {}, "ad": {}})
+        o[key][int(year)] = int(amount)
+    ys = sorted(years)
+    out = list(acc.values())
+    # 최신 연도 매출 내림차순(없으면 뒤로) — 기획팀이 규모 순으로 훑기 편하게
+    last = ys[-1] if ys else None
+    out.sort(key=lambda r: -(r["rev"].get(last) or 0))
+    return {"years": ys, "rows": out}
+
+
+def get_dart_yoy(session: Session) -> dict:
+    """DART 상장사 실적 + 동일기간 YoY. 반환 {brand: {corp, year, reprt, revenue, prev, yoy, op}}.
+
+    분기 누적은 같은 reprt_code끼리만 비교해야 정확하다(2026 반기 vs 2025 반기).
+    """
+    try:
+        rows = session.execute(text(f"""
+            SELECT c.brand, c.corp_name, c.bsns_year, c.reprt_code, c.revenue, c.op_income,
+                   p.revenue AS prev_rev
+            FROM {DB_SCHEMA}.competitor_financials c
+            LEFT JOIN {DB_SCHEMA}.competitor_financials p
+              ON p.brand = c.brand AND p.reprt_code = c.reprt_code
+             AND p.bsns_year = c.bsns_year - 1
+            WHERE c.revenue IS NOT NULL
+            ORDER BY c.bsns_year DESC
+        """)).fetchall()
+    except Exception:
+        return {}
+    _RC = {"11013": "1분기", "11012": "상반기", "11014": "3분기누적", "11011": "연간"}
+    out: dict = {}
+    for brand, corp, yr, rc, rev, op, prev in rows:
+        if brand in out:            # 최신 연도 1건만
+            continue
+        yoy = ((rev - prev) / prev * 100) if (prev and prev > 0) else None
+        out[brand] = {"corp": corp or "", "year": int(yr), "reprt": _RC.get(rc, rc),
+                      "revenue": int(rev), "prev": int(prev) if prev else None,
+                      "yoy": round(yoy, 1) if yoy is not None else None,
+                      "op": int(op) if op else None}
+    return out

@@ -66,6 +66,8 @@ from analytics.queries import (
     get_sales_velocity,
     get_social_verdict,
     get_launch_hits,
+    get_all_company_financials,
+    get_dart_yoy,
 )
 from analytics.summarizer import (
     generate_brand_strategy_summary, generate_market_overview,
@@ -4993,6 +4995,8 @@ def _build_full_html(
     oliveyoung_flagship: dict = None,
     oliveyoung_reviews: list = None,
     brief_feed_html: str = "",
+    all_companies: dict = None,
+    dart_yoy: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
     generated = datetime.utcnow() + timedelta(hours=9)
@@ -5032,6 +5036,7 @@ def _build_full_html(
     demand_html       = _render_demand_signal(demand_tri or [])
     export_growth_html = _render_export_growth(export_growth or [], export_period or {}, export_stacked or {})
     growth_story_html  = _render_growth_story(growth_story or {})
+    all_companies_html = _render_all_companies(all_companies or {}, dart_yoy or {})
     financials_nice_html = _render_financials_nice(nice_financials or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
@@ -5355,6 +5360,7 @@ def _build_full_html(
       </div>
       {financials_nice_html}
     </div>
+    {all_companies_html}
   </div>
 
   <!-- ===== 탭: 검색 (MCP+챗봇 자연어 질의) ===== -->
@@ -6070,6 +6076,13 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             nice_financials = get_nice_financials(session)
         except Exception:
             nice_financials = []
+        # 기획팀 요구 — 전체 기업(화장품업 필터) + DART 최신 실적/YoY
+        try:
+            all_companies = get_all_company_financials(session)
+            dart_yoy = get_dart_yoy(session)
+        except Exception as _e:
+            logger.warning("전체 기업 재무 조회 실패: %s", _e)
+            all_companies, dart_yoy = {"years": [], "rows": []}, {}
         try:
             ingredient_trends = get_ingredient_trends(session, days=30, limit=12)
         except Exception:
@@ -6396,6 +6409,8 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brand_products=brand_products,
         brand_signals=brand_signals,
         brief_feed_html=brief_feed_html,
+        all_companies=all_companies,
+        dart_yoy=dart_yoy,
         stories=stories,
         category_battle=category_battle,
         expansion_playbook=expansion_playbook,
@@ -6417,3 +6432,137 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
 
     logger.info("보고서 생성 완료: %s (%.1f KB)", abs_path, len(html_content) / 1024)
     return abs_path
+
+
+_ALLCO_STYLE = """<style>
+#allco .ac-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px}
+#allco input.ac-q{flex:1;min-width:200px;background:#0f1726;border:1px solid #26314e;border-radius:6px;
+  color:#e7ecf7;padding:7px 12px;font-size:14px;font-family:inherit}
+#allco .ac-tog{display:flex;gap:6px}
+#allco .ac-tog button{background:rgba(255,255,255,.04);border:1px solid #26314e;color:#93a0bd;
+  border-radius:6px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+#allco .ac-tog button.on{background:rgba(74,143,212,.18);border-color:rgba(74,143,212,.5);color:#8fb4ff}
+#allco .ac-meta{font-size:12px;color:#6b769a;margin-left:auto}
+#allco .ac-wrap{max-height:520px;overflow:auto;border:1px solid #26314e;border-radius:10px}
+#allco table{border-collapse:collapse;width:100%;font-size:13px}
+#allco thead th{position:sticky;top:0;background:#141d33;color:#93a0bd;font-size:11.5px;font-weight:700;
+  padding:9px 10px;text-align:right;border-bottom:1px solid #26314e;white-space:nowrap;cursor:pointer}
+#allco thead th:first-child,#allco thead th:nth-child(2){text-align:left}
+#allco tbody td{padding:8px 10px;border-bottom:1px solid rgba(38,49,78,.5);text-align:right;
+  font-variant-numeric:tabular-nums;color:#cfd7e8;white-space:nowrap}
+#allco tbody td:first-child{text-align:left;color:#e7ecf7;font-weight:600}
+#allco tbody td:nth-child(2){text-align:left;color:#6b769a;font-size:11.5px}
+#allco tbody tr:hover{background:rgba(74,143,212,.06)}
+#allco .yoy-up{color:#5bd99a;font-weight:700}
+#allco .yoy-dn{color:#e8654e;font-weight:700}
+#allco .ac-dart{font-size:11px;color:#e6c179;background:rgba(224,173,74,.12);padding:1px 6px;border-radius:5px;margin-left:6px}
+#allco .ac-more{text-align:center;padding:10px;color:#6b769a;font-size:12.5px;cursor:pointer}
+#allco .ac-more:hover{color:#8fb4ff}
+#allco .ac-note{font-size:11.5px;color:#6b769a;margin-top:8px;line-height:1.6}
+</style>"""
+
+
+def _render_all_companies(data: dict, dart: dict = None) -> str:
+    """NICE 전체 기업 재무 표 — 화장품업 기본 + 전체 전환, 검색·정렬, DART 최신 YoY 결합.
+
+    단위 주의: nice_financials.amount는 **천원** 단위다(포스코인터내셔널 2.7e10 = 27조).
+    화면은 억원으로 환산(÷100,000). DART(competitor_financials)는 **원** 단위(÷1e8).
+    """
+    rows = (data or {}).get("rows") or []
+    years = (data or {}).get("years") or []
+    if not rows:
+        return ""
+    dart = dart or {}
+    # DART는 브랜드 키 → 회사명으로 붙인다(기획팀은 회사명으로 봄).
+    # NICE는 '(주)아모레퍼시픽', DART는 '아모레퍼시픽'처럼 법인 접두/접미가 달라
+    # 정규화(법인격·공백·괄호 제거) 후 매칭해야 붙는다.
+    def _norm_co(n):
+        import re as _re
+        t = _re.sub(r"\(주\)|\(유\)|㈜|㈐|주식회사|유한회사|_", "", n or "")
+        return _re.sub(r"\s+", "", t).lower()
+
+    dart_by_corp = {}
+    for b, v in dart.items():
+        if v.get("corp"):
+            dart_by_corp.setdefault(_norm_co(v["corp"]), v)
+    payload = []
+    for r in rows:
+        d = dart_by_corp.get(_norm_co(r["company"]))
+        payload.append({
+            "c": r["company"], "i": (r["industry"] or "")[:24], "k": 1 if r["cosmetic"] else 0,
+            "r": [r["rev"].get(y) for y in years],
+            "o": [r["op"].get(y) for y in years],
+            "d": ({"y": d["year"], "p": d["reprt"], "v": d["revenue"], "g": d["yoy"]} if d else None),
+        })
+    js = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    yhead = "".join(f"<th data-k='r{i}'>{y} 매출</th>" for i, y in enumerate(years))
+    n_cos = sum(1 for r in rows if r["cosmetic"])
+    return (_ALLCO_STYLE + f'''
+    <div class="section" id="allco">
+      <div class="section-title">🏢 전체 기업 재무 <span class="section-sub">
+        NICE BizLine 적재분 — 화장품업 {n_cos:,}개사 / 전체 {len(rows):,}개사 · 회사명 검색·열 클릭 정렬</span></div>
+      <div class="ac-bar">
+        <div class="ac-tog">
+          <button id="ac-cos" class="on" onclick="acSetCos(1)">화장품업만</button>
+          <button id="ac-all" onclick="acSetCos(0)">전체 기업</button>
+        </div>
+        <input class="ac-q" id="ac-q" placeholder="회사명 검색 (예: 아모레, 클리오, 올리브영)" oninput="acRender()">
+        <span class="ac-meta" id="ac-meta"></span>
+      </div>
+      <div class="ac-wrap">
+        <table><thead><tr>
+          <th data-k="c">회사</th><th data-k="i">업종</th>{yhead}
+          <th data-k="o">최근 영업이익</th><th data-k="g">DART 최신 실적 · YoY</th>
+        </tr></thead><tbody id="ac-body"></tbody></table>
+      </div>
+      <div class="ac-more" id="ac-more" onclick="acMore()"></div>
+      <p class="ac-note">단위 억원 · NICE BizLine 2023~2025 연간(비상장 포함). <b>DART 칸</b>은 상장사만 —
+        전자공시 최신 보고서 기준이며 <b>같은 기간끼리</b> 비교한 성장률(예: 2026 상반기 vs 2025 상반기).
+        연간 실적이 아직 공시 전이면 분기 누적으로 표시된다.</p>
+    </div>
+    <script>
+    var AC_DATA={js}, AC_YEARS={json.dumps(years)}, AC_COS=1, AC_LIMIT=60, AC_SORT='r{max(len(years)-1,0)}', AC_DESC=true;
+    function acFmt(v){{ return (v===null||v===undefined)?'—':(v/100000).toLocaleString(undefined,{{maximumFractionDigits:0}}); }}
+    function acSetCos(v){{ AC_COS=v; AC_LIMIT=60;
+      document.getElementById('ac-cos').className=v?'on':'';
+      document.getElementById('ac-all').className=v?'':'on'; acRender(); }}
+    function acMore(){{ AC_LIMIT+=100; acRender(); }}
+    function acRender(){{
+      var q=(document.getElementById('ac-q').value||'').trim().toLowerCase();
+      var list=AC_DATA.filter(function(r){{
+        if(AC_COS && !r.k) return false;
+        if(q && r.c.toLowerCase().indexOf(q)<0) return false;
+        return true; }});
+      var si=AC_SORT;
+      list.sort(function(a,b){{
+        var av,bv;
+        if(si[0]==='r'){{ var i=+si.slice(1); av=a.r[i]; bv=b.r[i]; }}
+        else if(si==='o'){{ av=a.o[a.o.length-1]; bv=b.o[b.o.length-1]; }}
+        else if(si==='g'){{ av=a.d?a.d.g:null; bv=b.d?b.d.g:null; }}
+        else {{ av=a[si]; bv=b[si]; }}
+        if(typeof av==='string'||typeof bv==='string') return (AC_DESC?-1:1)*String(bv||'').localeCompare(String(av||''));
+        av=(av===null||av===undefined)?-Infinity:av; bv=(bv===null||bv===undefined)?-Infinity:bv;
+        return AC_DESC?(bv-av):(av-bv); }});
+      var shown=list.slice(0,AC_LIMIT);
+      document.getElementById('ac-body').innerHTML=shown.map(function(r){{
+        var tds=r.r.map(function(v){{ return '<td>'+acFmt(v)+'</td>'; }}).join('');
+        var op=r.o[r.o.length-1];
+        var dv='—';
+        if(r.d){{
+          var g=(r.d.g===null||r.d.g===undefined)?'':
+            '<span class="'+(r.d.g>=0?'yoy-up':'yoy-dn')+'">'+(r.d.g>=0?'+':'')+r.d.g+'%</span>';
+          dv=(r.d.v/100000000).toLocaleString(undefined,{{maximumFractionDigits:0}})+'억 '+g+
+             '<span class="ac-dart">'+r.d.y+' '+r.d.p+'</span>';
+        }}
+        return '<tr><td>'+r.c+'</td><td>'+r.i+'</td>'+tds+'<td>'+acFmt(op)+'</td><td>'+dv+'</td></tr>'; }}).join('');
+      document.getElementById('ac-meta').textContent=list.length.toLocaleString()+'개사 중 '+shown.length+'개 표시';
+      document.getElementById('ac-more').textContent = list.length>AC_LIMIT ? ('+ 더 보기 ('+(list.length-AC_LIMIT).toLocaleString()+'개 남음)') : '';
+    }}
+    document.querySelectorAll('#allco thead th').forEach(function(th){{
+      th.addEventListener('click', function(){{
+        var k=th.dataset.k; if(!k) return;
+        if(AC_SORT===k) AC_DESC=!AC_DESC; else {{ AC_SORT=k; AC_DESC=true; }}
+        AC_LIMIT=60; acRender(); }});
+    }});
+    acRender();
+    </script>''')
