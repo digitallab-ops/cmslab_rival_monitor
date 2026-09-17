@@ -6608,6 +6608,10 @@ function dxInit(){ if(DX_INIT) return; DX_INIT=true; dxCards(); }
 
 
 _ALLCO_STYLE = """<style>
+/* 열이 9개라 page-body(1500px) 안에서는 가로 스크롤바가 생긴다. 이 표만 좌우로
+   내밀어 한 화면에 담는다. 화면이 좁아지면 내밀기를 거둬 넘치지 않게 한다. */
+#allco{margin-left:-120px;margin-right:-120px}
+@media (max-width:1790px){#allco{margin-left:0;margin-right:0}}
 #allco .ac-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px}
 #allco input.ac-q{flex:1;min-width:200px;background:#0f1726;border:1px solid #26314e;border-radius:6px;
   color:#e7ecf7;padding:7px 12px;font-size:14px;font-family:inherit}
@@ -6621,14 +6625,18 @@ _ALLCO_STYLE = """<style>
 #allco .ac-wrap{max-height:600px;overflow:auto;border:1px solid #26314e;border-radius:10px}
 #allco table{border-collapse:collapse;width:100%;font-size:15px}
 #allco thead th{position:sticky;top:0;z-index:2;background:#141d33;color:#aab6d4;font-size:13px;font-weight:700;
-  padding:11px 12px;text-align:right;border-bottom:2px solid #2f3c60;white-space:nowrap;cursor:pointer}
+  padding:11px 9px;text-align:right;border-bottom:2px solid #2f3c60;white-space:nowrap;cursor:pointer}
 #allco thead th:hover{color:#cfe0ff}
 #allco thead th:first-child,#allco thead th:nth-child(2){text-align:left}
-#allco tbody td{padding:11px 12px;border-bottom:1px solid rgba(38,49,78,.55);text-align:right;
+#allco tbody td{padding:11px 9px;border-bottom:1px solid rgba(38,49,78,.55);text-align:right;
   font-variant-numeric:tabular-nums;color:#dbe3f4;white-space:nowrap;letter-spacing:.2px}
 #allco tbody tr:nth-child(even){background:rgba(255,255,255,.018)}
 #allco tbody td:first-child{text-align:left;color:#f2f5fc;font-weight:700;font-size:15px}
-#allco tbody td:nth-child(2){text-align:left;color:#8490b0;font-size:12.5px}
+/* 업종명이 '그 외 기타 분류 안 된 화학제품 제조업'처럼 길어 폭을 크게 먹는다.
+   잘라서 고정폭으로 두되, 마우스를 올리면 전체가 보이게 title을 단다. */
+#allco tbody td:nth-child(2){text-align:left;color:#8490b0;font-size:12.5px;
+  max-width:170px;overflow:hidden;text-overflow:ellipsis}
+#allco thead th:nth-child(2){max-width:170px}
 #allco tbody tr:hover{background:rgba(74,143,212,.10)}
 /* 최신 연도 매출 = 표를 훑을 때 기준이 되는 값이라 흰색으로 세워둔다 */
 #allco .ac-lead{color:#ffffff;font-weight:700}
@@ -6819,7 +6827,7 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
                 + (r.m ? (r.s?'<span class="ac-tag ac-single">회사=브랜드</span>'
                              :'<span class="ac-tag ac-whole">회사전체</span>') : '');
         var co = head + tag + (r.b?'<span class="ac-brand">'+r.b+'</span>':'');
-        return '<tr><td>'+co+'</td><td>'+r.i+'</td>'+tds+
+        return '<tr><td>'+co+'</td><td title="'+r.i+'">'+r.i+'</td>'+tds+
                '<td>'+acFmt(op)+' '+pct(op)+'</td><td>'+acFmt(ad)+' '+pct(ad)+'</td>'+dv+'</tr>'; }}).join('');
       document.getElementById('ac-meta').textContent=list.length.toLocaleString()+'개사 중 '+shown.length+'개 표시';
       document.getElementById('ac-more').textContent = list.length>AC_LIMIT ? ('+ 더 보기 ('+(list.length-AC_LIMIT).toLocaleString()+'개 남음)') : '';
