@@ -6686,9 +6686,22 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
     for b, v in dart.items():
         if v.get("corp"):
             dart_by_corp.setdefault(_norm_co(v["corp"]), v)
+
+    # 정규화가 서로 다른 회사를 같은 키로 뭉갤 수 있다('(주)레토' vs '레토(주)' 등 10건).
+    # 그런 키에 DART 회사가 걸리면 두 회사 모두에 같은 실적이 붙어버린다 — 조용히 틀리느니
+    # 붙이지 않고 로그를 남긴다. 상장사가 늘어 충돌이 실제로 생기는 날을 대비한 안전장치.
+    _collide: dict = {}
+    for r in rows:
+        _collide.setdefault(_norm_co(r["company"]), set()).add(r["company"])
+    _ambiguous = {k for k, v in _collide.items() if len(v) > 1}
+    _hit = _ambiguous & set(dart_by_corp)
+    if _hit:
+        logger.warning("DART 회사명 매칭 모호 — 실적 미표시: %s",
+                       {k: sorted(_collide[k]) for k in _hit})
     payload = []
     for r in rows:
-        d = dart_by_corp.get(_norm_co(r["company"]))
+        _k = _norm_co(r["company"])
+        d = None if _k in _ambiguous else dart_by_corp.get(_k)
         payload.append({
             "c": r["company"], "i": (r["industry"] or "")[:24], "k": 1 if r["cosmetic"] else 0,
             "b": (r.get("brands") or "")[:90],
