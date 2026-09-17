@@ -236,6 +236,7 @@ async def refresh(background_tasks: BackgroundTasks, key: str = Query("")):
 # /api/ask 남용 방지 — 공개 챗봇이라 인증은 못 걸지만(대시보드 JS가 호출),
 # 길이 상한 + 간단한 인메모리 IP 레이트리밋으로 비용/남용 폭주만 차단.
 _ASK_MAX_LEN = 500
+_ASK_TIMEOUT_SEC = int(os.getenv("ASK_TIMEOUT_SEC", "55"))   # 무한 대기 방지 상한
 _ASK_RATE_MAX = 12          # 분당 IP별 허용 횟수
 _ask_hits: dict = {}
 
@@ -277,12 +278,20 @@ async def api_ask(request: Request):
         # /api/ask는 단발 JSON 응답 — 스트리밍 콜백 불필요(slack_bot은 on_delta를
         # 동기 호출하므로 no-op 동기 콜백을 넘긴다). 예전의 async _collect는 await되지
         # 않아 코루틴이 버려지고 parts가 항상 비어 무의미했음.
-        ans = await slack_bot.answer(q, [], lambda t: None)
+        # 서버측 상한 — 무한 대기 대신 안내 응답. 프론트도 별도 타임아웃을 건다.
+        ans = await asyncio.wait_for(slack_bot.answer(q, [], lambda t: None),
+                                     timeout=_ASK_TIMEOUT_SEC)
         return {"answer": ans or "관련 데이터를 찾지 못했어요."}
+    except asyncio.TimeoutError:
+        logger.warning("검색 응답 타임아웃(%ds): %s", _ASK_TIMEOUT_SEC, q[:60])
+        return JSONResponse(
+            {"answer": f"조회가 {_ASK_TIMEOUT_SEC}초를 넘겨 중단했어요. "
+                       "질문을 더 좁혀서(브랜드·국가·기간) 다시 시도해 주세요.",
+             "error": "timeout"}, status_code=504)
     except Exception as e:
         logger.warning("검색 응답 실패: %s", e)
-        return JSONResponse({"answer": "검색 처리 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요."},
-                            status_code=500)
+        return JSONResponse({"answer": "검색 처리 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.",
+                             "error": "server"}, status_code=500)
 
 
 # ── 인사이트 API ─────────────────────────────────────────────────────────────

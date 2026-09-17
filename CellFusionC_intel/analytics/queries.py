@@ -149,12 +149,23 @@ def get_digest_cache(session: Session, key: str = "__DIGEST7__") -> str:
 
 
 def get_briefings_list(session: Session, limit: int = 24) -> list[dict]:
-    """보관된 브리핑(주간/일간) 목록 — 대시보드 아카이브용. 최신순. 테이블 없으면 빈 리스트."""
+    """보관된 브리핑(주간/일간) 목록 — 대시보드 아카이브용. 최신순.
+
+    같은 날 같은 종류가 여러 번 생성되면(재실행·테스트·수동 발송) 전부 쌓여 아카이브가
+    중복으로 도배된다(실측: 2026-09-10 일간 10건). 날짜×종류별 **가장 최신 1건만** 보여
+    사용자가 '어느 게 진짜인지' 헷갈리지 않게 한다. 원본 행은 지우지 않음(이력 보존).
+    """
     try:
         rows = session.execute(text(f"""
             SELECT kind, generated_at::text, period_from::date::text, period_to::date::text,
                    content, total, high, brands, countries, model
-            FROM {DB_SCHEMA}.briefings
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                           PARTITION BY kind, generated_at::date
+                           ORDER BY generated_at DESC, id DESC) rn
+                FROM {DB_SCHEMA}.briefings
+            ) q
+            WHERE rn = 1
             ORDER BY generated_at DESC
             LIMIT :lim
         """), {"lim": max(1, min(limit, 60))}).fetchall()

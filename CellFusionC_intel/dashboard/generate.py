@@ -2403,6 +2403,11 @@ a:hover { color: var(--gold); }
 .rt-now { font-family:var(--mono); font-size:15px; font-weight:800; color:var(--champ2); }
 .rt-spark { display:block; }
 .rt-spark .spark { display:block; width:110px; height:22px; overflow:visible; }
+/* path 스타일이 없으면 SVG 기본값(검정 채움)으로 그려져 라인이 '검은 덩어리'가 된다.
+   .met/.fin-spark에는 있었고 .rt-spark만 빠져 있어 아마존 추세 칸이 통째로 깨졌음. */
+.rt-spark .spark path { fill:none; stroke:var(--champ); stroke-width:1.4; vector-effect:non-scaling-stroke; }
+.rt-spark .spark .fill { fill:rgba(139,149,255,.10); stroke:none; }
+.rt-spark .spark .end { fill:var(--champ); }
 .rt-delta { font-family:var(--mono); font-size: 14.5px; font-weight:800; text-align:right; white-space:nowrap; }
 .rt-note { font-size: 13px; color:var(--lo); padding:10px 12px 0; }
 /* ── 국내 올리브영 ── */
@@ -2461,6 +2466,13 @@ a:hover { color: var(--gold); }
 .sc-q { font-size: 16px; font-weight:700; color:var(--champ2); margin-bottom:8px; }
 .sc-q::before { content:"Q  "; color:var(--champ); font-family:var(--mono); }
 .sc-a { font-size: 15.5px; color:var(--hi); line-height:1.65; white-space:normal; }
+.sc-load { color:var(--mid); font-size:14px; }
+.sc-load b { color:var(--champ); font-weight:600; font-variant-numeric:tabular-nums; }
+.sc-err { color:#e8654e; font-size:14.5px; }
+.sc-retry { margin-left:8px; background:rgba(74,143,212,.14); color:var(--blue);
+  border:1px solid rgba(74,143,212,.4); border-radius:4px; padding:2px 10px;
+  font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
+.sc-retry:hover { background:rgba(74,143,212,.24); }
 .fin-sub { font-size: 13px; color: var(--lo); font-weight: 400; }
 .fin-rev { font-variant-numeric: tabular-nums; }
 .fin-note { font-size: 13.5px; color: var(--lo); line-height: 1.5; margin-top: 8px; }
@@ -5366,21 +5378,54 @@ def _build_full_html(
   </div>
   <script>
   function askExample(el){{ document.getElementById('search-q').value=el.textContent; runSearch(); }}
-  async function runSearch(){{
-    var inp=document.getElementById('search-q'); var q=(inp.value||'').trim(); if(!q) return;
+  // 조회는 LLM+DB라 수십 초 걸릴 수 있다. 무한 로딩이면 사용자는 '고장인지 느린 건지'
+  // 알 수 없으므로 경과 시간 표시 + 상한(ASK_TIMEOUT) + 실패 시 재시도 버튼을 제공한다.
+  var ASK_TIMEOUT=60000;
+  function _ans(id){{ return document.getElementById(id); }}
+  function _esc2(t){{ return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }}
+  function _retryBtn(q){{
+    return '<button class="sc-retry" onclick="runSearch('+JSON.stringify(q).replace(/"/g,'&quot;')+')">다시 시도</button>';
+  }}
+  async function runSearch(preset){{
+    var inp=document.getElementById('search-q');
+    var q=(preset!==undefined&&preset!==null)?String(preset):((inp.value||'').trim());
+    if(!q) return;
     var chat=document.getElementById('search-chat');
-    var id='m'+Date.now();
-    var qe=q.replace(/&/g,'&amp;').replace(/</g,'&lt;');
-    chat.insertAdjacentHTML('afterbegin','<div class="sc-pair"><div class="sc-q">'+qe+'</div><div class="sc-a" id="'+id+'">답변 생성 중…</div></div>');
-    inp.value='';
+    var id='m'+Date.now()+Math.floor(Math.random()*999);
+    chat.insertAdjacentHTML('afterbegin','<div class="sc-pair"><div class="sc-q">'+_esc2(q)+
+      '</div><div class="sc-a" id="'+id+'"><span class="sc-load">답변 생성 중… <b id="'+id+'t">0초</b></span></div></div>');
+    if(preset===undefined||preset===null) inp.value='';
+    // 경과 시간 카운터 — '멈춘 건지' 불안하지 않게
+    var t0=Date.now();
+    var tick=setInterval(function(){{
+      var el=document.getElementById(id+'t');
+      if(!el){{ clearInterval(tick); return; }}
+      var s=Math.floor((Date.now()-t0)/1000);
+      el.textContent=s+'초'+(s>=20?' · 데이터가 많은 질문은 오래 걸려요':'');
+    }},1000);
+    var ctrl=new AbortController();
+    var killer=setTimeout(function(){{ ctrl.abort(); }}, ASK_TIMEOUT);
     try{{
-      var r=await fetch('/api/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{question:q}})}});
-      var d=await r.json();
-      var ans=(d.answer||'답을 찾지 못했어요.').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\\n/g,'<br>');
+      var r=await fetch('/api/ask',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+        body:JSON.stringify({{question:q}}), signal:ctrl.signal}});
+      var d=await r.json().catch(function(){{ return {{}}; }});
+      clearInterval(tick); clearTimeout(killer);
+      if(!r.ok){{
+        var msg=d.answer||('서버 오류('+r.status+')');
+        _ans(id).innerHTML='<span class="sc-err">'+_esc2(msg)+'</span> '+_retryBtn(q);
+        return;
+      }}
+      var ans=_esc2(d.answer||'답을 찾지 못했어요.').replace(/\\n/g,'<br>');
       // 출처 URL을 클릭 가능한 링크로(근거 표기)
       ans=ans.replace(/(https?:\\/\\/[^\\s<]+)/g,'<a href="$1" target="_blank" rel="noopener" style="color:var(--teal);font-weight:600">원문↗</a>');
-      document.getElementById(id).innerHTML=ans;
-    }}catch(e){{ document.getElementById(id).innerHTML='오류: '+e; }}
+      _ans(id).innerHTML=ans;
+    }}catch(e){{
+      clearInterval(tick); clearTimeout(killer);
+      var aborted=(e&&e.name==='AbortError');
+      _ans(id).innerHTML='<span class="sc-err">'+(aborted
+        ? '응답이 '+(ASK_TIMEOUT/1000)+'초를 넘겨 중단했어요. 서버가 깨어나는 중일 수 있으니 다시 시도해 보세요.'
+        : '연결 오류: '+_esc2(String(e)))+'</span> '+_retryBtn(q);
+    }}
   }}
   </script>
 

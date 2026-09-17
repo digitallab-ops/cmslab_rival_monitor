@@ -78,8 +78,59 @@ _tools_cache = None                              # OpenAI tools 포맷 캐시
 _history: dict = defaultdict(lambda: deque(maxlen=HISTORY_TURNS * 2))
 
 
+class _InProcMCP:
+    """인프로세스 MCP 어댑터 — HTTP를 타지 않고 툴 함수를 직접 호출.
+
+    MCP_SERVER_URL이 '우리 자신'을 가리키면(웹 서버가 자기 /mcp를 HTTP로 호출) 워커가
+    1개인 배포에서 자기 요청을 자기가 기다리는 교착이 생긴다(실측: /health 0.4초인데
+    /api/ask는 60초+ 무응답, MCP를 외부에서 직접 부르면 0.3초 정상).
+    같은 프로세스 안에 이미 FastMCP 객체가 있으므로 그대로 호출하면 교착도, 왕복 비용도 없다.
+    """
+
+    def __init__(self, mcp):
+        self._mcp = mcp
+
+    async def list_tools(self):
+        tools = await self._mcp.list_tools()
+        return type("R", (), {"tools": tools})()
+
+    async def call_tool(self, name, args):
+        res = await self._mcp.call_tool(name, args or {})
+        content = res[0] if isinstance(res, tuple) else res
+        return type("R", (), {"content": content})()
+
+
+def _self_hosted_mcp() -> bool:
+    """MCP_SERVER_URL이 이 서비스 자신인지(=자기 호출이라 인프로세스로 우회해야 하는지).
+
+    server.py가 기동 시 MCP_SERVER_URL을 http://127.0.0.1:{PORT}/mcp로 강제하므로
+    루프백 주소가 곧 '자기 자신'이다. 공개 URL로 설정된 경우도 함께 본다.
+    """
+    if os.getenv("MCP_INPROC", "").strip() == "1":
+        return True
+    url = (os.getenv("MCP_SERVER_URL") or MCP_SERVER_URL or "").strip()
+    if not url:
+        return False
+    host = url.replace("https://", "").replace("http://", "").split("/")[0].lower()
+    hostname = host.split(":")[0]
+    if hostname in ("127.0.0.1", "localhost", "0.0.0.0", "::1"):
+        return True
+    own = (os.getenv("RENDER_EXTERNAL_URL") or "").strip()
+    if own:
+        own_host = own.replace("https://", "").replace("http://", "").split("/")[0].lower()
+        return own_host.split(":")[0] == hostname
+    return False
+
+
 @asynccontextmanager
 async def _mcp_session():
+    if _self_hosted_mcp():
+        try:
+            from mcp_server import rival_mcp
+            yield _InProcMCP(rival_mcp)
+            return
+        except Exception as e:      # 임포트 실패 시 기존 HTTP 경로로 폴백
+            logger.warning("인프로세스 MCP 실패 → HTTP 폴백: %s", e)
     headers = {"Authorization": f"Bearer {MCP_API_KEY}"} if MCP_API_KEY else None
     async with streamablehttp_client(MCP_SERVER_URL, headers=headers) as (read, write, _):
         async with ClientSession(read, write) as session:
