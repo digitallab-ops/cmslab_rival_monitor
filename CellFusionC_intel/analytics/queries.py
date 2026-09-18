@@ -72,8 +72,10 @@ def get_category_battle(session: Session, days: int = 30) -> list[dict]:
     return out
 
 
-# 잡음 국가코드(권역명·전역·비대상) — 플레이북에서 제외
-_NON_MARKET_CC = {"", "?", "EU", "GLOBAL", "global", "NA", "LATAM", "SEA", "APAC", "ME",
+# 잡음 국가코드(권역명·전역·비대상) — 진출 시장 집계에서 제외.
+# KR은 '해외 진출' 관점에서 시장이 아니다 — 국내 채널 입점 기사가 해외 진출 카드로
+# 올라오던 걸 막는다(실측: 건수 2위 카드가 한국이었다).
+_NON_MARKET_CC = {"", "?", "KR", "EU", "GLOBAL", "global", "NA", "LATAM", "SEA", "APAC", "ME",
                   "AF", "IN?", "other", "OTHER", "null", "None"}
 
 
@@ -380,8 +382,11 @@ def get_brand_country_matrix(
         country_totals[cc] += cnt
 
     top_brands = sorted(brand_totals, key=lambda b: brand_totals[b], reverse=True)[:top_n]
+    # KR은 국내 뉴스라 건수가 압도적이다(실측 781 vs 2위 US 257). 열로 두면 색상 대비가
+    # 죽어 히트맵이 제 역할을 못 한다. 해외 분포 매트릭스이므로 열에서 빼고 총계만 넘긴다.
     top_countries = sorted(
-        country_totals, key=lambda c: country_totals[c], reverse=True
+        (c for c in country_totals if c != "KR"),
+        key=lambda c: country_totals[c], reverse=True
     )[:top_n_countries]
 
     return {
@@ -2093,6 +2098,123 @@ def get_market_growth_story(session: Session, top_n: int = 6,
     _cand.sort(key=lambda m: (len(m["moves"]) == 0, -(m["yoy_pct"] or 0)))
     markets = _cand[:top_n]
     return {"overall": overall, "markets": markets}
+
+
+# 같은 리테일러가 한글·영문으로 따로 잡혀 채널 태그가 'Sephora, 세포라'처럼 중복된다.
+# 대표 표기 하나로 모은다(소문자·공백제거 후 비교).
+_CHANNEL_ALIAS = {
+    "sephora": "세포라", "olive young": "올리브영", "oliveyoung": "올리브영",
+    "coles": "콜스", "boots": "부츠", "ultabeauty": "얼타뷰티", "ulta": "얼타뷰티",
+    "amazon": "아마존", "target": "타깃", "walmart": "월마트", "costco": "코스트코",
+    "douglas": "더글라스", "watsons": "왓슨스", "bigw": "BIG W", "tiktokshop": "틱톡샵",
+    "tiktok": "틱톡샵", "qoo10": "큐텐", "shopee": "쇼피", "lazada": "라자다",
+    "rakuten": "라쿠텐", "donkihote": "돈키호테", "loft": "로프트", "matsukiyo": "마츠키요",
+}
+
+
+def _norm_channel(name: str) -> str:
+    k = (name or "").strip().lower().replace(" ", "").replace(".", "")
+    return _CHANNEL_ALIAS.get(k, (name or "").strip())
+
+
+def get_market_countries(session: Session, days: int = 90, window_days: int = 150,
+                         top_n: int = 10) -> dict:
+    """시장 탭 통합 국가 뷰 — 수출 성장 + 진입 채널 + 경쟁사 무브를 한 카드에.
+
+    '뜨는 시장'(수출 YoY 기준)과 '해외 진출 플레이북'(뉴스 건수 기준)이 같은 기사를
+    서로 다른 형식으로 두 번 보여주고 있었다(실측 5건 중복). 국가를 키로 두 뷰를
+    합쳐, 한 나라를 한 번만 보게 한다.
+
+    반환: {overall: {...}, countries: [{cc, name, yoy_pct, exp_musd, delta_musd,
+           moves, high, brand_count, channels, items, has_export, has_moves}]}
+    정렬은 화면에서 토글하므로 여기서는 고정하지 않고 필요한 축을 모두 싣는다.
+    """
+    story = get_market_growth_story(session, top_n=top_n, window_days=window_days)
+    play = get_expansion_playbook(session, days=days)
+
+    # 수출은 성장 상위권만이 아니라 **전 국가**를 직접 조회한다. story는 YoY 상위 N개만
+    # 돌려주므로 그것만 쓰면 일본(-5.2%)·중국(+16.9%)처럼 데이터가 있는 시장이
+    # '수출 —'로 떠서 통계가 없는 것처럼 보인다.
+    exp_by_cc: dict = {}
+    try:
+        for g in get_market_export_growth(session, hs_like="3304%", trailing=3):
+            exp_by_cc[g["country_code"]] = g
+    except Exception as e:
+        logger.warning("시장별 수출 조회 실패: %s", e)
+
+    merged: dict = {}
+    for m in (story.get("markets") or []):
+        cc = m["country_code"]
+        merged[cc] = {
+            "cc": cc, "name": m.get("country_name") or _CC_NAME.get(cc, cc),
+            "yoy_pct": m.get("yoy_pct"), "exp_musd": m.get("exp_musd"),
+            "delta_musd": m.get("delta_musd"),
+            "moves": 0, "high": 0, "brand_count": 0, "channels": [],
+            "items": list(m.get("moves") or []),
+        }
+    for p in play:
+        cc = p["country"]
+        o = merged.setdefault(cc, {
+            "cc": cc, "name": _CC_NAME.get(cc, cc), "yoy_pct": None,
+            "exp_musd": None, "delta_musd": None,
+            "moves": 0, "high": 0, "brand_count": 0, "channels": [], "items": [],
+        })
+        o["moves"] = p["moves"]
+        o["high"] = p["high"]
+        o["brand_count"] = p["brand_count"]
+        # 'Moida'와 'moida'처럼 대소문자만 다른 표기가 따로 잡히므로 소문자 키로 중복을 판정한다
+        chans: list = []
+        seen_ch: set = set()
+        for c in p["channels"]:
+            n = _norm_channel(c)
+            k = n.lower().replace(" ", "")
+            if n and k not in seen_ch:
+                seen_ch.add(k)
+                chans.append(n)
+        o["channels"] = chans[:5]
+        # 두 쪽 기사를 합치되 같은 URL(없으면 제목)은 한 번만 — 중복 노출이 원래 문제였다
+        seen = {(it.get("url") or it.get("title")) for it in o["items"]}
+        for it in p["items"]:
+            k = it.get("url") or it.get("title")
+            if k in seen:
+                continue
+            seen.add(k)
+            o["items"].append(it)
+
+    out = []
+    for cc, o in merged.items():
+        if cc in _NON_MARKET_CC:
+            continue
+        # story가 안 준 국가도 수출 통계가 있으면 채운다
+        g = exp_by_cc.get(cc)
+        if g and o["yoy_pct"] is None:
+            o["yoy_pct"] = g.get("yoy_pct")
+            o["exp_musd"] = round(g["exp_usd_3m"] / 1e6, 1)
+            o["delta_musd"] = round((g["exp_usd_3m"] - g["prev_usd_3m"]) / 1e6, 1)
+            if not o.get("name") or o["name"] == cc:
+                o["name"] = g.get("country_name") or cc
+        # 무브 수가 플레이북에서 안 잡힌 국가는 실제 담긴 기사 수로 채운다
+        if not o["moves"]:
+            o["moves"] = len(o["items"])
+        if not o["brand_count"]:
+            o["brand_count"] = len({it.get("brand") for it in o["items"] if it.get("brand")})
+        o["items"] = sorted(
+            o["items"], key=lambda x: (x.get("importance") != "high", -(x.get("score") or 0)))[:6]
+        # 접힌 줄에서 '누가 들어갔나'가 바로 보이도록 브랜드명을 싣는다
+        bl: list = []
+        for it in o["items"]:
+            b = (it.get("brand") or "").strip()
+            if b and b not in bl:
+                bl.append(b)
+        o["brands"] = bl[:4]
+        o["has_export"] = o["yoy_pct"] is not None
+        o["has_moves"] = bool(o["items"])
+        out.append(o)
+
+    # 수출·활동 어느 쪽 신호도 없는 국가는 카드로 낼 가치가 없다
+    out = [o for o in out if o["has_export"] or o["has_moves"]]
+    out.sort(key=lambda o: (-(o["yoy_pct"] if o["yoy_pct"] is not None else -999), -o["moves"]))
+    return {"overall": story.get("overall"), "countries": out}
 
 
 def get_search_momentum(session: Session) -> dict:

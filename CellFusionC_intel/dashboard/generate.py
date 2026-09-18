@@ -24,7 +24,7 @@ from analytics.queries import (
     get_collection_stats,
     get_country_signal_stats,
     get_category_battle,
-    get_expansion_playbook,
+    get_market_countries,
     get_briefings_list,
     get_digest_cache,
     get_high_articles,
@@ -582,50 +582,6 @@ _COUNTRY_KO_LBL = {
 }
 
 
-def _render_expansion_playbook(playbook: list) -> str:
-    """해외 진출 플레이북 — 경쟁사가 각 시장에 어떤 채널로 들어갔나 (우리 진출 참고서)."""
-    if not playbook:
-        return ""
-    cards = []
-    for m in playbook[:9]:
-        cc = m["country"]
-        flag = COUNTRY_FLAGS.get(cc, "🌐")
-        name = _COUNTRY_KO_LBL.get(cc, cc)
-        chips = "".join(
-            f'<span class="pb-chip">{_esc(ch)}</span>' for ch in m.get("channels", [])[:6]
-        )
-        chips_html = (f'<div class="pb-chips"><span class="pb-chips-lbl">진입 채널</span>{chips}</div>'
-                      if chips else
-                      '<div class="pb-chips pb-chips-empty">채널 데이터 축적 중 (신규 수집분부터 채워짐)</div>')
-        moves = []
-        for it in m.get("items", [])[:4]:
-            ch = f' · <span class="pb-mv-ch">{_esc(it["channel"])}</span>' if it.get("channel") else ""
-            url = _esc(it.get("url", ""))
-            title = _esc((it.get("title") or "")[:80])
-            act = ACTIVITY_LABELS.get(it["activity_type"], it["activity_type"])
-            title_html = f'<a href="{url}" target="_blank" rel="noopener">{title}</a>' if url else title
-            moves.append(
-                f'<li><span class="pb-mv-b">{_esc(it["brand"])}</span> '
-                f'<span class="pb-mv-act">{act}</span>{ch}<br>{title_html}</li>'
-            )
-        cards.append(
-            f'<div class="pb-card">'
-            f'<div class="pb-head"><span class="pb-flag">{flag}</span>'
-            f'<span class="pb-name">{_esc(name)}</span>'
-            f'<span class="pb-stat">{m["moves"]}건 · HIGH {m["high"]} · 경쟁사 {m["brand_count"]}</span></div>'
-            f'{chips_html}'
-            f'<ul class="pb-moves">{"".join(moves)}</ul>'
-            f'</div>'
-        )
-    return (
-        '<div class="section" id="expansion-playbook">'
-        '<div class="section-title">🧭 해외 진출 플레이북'
-        '<span class="section-sub">경쟁사는 이 시장에 이렇게 들어갔다 — 우리 진출 참고서 (신시장 진출·유통 채널 활동, 중복 제외)</span>'
-        '</div>'
-        f'<div class="pb-grid">{"".join(cards)}</div>'
-        '</div>'
-    )
-
 
 _XG_COLORS = ["#4a80f0", "#e8654e", "#d9a441", "#2ba9b2", "#5a6486"]  # 미국·중국·일본·4위·기타
 
@@ -1142,51 +1098,6 @@ def _yoy_badge_color(yoy) -> str:
         return "var(--lo)"
     return "#4ab884" if yoy >= 15 else ("#e05353" if yoy <= -10 else "var(--mid)")
 
-
-def _render_growth_story(story: dict) -> str:
-    """시장 성장 스토리 — 수출 YoY(성과) + 그 시장의 경쟁사 활동(뉴스)을 카드로 엮음."""
-    markets = (story or {}).get("markets") or []
-    if not markets:
-        return ('<p class="no-data">수출·활동 연계 데이터 없음 '
-                '(관세청 수집 후 표시 · 매월 3일 갱신)</p>')
-
-    cards = []
-    for m in markets:
-        cc = m["country_code"]
-        flag = COUNTRY_FLAGS.get(cc, "🌐")
-        name = _COUNTRY_KO_LBL.get(cc, m["country_name"] or cc)
-        yoy = m["yoy_pct"]
-        yoy_txt = f'{"+" if (yoy or 0) >= 0 else ""}{yoy:.0f}%' if yoy is not None else "—"
-        col = _yoy_badge_color(yoy)
-        moves = []
-        for mv in m["moves"][:4]:
-            act = ACTIVITY_LABELS.get(mv["activity_type"], mv["activity_type"])
-            title = _esc(mv["title"])
-            title_html = (f'<a href="{_esc(mv["url"])}" target="_blank" rel="noopener">{title}</a>'
-                          if mv["url"] else title)
-            hi = ' gs-mv-hi' if mv["importance"] == "high" else ''
-            moves.append(
-                f'<li class="gs-move{hi}">'
-                f'<span class="gs-mv-brand">{_esc(mv["brand"])}</span>'
-                f'<span class="gs-mv-act">{_esc(act)}</span>'
-                f'<span class="gs-mv-title">{title_html}</span></li>'
-            )
-        moves_html = ("<ul class='gs-moves'>" + "".join(moves) + "</ul>") if moves else \
-            "<div class='gs-nomv'>이 시장 경쟁사 활동 기사 없음(수집 축적 중)</div>"
-        cards.append(
-            f'<div class="gs-card">'
-            f'<div class="gs-head">'
-            f'<span class="gs-flag">{flag}</span>'
-            f'<span class="gs-name">{_esc(name)}</span>'
-            f'<span class="gs-yoy" style="color:{col}">{yoy_txt}</span>'
-            f'</div>'
-            f'<div class="gs-exp">수출 ${m["exp_musd"]:,.0f}M '
-            f'<span class="gs-delta">(전년 대비 +${m["delta_musd"]:,.0f}M)</span></div>'
-            f'<div class="gs-why">이 시장에서 경쟁사가 한 일</div>'
-            f'{moves_html}'
-            f'</div>'
-        )
-    return f'<div class="gs-grid">{"".join(cards)}</div>'
 
 
 def _briefing_md_to_html(text: str) -> str:
@@ -2340,7 +2251,7 @@ a:hover { color: var(--gold); }
 .neg-src { color:var(--champ); font-size: 13px; white-space:nowrap; }
 /* ── 아마존 리테일 순위 추세 ── */
 .rt-head, .rt-row { display:grid; grid-template-columns:140px 1fr 62px 120px 74px; align-items:center; gap:12px; }
-.rt-head { font-size: 12.5px; font-weight:800; color:var(--champ); text-transform:uppercase; letter-spacing:.04em;
+.rt-head { font-size: 13.5px; font-weight:800; color:var(--champ); text-transform:uppercase; letter-spacing:.04em;
   padding:0 12px 8px; border-bottom:1px solid var(--border); }
 .rt-list { display:flex; flex-direction:column; }
 .rt-row { padding:11px 12px; border-bottom:1px solid rgba(58,70,130,.35); cursor:pointer; transition:background .12s; }
@@ -2356,31 +2267,31 @@ a:hover { color: var(--gold); }
 .rt-spark .spark .fill { fill:rgba(139,149,255,.10); stroke:none; }
 .rt-spark .spark .end { fill:var(--champ); }
 .rt-delta { font-family:var(--mono); font-size: 14.5px; font-weight:800; text-align:right; white-space:nowrap; }
-.rt-note { font-size: 13px; color:var(--lo); padding:10px 12px 0; }
+.rt-note { font-size: 14px; color:var(--lo); padding:10px 12px 0; }
 /* ── 국내 올리브영 ── */
 .oy-wrap { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 @media (max-width:900px) { .oy-wrap { grid-template-columns:1fr; } }
 .oy-block { background:var(--elevated); border:1px solid var(--border); border-radius:10px; padding:14px 15px; }
 .oy-bt { font-size: 15.5px; font-weight:800; color:var(--hi); margin-bottom:10px; }
-.oy-sub { font-size: 12.5px; font-weight:500; color:var(--lo); margin-left:6px; }
+.oy-sub { font-size: 13.5px; font-weight:500; color:var(--lo); margin-left:6px; }
 .oy-list { display:flex; flex-direction:column; }
 .oy-row { display:grid; grid-template-columns:38px 44px 1fr; align-items:center; gap:8px;
   padding:7px 4px; border-bottom:1px solid rgba(58,70,130,.32); }
 .oy-row:last-child, .oy-mv:last-child { border-bottom:none; }
 .oy-rank { font-family:var(--mono); font-size: 15.5px; font-weight:800; color:var(--champ2); }
-.oy-d { font-family:var(--mono); font-size: 13.5px; font-weight:800; text-align:center; }
+.oy-d { font-family:var(--mono); font-size: 14.5px; font-weight:800; text-align:center; }
 .oy-d.up { color:var(--teal); } .oy-d.dn { color:var(--coral); } .oy-d.fl { color:var(--lo); }
 .oy-brand { grid-column:3; font-size: 14.5px; font-weight:700; color:var(--mid); display:flex; align-items:center; gap:6px; }
 .oy-brand.oy-mon { color:var(--champ); } .oy-brand.oy-our { color:var(--teal); }
-.oy-prod { grid-column:3; font-size: 13px; color:var(--lo); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.oy-tag { font-size: 11px; font-weight:800; padding:1px 5px; border-radius:3px; }
+.oy-prod { grid-column:3; font-size: 14px; color:var(--lo); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.oy-tag { font-size: 12.5px; font-weight:800; padding:1px 5px; border-radius:3px; }
 .oy-tag.mon { background:rgba(139,149,255,.18); color:var(--champ); }
 .oy-tag.our { background:rgba(5,224,224,.16); color:var(--teal); }
 .oy-mv { display:grid; grid-template-columns:64px 1fr 42px 36px; align-items:center; gap:8px;
   padding:7px 4px; border-bottom:1px solid rgba(58,70,130,.32); }
-.oy-cat { font-size: 12px; font-weight:700; color:var(--champ); background:var(--deep);
+.oy-cat { font-size: 13px; font-weight:700; color:var(--champ); background:var(--deep);
   border-radius:4px; padding:2px 6px; text-align:center; white-space:nowrap; }
-.oy-mvname { font-size: 13.5px; color:var(--mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.oy-mvname { font-size: 14.5px; color:var(--mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .oy-mvname.oy-mon { color:var(--hi); font-weight:700; }
 .oy-mvrank { font-family:var(--mono); font-size: 14px; font-weight:700; color:var(--champ2); text-align:right; }
 .oy-rev-block { margin-top:16px; }
@@ -2391,9 +2302,9 @@ a:hover { color: var(--gold); }
 .oy-rev-brand { font-size: 14.5px; font-weight:700; color:var(--hi); display:flex; align-items:center; gap:5px; }
 .oy-score { font-family:var(--mono); font-size: 14.5px; font-weight:800; }
 .oy-score.low { color:var(--coral); } .oy-score.mid { color:var(--champ2); } .oy-score.hi { color:var(--teal); }
-.oy-rev-cnt { font-size: 12.5px; color:var(--lo); margin-left:auto; white-space:nowrap; }
+.oy-rev-cnt { font-size: 13.5px; color:var(--lo); margin-left:auto; white-space:nowrap; }
 .oy-kws { display:flex; flex-wrap:wrap; gap:4px; }
-.oy-kw { font-size: 12.5px; font-weight:600; padding:2px 7px; border-radius:4px; }
+.oy-kw { font-size: 13.5px; font-weight:600; padding:2px 7px; border-radius:4px; }
 .oy-kw.neg { background:rgba(255,107,122,.14); color:var(--coral); }
 .oy-kw.pos { background:rgba(5,224,224,.12); color:var(--teal); }
 /* ── 검색 탭 (MCP 챗봇) ── */
@@ -2507,7 +2418,7 @@ a:hover { color: var(--gold); }
   background: linear-gradient(90deg, rgba(239,83,83,0.55), rgba(239,83,83,0.75)); }
 .catb-cnt { font-size: 14px; color: var(--mid); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .catb-hi-cnt { color: #d83a33; font-weight: 700; margin-left: 2px; }
-.catb-top { grid-column: 2; font-size: 13px; color: var(--lo); margin-top: -4px; }
+.catb-top { grid-column: 2; font-size: 14px; color: var(--lo); margin-top: -4px; }
 .catb-top b { color: var(--mid); }
 @media (max-width: 640px) { .catb-row { grid-template-columns: 70px 1fr; } .catb-name { font-size: 13.5px; } }
 
@@ -2975,68 +2886,51 @@ _WORLDMAP_CSS = """
   letter-spacing: 0.1em; text-transform: uppercase;
   margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
 }
-.wm-alert-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 10px;
-}
-.wm-alert-card {
-  position: relative;
-  padding: 11px 13px 11px 16px;
-  background: rgba(255,255,255,0.045);
-  border: 1px solid rgba(120,150,220,0.16);
+/* 카드 그리드 → 한 줄 리스트. 같은 기사가 기록 탭에 전부 있으므로 여기선 훑기만 하면 된다. */
+.wm-alert-grid { border: 1px solid rgba(120,150,220,0.16); border-radius: 8px; overflow: hidden; }
+.wm-alert-line {
+  display: grid; grid-template-columns: 116px 84px 1fr 52px;
+  align-items: center; gap: 12px;
+  padding: 10px 14px; cursor: pointer;
+  border-bottom: 1px solid rgba(120,150,220,0.12);
   border-left: 3px solid #ef5a5a;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+  transition: background 0.12s;
 }
-.wm-alert-card:hover {
-  background: rgba(255,255,255,0.09);
-  border-color: rgba(120,150,220,0.4);
-  border-left-color: #ef5a5a;
-  transform: translateY(-1px);
+.wm-alert-line:last-child { border-bottom: 0; }
+.wm-alert-line:hover { background: rgba(120,150,220,0.09); }
+.wm-l-brand { font-size: 14.5px; font-weight: 700; color: #aab1f2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wm-l-cc { font-size: 13.5px; font-weight: 600; color: #c2ccdf; white-space: nowrap; }
+.wm-l-title { font-size: 14.5px; color: #eaf0fb; line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wm-l-date { font-size: 13px; color: #8b95b0; text-align: right;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 900px) {
+  .wm-alert-line { grid-template-columns: 1fr auto; }
+  .wm-l-title { grid-column: 1 / -1; white-space: normal; }
 }
-.wm-alert-badges { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
-.wm-alert-brand {
-  font-size: 14px; font-weight: 700; color: #aab1f2;
-  background: rgba(212,184,126,0.14); border-radius: 3px; padding: 2px 8px;
-  letter-spacing: 0.02em;
-}
-.wm-alert-cc {
-  font-size: 14px; font-weight: 600; color: #c2ccdf;
-  background: rgba(255,255,255,0.08); border-radius: 3px; padding: 2px 8px;
-}
-.wm-alert-title {
-  font-size: 15px; color: #eaf0fb; line-height: 1.5; font-weight: 500;
-  overflow: hidden; display: -webkit-box;
-  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-}
-.wm-alert-meta { font-size: 13.5px; color: #8b95b0; margin-top: 6px; font-variant-numeric: tabular-nums; }
-.wm-alert-empty { padding: 16px; color: #8b95b0; font-size: 13.5px; grid-column: 1 / -1; }
+.wm-alert-empty { padding: 16px; color: #8b95b0; font-size: 14px; }
 """
 
 
 def _render_worldmap_section(high_articles: list | None = None) -> str:
+    # 카드 8장은 기록 탭 기사 목록과 100% 겹쳐(실측 8/8) 같은 내용을 두 번 읽게 했다.
+    # 지도가 이미 '어디서 신호가 뜨는지'를 보여주므로 여기는 한 줄 리스트로 줄인다.
     alert_cards = []
     high_only = [a for a in (high_articles or []) if a.get("importance") == "high"][:8]
     for a in high_only:
         cc = a.get("country", "")
-        flag = COUNTRY_FLAGS.get(cc, "🌐")
-        date = _fmt_date(a.get("published_date", ""))[:10]
+        date = _fmt_date(a.get("published_date", ""))[5:10]
         brand = _esc(a.get("brand", ""))
         brand_js = brand.replace("'", "")
         title = _esc(a.get("title_ko") or a.get("title") or (a.get("details") or "")[:90])
-        src = _esc(a.get("source_name") or "")
-        meta = _esc(date) + (f" · {src}" if src else "")
         alert_cards.append(
-            f'<div class="wm-alert-card" onclick="openHeatmapDrilldown(\'{brand_js}\',\'{_esc(cc)}\')" '
+            f'<div class="wm-alert-line" onclick="openHeatmapDrilldown(\'{brand_js}\',\'{_esc(cc)}\')" '
             f'title="{brand} · {_esc(cc)} 전략 요약 보기">'
-            f'<div class="wm-alert-badges">'
-            f'<span class="wm-alert-brand">{brand}</span>'
-            f'<span class="wm-alert-cc">{flag} {_esc(cc)}</span>'
-            f'</div>'
-            f'<div class="wm-alert-title">{title}</div>'
-            f'<div class="wm-alert-meta">{meta}</div>'
+            f'<span class="wm-l-brand">{brand}</span>'
+            f'<span class="wm-l-cc">{_esc(_bf_cty(cc) if cc else "")}</span>'
+            f'<span class="wm-l-title">{title}</span>'
+            f'<span class="wm-l-date">{_esc(date)}</span>'
             f'</div>'
         )
 
@@ -4911,7 +4805,7 @@ def _build_full_html(
     respond_feed: list = None,
     brand_radar: list = None,
     category_battle: list = None,
-    expansion_playbook: list = None,
+    market_countries: dict = None,
     briefing_archive: list = None,
     momentum: list = None,
     market_text: str = "",
@@ -4973,13 +4867,12 @@ def _build_full_html(
     brand_high_html   = _render_brand_high_ratio(brand_high)
     brand_act_html    = _render_brand_activity_bar(brand_act)
     category_battle_html = _render_category_battle(category_battle or [])
-    expansion_playbook_html = _render_expansion_playbook(expansion_playbook or [])
+    market_countries_html = _render_market_countries(market_countries or {})
     briefing_archive_html = _render_briefing_archive(briefing_archive or [])
     _dg = digest or {}
     radar_html        = _render_brand_radar(brand_radar or [])
     demand_html       = _render_demand_signal(demand_tri or [])
     export_growth_html = _render_export_growth(export_growth or [], export_period or {}, export_stacked or {})
-    growth_story_html  = _render_growth_story(growth_story or {})
     all_companies_html = _render_all_companies(all_companies or {}, dart_yoy or {})
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
@@ -5245,26 +5138,9 @@ def _build_full_html(
     <!-- 글로벌 신호 지도 (브리핑에서 이동 — 공간 여유 있는 시장 탭 상단) -->
     {worldmap_section}
 
-    {category_battle_html}
-
-    <!-- 시장 성장 스토리 — 수출 성장(성과) x 그 시장 경쟁사 활동(뉴스) -->
-    <div class="section">
-      <div class="section-title">
-        🔥 뜨는 시장, 왜 크는가 <span class="section-sub">관세청 실수출 성장(YoY) + 같은 시장에서 경쟁사가 한 진출·입점·마케팅 — 발표(뉴스)·성과(수출)를 한눈에 대조</span>
-      </div>
-      {growth_story_html}
-    </div>
-
-    <!-- 브랜드 × 국가 분포 (근거자료 — 기본 접기, 근거 보기로 펼침) -->
-    <div class="section">
-      <details class="collapse-sec">
-        <summary class="collapse-summary">
-          <span class="collapse-title">브랜드 × 국가 분포</span>
-          <span class="section-sub">어느 시장에 경쟁이 집중되나 · 근거자료라 접어둠 — 클릭해 펼치기(셀 클릭 시 기사 목록)</span>
-        </summary>
-        <div class="collapse-body">{heatmap_html}</div>
-      </details>
-    </div>
+    <!-- 시장별 현황 — 옛 '뜨는 시장'(수출 YoY) + '해외 진출 플레이북'(진입 채널)을 통합.
+         둘이 같은 기사를 다른 형식으로 두 번 보여주고 있어 국가 카드 하나로 합쳤다. -->
+    {market_countries_html}
 
     <!-- 화장품 수출 규모·성장 전체 랭킹 (스킨케어 330499) -->
     <div class="section">
@@ -5274,26 +5150,41 @@ def _build_full_html(
       {export_growth_html}
     </div>
 
-    <!-- 아마존 리테일 순위 추세 — 실판매 채널 성과(누가 뜨고 지나) -->
+    <!-- 우리 카테고리 vs 경쟁 활동 — 시장(어디) 다음에 제품군(무엇) 순서로 읽히게 아래로 -->
+    {category_battle_html}
+
+    <!-- 아마존 리테일 순위 추세 — 길어서 접어둠(차트라 요약 줄이 따로 필요 없다) -->
     <div class="section">
-      <div class="section-title">
-        🛒 아마존 리테일 순위 추세 <span class="section-sub">아마존 베스트셀러 실순위(공식 BSR) 일별 스냅샷 — 첫날 대비 순위 변동으로 실판매에서 누가 뜨고 지는지 · 최근 15일</span><span class="section-basis">{b_amazon}</span>
-      </div>
-      {rank_trends_html}
+      <details class="collapse-sec">
+        <summary class="collapse-summary">
+          <span class="collapse-title">🛒 아마존 리테일 순위 추세</span>
+          <span class="section-sub">아마존 베스트셀러 실순위(공식 BSR) 일별 스냅샷 — 첫날 대비 순위 변동으로 누가 뜨고 지는지 · 최근 15일 · 클릭해 펼치기</span>
+        </summary>
+        <div class="collapse-body">{rank_trends_html}</div>
+      </details>
     </div>
 
-    <!-- 국내 올리브영 (국내 최대 H&B 채널 — 아마존 해외와 대조) -->
+    <!-- 브랜드 × 국가 분포 (근거자료 — 기본 접기) -->
     <div class="section">
-      <div class="section-title">
-        🇰🇷 국내 올리브영 <span class="section-sub">국내 최대 H&amp;B 채널 — 선케어(간판) 국내 랭킹 + 급변동 + 경쟁사 리뷰 감성(평점·긍정/부정 키워드). 아마존(해외)↔올영(국내) 대조</span><span class="section-basis">📅 {_bt} 최신 스냅샷 기준 · 리뷰 감성은 누적 반영</span>
-      </div>
-      {oliveyoung_html}
+      <details class="collapse-sec">
+        <summary class="collapse-summary">
+          <span class="collapse-title">브랜드 × 국가 분포</span>
+          <span class="section-sub">어느 시장에 경쟁이 집중되나 · 근거자료라 접어둠 — 클릭해 펼치기(셀 클릭 시 기사 목록). 국내(KR)는 건수가 압도적이라 열에서 제외</span>
+        </summary>
+        <div class="collapse-body">{heatmap_html}</div>
+      </details>
     </div>
 
-    {expansion_playbook_html}
-
-    <!-- (제거) 시장 종합 인사이트 — 브리핑 탭 주간종합/주목관점과 문장이 중복돼 삭제.
-         시장 탭은 뜨는시장·수출랭킹·아마존추세·국내올영 등 시장 고유 콘텐츠에 집중. -->
+    <!-- 국내 올리브영 — 해외 흐름을 끊지 않도록 맨 뒤로 보내고 접어둠 -->
+    <div class="section">
+      <details class="collapse-sec">
+        <summary class="collapse-summary">
+          <span class="collapse-title">🇰🇷 국내 올리브영</span>
+          <span class="section-sub">해외 시장 흐름과 구분해 맨 뒤에 접어둠 — 선케어 국내 랭킹 + 급변동 + 경쟁사 리뷰 감성 · 궁금할 때 클릭해 펼치기</span>
+        </summary>
+        <div class="collapse-body">{oliveyoung_html}</div>
+      </details>
+    </div>
   </div>
 
   <!-- ===== 탭: 재무 (NICE BizLine · 연 단위 · 비상장 포함) ===== -->
@@ -5984,8 +5875,13 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brand_high    = get_brand_high_ratio(session, days=days)
         country_stats = get_country_signal_stats(session, days=days)
         category_battle = get_category_battle(session, days=days)
-        # 해외 진출 플레이북은 진입 이벤트가 드물어 윈도우를 넓게(최소 90일) 잡아 밀도 확보
-        expansion_playbook = get_expansion_playbook(session, days=max(days, 90))
+        # 시장별 현황(통합) — 수출 YoY + 진입 채널 + 경쟁사 무브. 진입 이벤트가 드물어
+        # 뉴스 윈도우를 넓게(최소 90일) 잡아 밀도를 확보한다.
+        try:
+            market_countries = get_market_countries(session, days=max(days, 90))
+        except Exception as _e:
+            logger.warning("시장별 현황 조회 실패: %s", _e)
+            market_countries = {"overall": None, "countries": []}
         briefing_archive = get_briefings_list(session, limit=24)
         try:
             brand_radar = get_brand_radar(session)
@@ -6386,13 +6282,14 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         dart_yoy=dart_yoy,
         stories=stories,
         category_battle=category_battle,
-        expansion_playbook=expansion_playbook,
+        market_countries=market_countries,
         briefing_archive=briefing_archive,
         momentum=market_momentum,
         market_text=period_data.get(days, {}).get("market", ""),
         digest={
             "stats": dg_stats, "cat": dg_cat, "high": dg_high,
-            "expansion": expansion_playbook, "market": dg_market,
+            "expansion": (market_countries or {}).get("countries") or [],
+            "market": dg_market,
             "ref_date": (datetime.utcnow() + timedelta(hours=9)).strftime("%-m/%-d")
                         if os.name != "nt" else (datetime.utcnow() + timedelta(hours=9)).strftime("%#m/%#d"),
         },
@@ -6408,6 +6305,123 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
 
 
 # 데이터 탐색 탭 — f-string 밖의 평문 상수로 둔다(CSS/JS 중괄호를 일일이 escape 하지 않으려고).
+# 시장 탭 통합 국가 카드 — '뜨는 시장'과 '해외 진출 플레이북'을 한 카드로.
+# 접힌 줄만으로 판단이 서도록 수출 성장률·경쟁 활동·진입 채널을 한 줄에 싣는다.
+_MKC_STYLE = """<style>
+#mkc .mk-tog{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+#mkc .mk-tog button{background:rgba(255,255,255,.04);border:1px solid #26314e;color:#93a0bd;
+  border-radius:7px;padding:8px 15px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit}
+#mkc .mk-tog button:hover{color:#cfe0ff;border-color:#3d5266}
+#mkc .mk-tog button.on{background:rgba(74,143,212,.18);border-color:rgba(74,143,212,.5);color:#8fb4ff}
+#mkc .mk-list{border:1px solid #26314e;border-radius:10px;overflow:hidden}
+#mkc .mrow{padding:14px 16px;cursor:pointer;border-bottom:1px solid rgba(37,49,76,.55);
+  transition:background .12s}
+#mkc .mrow:last-child{border-bottom:0}
+#mkc .mrow:hover{background:rgba(90,139,245,.07)}
+#mkc .mhead{display:grid;grid-template-columns:18px 128px 108px 1fr;align-items:center;gap:14px}
+#mkc .tri{color:#6b769a;font-size:13px;transition:transform .15s;display:inline-block}
+#mkc .tri.op{transform:rotate(90deg);color:#e0ad4a}
+#mkc .mname{font-size:17px;font-weight:800;color:#f2f5fc}
+#mkc .myoy{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right}
+#mkc .up{color:#63e3a5} #mkc .dn{color:#ff7a62} #mkc .na{color:#6b769a;font-weight:600;font-size:13px}
+#mkc .mmeta{font-size:13.5px;color:#aeb8cf;display:flex;flex-wrap:wrap;gap:0 16px;align-items:baseline}
+#mkc .mmeta b{color:#e7ecf7;font-weight:700;font-variant-numeric:tabular-nums}
+#mkc .mbl{color:#e7ecf7;font-weight:600}
+#mkc .mchip{display:inline-block;font-size:12.5px;color:#8fb4ff;background:rgba(74,143,212,.12);
+  border:1px solid rgba(74,143,212,.26);border-radius:5px;padding:2px 8px;margin:0 5px 0 0}
+#mkc .mexp{display:none;padding:2px 16px 18px 50px;background:#0f1726;
+  border-bottom:1px solid rgba(37,49,76,.55)}
+#mkc .mexp.op{display:block}
+#mkc .mitem{padding:11px 0;border-top:1px solid rgba(37,49,76,.5);font-size:14.5px;line-height:1.6}
+#mkc .mitem:first-child{border-top:0}
+#mkc .mbrand{font-weight:800;color:#e7ecf7;margin-right:9px;font-size:15px}
+#mkc .mact{font-size:12px;font-weight:700;color:#e6c179;background:rgba(224,173,74,.12);
+  border-radius:5px;padding:2px 8px;margin-right:8px}
+#mkc .mch{font-size:12.5px;color:#8fb4ff;margin-right:8px}
+#mkc .mitem a{color:#cfd7e8;text-decoration:none}
+#mkc .mitem a:hover{color:#8fb4ff;text-decoration:underline}
+#mkc .mnone{padding:16px;color:#8490b0;font-size:14px}
+#mkc .mk-note{font-size:12.5px;color:#8490b0;margin-top:11px;line-height:1.75}
+#mkc .mk-note b{color:#b9c4dd}
+</style>"""
+
+
+def _render_market_countries(data: dict, limit: int = 18) -> str:
+    """국가 하나에 수출 성장·진입 채널·경쟁사 무브를 모아 접기/펼치기로 보여준다."""
+    countries = (data or {}).get("countries") or []
+    if not countries:
+        return '<p class="no-data">시장 데이터 축적 중(관세청 수출 + 경쟁사 활동 기사)</p>'
+    payload = [{
+        "cc": c["cc"], "n": c["name"],
+        "y": c["yoy_pct"], "e": c["exp_musd"],
+        "m": c["moves"], "b": c["brand_count"],
+        "ch": c["channels"][:4], "bl": c.get("brands") or [],
+        "it": [{"b": i.get("brand") or "", "a": (i.get("activity_type") or "").replace("_", " "),
+                "c": i.get("channel") or "", "t": (i.get("title") or "")[:120],
+                "u": i.get("url") or ""} for i in c["items"]],
+    } for c in countries[:limit]]
+    js = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    n_exp = sum(1 for c in countries[:limit] if c["yoy_pct"] is not None)
+    return (_MKC_STYLE + f'''
+    <div class="section" id="mkc">
+      <div class="section-title">🌏 시장별 현황 <span class="section-sub">
+        수출 성장률(관세청)과 그 시장에서 경쟁사가 한 일(진입 채널·뉴스)을 한 곳에서 —
+        상위 {len(payload)}개국 중 수출 통계 보유 {n_exp}개국 · 줄을 누르면 상세</span></div>
+      <div class="mk-tog">
+        <button id="mk-y" class="on" onclick="mkSort('y')">수출 성장률순</button>
+        <button id="mk-m" onclick="mkSort('m')">경쟁사 활동 많은 순</button>
+        <button id="mk-b" onclick="mkSort('b')">진입 브랜드 많은 순</button>
+      </div>
+      <div class="mk-list" id="mk-list"></div>
+      <p class="mk-note">수출 성장률은 <b>관세청 화장품(HS 3304) 최근 3개월 누적</b>을 전년 같은 기간과 비교한 값이다.
+        수출 통계가 없는 국가는 <b>—</b>로 두고 경쟁사 활동만 보여준다.<br>
+        진입 채널은 기사에 적힌 리테일러를 모은 것이라 <b>그 시장의 전부는 아니다</b> — 경쟁사가 쓴 경로의 표본으로 읽어야 한다.
+        국내(KR)는 해외 진출 관점이 아니므로 제외했다.</p>
+    </div>
+    <script>
+    var MKC={js}, MK_SORT='y';
+    function mkEsc(s){{ return String(s==null?'':s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }}
+    function mkTg(i){{ var e=document.getElementById('mke'+i), t=document.getElementById('mkt'+i);
+      if(e){{ e.classList.toggle('op'); t.classList.toggle('op'); }} }}
+    function mkSort(k){{ MK_SORT=k;
+      ['y','m','b'].forEach(function(x){{ document.getElementById('mk-'+x).className=(x===k)?'on':''; }});
+      mkRender(); }}
+    function mkRender(){{
+      var list=MKC.slice().sort(function(a,b){{
+        // 수출 통계가 없는 국가는 성장률 정렬에서 맨 뒤로(0%로 오해하면 안 된다)
+        if(MK_SORT==='y'){{
+          var av=(a.y===null||a.y===undefined)?-1e9:a.y, bv=(b.y===null||b.y===undefined)?-1e9:b.y;
+          return bv-av; }}
+        return (b[MK_SORT]||0)-(a[MK_SORT]||0); }});
+      document.getElementById('mk-list').innerHTML=list.map(function(c,i){{
+        var yo = (c.y===null||c.y===undefined) ? '<span class="na">수출 —</span>'
+               : '<span class="'+(c.y>=0?'up':'dn')+'">'+(c.y>=0?'+':'')+Math.round(c.y)+'%</span>';
+        var chips=(c.ch||[]).map(function(x){{ return '<span class="mchip">'+mkEsc(x)+'</span>'; }}).join('');
+        // 접힌 줄에서 '누가 · 어디로' 들어갔는지가 한 번에 읽히게 브랜드와 채널을 같이 보여준다
+        var bl=(c.bl||[]).map(mkEsc).join(', ');
+        var meta='<span>활동 <b>'+(c.m||0)+'</b>건</span>'
+               + (bl?'<span class="mbl">'+bl+(c.b>(c.bl||[]).length?' 외 '+(c.b-(c.bl||[]).length):'')+'</span>':'')
+               + (chips?'<span>'+chips+'</span>':'');
+        var items=(c.it||[]).map(function(t){{
+          var a=t.u?('<a href="'+mkEsc(t.u)+'" target="_blank" rel="noopener">'+mkEsc(t.t)+'</a>')
+                   :mkEsc(t.t);
+          return '<div class="mitem"><span class="mbrand">'+mkEsc(t.b)+'</span>'
+               + (t.a?'<span class="mact">'+mkEsc(t.a)+'</span>':'')
+               + (t.c?'<span class="mch">'+mkEsc(t.c)+'</span>':'')+a+'</div>'; }}).join('')
+          || '<div class="mnone">이 시장에서 잡힌 경쟁사 활동 기사가 아직 없다.</div>';
+        return '<div class="mrow" onclick="mkTg('+i+')"><div class="mhead">'
+             + '<span class="tri" id="mkt'+i+'">▸</span>'
+             + '<span class="mname">'+mkEsc(c.n)+'</span>'
+             + '<span class="myoy">'+yo+'</span>'
+             + '<span class="mmeta">'+meta+'</span></div></div>'
+             + '<div class="mexp" id="mke'+i+'">'+items+'</div>'; }}).join('');
+    }}
+    mkRender();
+    </script>''')
+
+
 _DX_STYLE = """<style>
 #dx .dx-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;margin:0 0 16px}
 #dx .dx-card{background:#0f1726;border:1px solid #26314e;border-radius:10px;padding:12px 14px;cursor:pointer;
