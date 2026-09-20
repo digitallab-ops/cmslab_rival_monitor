@@ -49,6 +49,25 @@ def _post_to(url: str, payload: dict) -> bool:
         return False
 
 
+def mention_prefix() -> str:
+    """관리자 멘션 문자열(`<@U123> <@U456> `) — 없으면 빈 문자열.
+
+    채널을 음소거해도 **본인 멘션은 알림이 뜬다**(@channel은 음소거 채널에서 안 뜬다).
+    그래서 사람이 승인·조치해야 하는 알림에만 붙인다. 정기 브리핑에까지 달면
+    음소거한 이유가 그대로 돌아온다.
+
+    ID는 SLACK_MENTION_IDS, 없으면 SLACK_BRAND_ADMINS를 쓴다(승인 권한자와 대체로 같다).
+    슬랙 봇에게 `내 아이디`라고 물으면 본인 ID를 알려준다.
+    """
+    raw = (os.getenv("SLACK_MENTION_IDS", "")
+           or os.getenv("SLACK_BRAND_ADMINS", "")).strip()
+    ids = [x.strip() for x in raw.split(",") if x.strip()]
+    if not ids:
+        return ""
+    # 이미 <@...> 형태로 넣어둔 경우도 받아준다
+    return " ".join(i if i.startswith("<@") else f"<@{i}>" for i in ids) + " "
+
+
 def _post(payload: dict, secondary: bool = False) -> bool:
     """기본 채널로 전송. secondary=True면 두 번째 채널(SLACK_WEBHOOK_URL_2)에도 함께 전송.
 
@@ -66,11 +85,16 @@ def _post(payload: dict, secondary: bool = False) -> bool:
 
 
 def send_watchdog(title: str, body: str) -> bool:
-    """AI 파수꾼 리포트(수집 이상·잡 실패 진단) — 개인/수집 채널만(시끄러워도 OK)."""
+    """AI 파수꾼 리포트(수집 이상·잡 실패 진단) — 개인/수집 채널만(시끄러워도 OK).
+
+    사람이 들여다봐야 하는 이상 신호라 관리자를 멘션한다(음소거해도 멘션은 뜬다).
+    """
+    mp = mention_prefix()
     payload = {
-        "text": title,
+        "text": f"{mp}{title}",
         "blocks": [
-            {"type": "section", "text": {"type": "mrkdwn", "text": f"*{title}*\n\n{body}"[:2900]}},
+            {"type": "section",
+             "text": {"type": "mrkdwn", "text": f"{mp}*{title}*\n\n{body}"[:2900]}},
             {"type": "divider"},
         ],
     }

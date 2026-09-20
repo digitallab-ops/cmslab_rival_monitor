@@ -251,11 +251,12 @@ def run() -> dict:
 def _notify_slack(cands: list[dict]) -> None:
     """새 후보를 슬랙으로 제안(제안만 — 승인은 봇에서 `추가 <브랜드>`)."""
     try:
-        from notifications.slack import _post
+        from notifications.slack import _post, mention_prefix
     except Exception as e:
         logger.warning("슬랙 모듈 로드 실패: %s", e)
         return
-    lines = [f"*🆕 신흥 브랜드 후보 {len(cands)}건* — 레이더에 없던 브랜드가 최근 뉴스에 떴어요",
+    # 승인해야 넘어가는 알림이라 관리자를 멘션한다 — 채널을 음소거해도 멘션은 뜬다
+    lines = [f"{mention_prefix()}*🆕 신흥 브랜드 후보 {len(cands)}건* — 레이더에 없던 브랜드가 최근 뉴스에 떴어요",
              "_봇에게(@멘션): `승인 <브랜드>` 등록 · `후보` 목록 · `제외 <브랜드>` 무시_",
              "_※ 등록/제외는 관리자만(SLACK_BRAND_ADMINS). 내 ID는 `내 아이디`_", ""]
     for c in cands[:15]:
