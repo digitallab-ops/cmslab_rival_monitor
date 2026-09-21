@@ -273,8 +273,14 @@ def _brand_command(text: str, user_id: str = ""):
     """신흥 브랜드 후보 명령. 명령이면 응답 문자열, 아니면 None(→ 일반 Q&A로).
     조회(후보)는 누구나, 등록/제외(쓰기)는 SLACK_BRAND_ADMINS만."""
     t = (text or "").strip()
-    if t in ("내 아이디", "내아이디", "myid", "my id"):
-        return f"당신의 Slack ID: `{user_id}`  (브랜드 승인 권한이 필요하면 이 ID를 SLACK_BRAND_ADMINS에 추가)"
+    # 정확히 '내 아이디'만 받다 보니 '내 ID', '내 슬랙 id 뭐냐고'가 LLM으로 새서
+    # "개인 정보는 확인할 수 없습니다"라고 거절당했다. 표현 변주를 폭넓게 받는다.
+    _t = re.sub(r"[?？!！.\s]+", "", t.lower())
+    if re.fullmatch(r"(내|나의|제)?(슬랙|slack)?(아이디|id)(뭐야|뭐냐고|뭐임|알려줘|좀|은|는)*", _t) \
+            or _t in ("myid", "myslackid", "whatsmyid"):
+        return (f"당신의 Slack ID: `{user_id}`\n"
+                f"_알림을 받으려면 이 ID를 `SLACK_MENTION_IDS`에, "
+                f"브랜드 승인 권한이 필요하면 `SLACK_BRAND_ADMINS`에 넣으세요._")
 
     def _can_write():
         return bool(_BRAND_ADMINS) and user_id in _BRAND_ADMINS
