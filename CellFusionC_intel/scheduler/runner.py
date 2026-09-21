@@ -3,7 +3,7 @@ APScheduler 스케줄
 
 - Tier1 브랜드 × Tier1 국가: 매일 18:00 KST (업무시간 이후 — 피크 16시 이후 수집)
 - 전체 브랜드 × 전체 국가: 매주 월요일 20:00 KST (주간 풀스캔)
-- 주간 모멘텀 계산: 매주 월요일 19:00 KST
+- 주간 모멘텀 계산: 매주 화요일 06:00 KST (월요일 밤 풀스캔 뒤)
 - 주간 중복 정리: 매주 일요일 19:00 KST
 (Render는 유료플랜 상시가동 — keep-alive 핑 불필요, 제거됨)
 """
@@ -157,12 +157,22 @@ def job_weekly_full() -> None:
 
 TIER_CHANGE_COOLDOWN_DAYS = 14   # 최근 변경 후 이 기간 내 재변경 금지 (플립플롭 방지)
 
-# 비율(모멘텀)과 무관하게 '양'만으로 승급시키는 기준. 티어는 '얼마나 자주 수집할까'를
-# 정하는 값인데 기존 승급 조건이 rising(비율>1.5)뿐이라, 꾸준히 많은 브랜드가 영영
-# 티어2에 남았다 — 실측에서 Celimax(최근4주 12건)가 Amuse(5건)보다 많은데 Amuse만 승급.
-# 10은 근거가 있다: 현재 티어1 최소가 10건이라 기존 티어1 전원이 만족하는 최대값이고,
-# 경계 역전(티어2 최대 12 > 티어1 최소 10)을 해소하는 최소값이다.
-TIER1_VOLUME_MIN = 10
+# 비율(모멘텀)과 무관하게 '활동량'만으로 승급시키는 기준. 기존 승급 조건이
+# rising(비율>1.5)뿐이라 꾸준히 많은 브랜드가 영영 티어2에 남았다.
+#
+# 단 '건수'가 아니라 strategic_score 60점 이상 건수를 센다. 기사 수만 보면 증시 스침
+# 기사가 실적_공시로 분류돼 물량을 채운다 — 실측 노이즈 비율이 Mediheal 67%,
+# Goodal 75%였다. 반면 티어2인 Celimax는 17%로 훨씬 깨끗했다. 양이 아니라 질이다.
+#
+# 8인 근거: 티어2 상위가 Celimax 10 · Mixsoon 7이고 티어1 하위가 Numbuzin 7 · Abib 8이다.
+# 8이면 오늘 Celimax만 올라가 급격한 변화가 없고, Mixsoon은 한 건만 더 쌓이면 자연히
+# 올라온다. 70점+는 티어1 최소가 2건이라 표본이 작아 한두 건에 판정이 뒤집힌다.
+TIER1_QUALITY_MIN = 8
+
+# 승급은 품질로 바꿨지만 강등은 아직 건수 기준이다. 품질까지 강등에 넣으면 한 번에
+# 여러 브랜드가 내려갈 수 있어(Goodal 등) 몇 주 관찰이 필요하다. 그 관찰을 사람 기억에
+# 맡기지 않으려고, 기준 미달 티어1을 매주 슬랙으로 보고만 한다(자동 강등은 하지 않음).
+TIER1_NOISE_WATCH_PCT = 60
 
 
 def job_weekly_momentum() -> None:
@@ -181,14 +191,14 @@ def job_weekly_momentum() -> None:
 
             # 자동 티어링 — 승급 경로 둘, 강등 하나.
             #  ① 급상승: rising(비율>1.5) & 최근4주≥5 — 작지만 빠르게 뜨는 브랜드
-            #  ② 절대량: 최근4주≥TIER1_VOLUME_MIN — 비율이 평평해도 양이 많으면 자주 봐야 한다
+            #  ② 양질 활동: 60점+ 기사≥TIER1_QUALITY_MIN — 비율이 평평해도 알맹이가 많으면 자주 본다
             #  강등: cooling & 최근4주≤2 — 양까지 말랐을 때만(양이 많으면 비율이 꺾여도 유지)
             _rising = s["signal"] == "rising" and s["recent_4w"] >= 5
-            _bulky = s["recent_4w"] >= TIER1_VOLUME_MIN
+            _bulky = s.get("recent_q", 0) >= TIER1_QUALITY_MIN
             want_promote = s["tier"] == 2 and (_rising or _bulky)
             want_demote = (s["signal"] == "cooling" and s["tier"] == 1
                            and s["recent_4w"] <= 2)
-            promote_why = "급상승" if _rising else "활동량"
+            promote_why = "급상승" if _rising else "양질 활동"
             if not (want_promote or want_demote):
                 continue
 
@@ -209,10 +219,19 @@ def job_weekly_momentum() -> None:
                 logger.info("⬇  강등 T1→2: %-20s  momentum=%.2fx  (최근4주=%d건)",
                             s["brand"], s["momentum"], s["recent_4w"])
 
-        logger.info("모멘텀 갱신 완료 (%d개 브랜드, 승급 %d / 강등 %d)",
-                    len(scores), len(promoted), len(demoted))
-        if promoted or demoted:
-            _notify_tier_changes(promoted, demoted)
+        # 강등에는 아직 품질을 안 넣었다(한 번에 여러 개가 내려갈 수 있어 관찰이 필요).
+        # 그 관찰을 사람이 기억하지 않아도 되도록, 기준 미달 티어1을 매주 같이 올린다.
+        watch = [s for s in scores
+                 if s["tier"] == 1
+                 and s.get("recent_q", 0) < TIER1_QUALITY_MIN
+                 and s["recent_4w"] >= 3          # 표본이 너무 적으면 판단 보류
+                 and s.get("noise_pct", 0) >= TIER1_NOISE_WATCH_PCT]
+        watch.sort(key=lambda s: -s.get("noise_pct", 0))
+
+        logger.info("모멘텀 갱신 완료 (%d개 브랜드, 승급 %d / 강등 %d / 품질관찰 %d)",
+                    len(scores), len(promoted), len(demoted), len(watch))
+        if promoted or demoted or watch:
+            _notify_tier_changes(promoted, demoted, watch)
     except Exception as e:
         logger.error("모멘텀 계산 오류: %s", e)
     finally:
@@ -220,8 +239,9 @@ def job_weekly_momentum() -> None:
     logger.info("=== [주간] 모멘텀 계산 완료 ===")
 
 
-def _notify_tier_changes(promoted: list[str], demoted: list[str]) -> None:
-    """티어 변경 시 Slack 알림 (webhook 없으면 스킵)."""
+def _notify_tier_changes(promoted: list[str], demoted: list[str],
+                         watch: list[dict] | None = None) -> None:
+    """티어 변경 + 품질 관찰 대상 Slack 알림 (webhook 없으면 스킵)."""
     url = os.getenv("SLACK_WEBHOOK_URL", "")
     if not url:
         return
@@ -230,9 +250,23 @@ def _notify_tier_changes(promoted: list[str], demoted: list[str]) -> None:
         lines.append("⬆ *승급 (Tier2→1)*: " + ", ".join(promoted))
     if demoted:
         lines.append("⬇ *강등 (Tier1→2)*: " + ", ".join(demoted))
+    if watch:
+        lines.append("")
+        lines.append(f"👀 *티어1인데 양질 기사가 {TIER1_QUALITY_MIN}건 미만* "
+                     f"— 강등 후보지만 자동으로 내리진 않았어요")
+        for s in watch[:8]:
+            lines.append(f"   • {s['brand']} — 기사 {s['recent_4w']}건 중 "
+                         f"쓸만한 건 {s.get('recent_q', 0)}건 (노이즈 {s.get('noise_pct', 0)}%)")
+        lines.append("_몇 주 지켜보고 계속 이러면 강등 기준에 품질을 넣는 걸 검토하세요._")
     try:
         import json
-        data = json.dumps({"text": "*브랜드 티어 자동 조정*\n" + "\n".join(lines)}).encode("utf-8")
+        # 관찰 대상이 뜬 주에는 사람이 판단해야 하므로 멘션을 붙인다(음소거해도 알림이 뜬다).
+        try:
+            from notifications.slack import mention_prefix
+            mp = mention_prefix() if watch else ""
+        except Exception:
+            mp = ""
+        data = json.dumps({"text": f"{mp}*브랜드 티어 자동 조정*\n" + "\n".join(lines)}).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=10)
     except Exception as e:
@@ -571,12 +605,14 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # 매주 화요일 09:10 KST — 신흥 브랜드 발견(미등록 브랜드 탐지 → 슬랙 후보 제안)
+    # 매일 09:10 KST — 신흥 브랜드 발견(미등록 브랜드 탐지 → 슬랙 후보 제안).
+    # 주 1회였을 때는 '다른 날 재등장' 확인에 2주가 걸렸다. 매일 돌리면 이틀이면 된다.
+    # 비용은 RSS + gpt-4o-mini 1회라 무시할 수준이다.
     scheduler.add_job(
         job_brand_discovery,
-        trigger=CronTrigger(day_of_week="tue", hour=9, minute=10),
+        trigger=CronTrigger(hour=9, minute=10),
         id="brand_discovery",
-        name="[주간] 신흥 브랜드 발견",
+        name="[일별] 신흥 브랜드 발견",
         max_instances=1,
         coalesce=True,
     )

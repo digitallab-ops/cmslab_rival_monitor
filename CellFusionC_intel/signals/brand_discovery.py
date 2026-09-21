@@ -37,7 +37,8 @@ _QUERIES = [
     ('"korean skincare" brand (launch OR viral OR Sephora OR breakout)', "en-US", "US", "US:en"),
 ]
 
-_MENTION_MIN = 2            # 이 이상 언급된 후보만 제안
+_MENTION_MIN = 2            # 한 번의 스냅샷에서 이 이상 언급돼야 관찰 대상
+_WATCH_WINDOW_DAYS = 14     # 첫 목격 후 이 기간 안에 재등장해야 제안(넘으면 관찰 재시작)
 _MAX_HEADLINES = 110        # LLM 입력 상한(토큰·비용 관리)
 
 # 브랜드가 아닌 것(유통사·플랫폼·제조사·그룹·일반명사) — LLM이 놓쳐도 여기서 확정 제거.
@@ -112,8 +113,10 @@ def _known_set(session) -> tuple[set, set]:
         pass
     try:  # 이미 제안/처리(제외 포함)된 후보는 재제안 안 함.
         # 변형까지 넣어야 'A.P.R.'을 제외해도 'APR'로 다시 올라오는 일이 없다.
+        # 단 watching은 빼면 안 된다 — 재포착돼야 pending으로 승격되기 때문이다.
         for r in session.execute(text(
-                f"SELECT name, ko_name FROM {DB_SCHEMA}.brand_candidates")).fetchall():
+                f"SELECT name, ko_name FROM {DB_SCHEMA}.brand_candidates "
+                f"WHERE status <> 'watching'")).fetchall():
             if r[0]:
                 en |= {v.lower() for v in _corp_variants(r[0])}
             if r[1]:
@@ -227,15 +230,48 @@ def run() -> dict:
             if cnt < _MENTION_MIN:
                 continue
             samples = " · ".join(h for h in headlines if any(k in h for k in keys))[:400]
+
+            # 하루치 스냅샷만 보고 제안하면 보도자료 하나가 여러 매체에 실린 것도
+            # 후보가 된다(A.P.R.이 그 사례 — 같은 날 운영사 비교 기사 2건).
+            # 첫 포착은 watching으로 재워두고, **다른 날** 또 잡혀야 pending으로 올린다.
+            prev = session.execute(text(
+                f"SELECT status, first_seen, last_seen FROM {DB_SCHEMA}.brand_candidates "
+                f"WHERE name = :n"), {"n": name}).fetchone()
+
+            if prev is None:
+                session.execute(text(f"""
+                    INSERT INTO {DB_SCHEMA}.brand_candidates
+                        (name, ko_name, mention_count, sample_titles, status, first_seen, last_seen)
+                    VALUES (:n, :ko, :c, :s, 'watching', :cap, :cap)
+                """), {"n": name, "ko": ko or None, "c": cnt, "s": samples, "cap": cap})
+                logger.info("   👀 관찰 시작: %s (언급 %d건)", name, cnt)
+                continue
+
+            status, first_seen, last_seen = prev[0], prev[1], prev[2]
+            if status != "watching":
+                continue                      # pending/approved/rejected는 건드리지 않는다
+
+            if last_seen == cap:
+                continue                      # 같은 날 재실행 — 새로운 목격이 아니다
+
+            # 첫 목격이 오래됐으면 연속성이 끊긴 것 → 관찰을 처음부터 다시 센다
+            if first_seen and (cap - first_seen).days > _WATCH_WINDOW_DAYS:
+                session.execute(text(
+                    f"UPDATE {DB_SCHEMA}.brand_candidates SET first_seen=:cap, last_seen=:cap, "
+                    f"mention_count=:c, sample_titles=:s WHERE name=:n"),
+                    {"n": name, "c": cnt, "s": samples, "cap": cap})
+                logger.info("   👀 관찰 재시작(간격 초과): %s", name)
+                continue
+
             session.execute(text(f"""
-                INSERT INTO {DB_SCHEMA}.brand_candidates
-                    (name, ko_name, mention_count, sample_titles, status, first_seen, last_seen)
-                VALUES (:n, :ko, :c, :s, 'pending', :cap, :cap)
-                ON CONFLICT (name) DO UPDATE SET
-                    mention_count = GREATEST({DB_SCHEMA}.brand_candidates.mention_count, EXCLUDED.mention_count),
-                    sample_titles = EXCLUDED.sample_titles, last_seen = EXCLUDED.last_seen
-            """), {"n": name, "ko": ko or None, "c": cnt, "s": samples, "cap": cap})
-            new_candidates.append({"name": name, "ko": ko, "count": cnt,
+                UPDATE {DB_SCHEMA}.brand_candidates
+                SET status='pending', last_seen=:cap, sample_titles=:s,
+                    mention_count=GREATEST(mention_count, :c), proposed_at=NOW()
+                WHERE name=:n
+            """), {"n": name, "c": cnt, "s": samples, "cap": cap})
+            days = (cap - first_seen).days if first_seen else 0
+            logger.info("   ✅ 제안 승격: %s (%d일에 걸쳐 재등장)", name, days)
+            new_candidates.append({"name": name, "ko": ko, "count": cnt, "days": days,
                                    "sample": samples.split(" · ")[0] if samples else ""})
         session.commit()
         logger.info("발견: 헤드라인 %d · 추출 %d · 신규 후보 %d",

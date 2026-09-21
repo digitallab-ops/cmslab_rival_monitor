@@ -2367,6 +2367,13 @@ def compute_brand_momentum(session: Session) -> list[dict]:
                               AND  published_date <  :prev_end)                    AS prev_4w,
             COUNT(*) FILTER (WHERE published_date >= :recent_start
                               AND  importance = 'high')                            AS recent_high,
+            -- 양이 아니라 질로 티어를 정하기 위한 축. 증시 스침 기사('[특징주] …
+            -- 오가닉티코스메틱 상한가')가 실적_공시로 분류돼 건수를 부풀리는데,
+            -- 분류기의 strategic_score는 그런 걸 이미 낮게 준다(기타 평균 30 vs
+            -- 신시장_진출 80). 제목 키워드로 자르면 'Costco 입점 — 주가 100% 급등'
+            -- 같은 진짜 사건까지 죽으므로 점수를 쓴다.
+            COUNT(*) FILTER (WHERE published_date >= :recent_start
+                              AND  COALESCE(strategic_score, 0) >= 60)             AS recent_q,
             COUNT(*)                                                               AS total
         FROM {DB_SCHEMA}.news_articles
         WHERE published_date >= :prev_start AND published_date < :now_cap
@@ -2390,7 +2397,8 @@ def compute_brand_momentum(session: Session) -> list[dict]:
     import math
     result = []
     for r in rows:
-        brand, recent, prev, recent_high, total = r[0], r[1] or 0, r[2] or 0, r[3] or 0, r[4] or 0
+        brand, recent, prev = r[0], r[1] or 0, r[2] or 0
+        recent_high, recent_q, total = r[3] or 0, r[4] or 0, r[5] or 0
         # prev_4w가 3건 미만이면 이전 기간 데이터 부족 → momentum neutral 처리
         if prev < 3:
             momentum = 1.0
@@ -2412,6 +2420,8 @@ def compute_brand_momentum(session: Session) -> list[dict]:
             "recent_4w":    recent,
             "prev_4w":      prev,
             "recent_high":  recent_high,
+            "recent_q":     recent_q,     # strategic_score 60+ 건수(= 실질 신호량)
+            "noise_pct":    round((1 - recent_q / recent) * 100) if recent else 0,
             "total_8w":     total,
             "_sort_score":  sort_score,
         })
