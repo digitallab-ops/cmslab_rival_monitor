@@ -601,6 +601,28 @@ async def api_explore_csv(dataset: str = Query("news"),
     return StreamingResponse(_stream(), media_type="text/csv; charset=utf-8", headers=headers)
 
 
+# ── 재무 탭 회사 목록 ─────────────────────────────────────────────────────────
+# 7,209개사를 대시보드 HTML에 통째로 박으면 979KB가 재무 탭을 열지 않는 사람에게도
+# 매번 나가고, 구매 데이터(NICE BizLine)가 인증 없이 그대로 노출된다. HTML에는
+# 모니터링 브랜드만 싣고 '화장품업 전체'·'전체 기업'을 누를 때 여기서 받아간다.
+
+_COMPANY_SCOPES = {"monitored", "cosmetic", "all"}
+
+
+@app.get("/api/companies")
+async def api_companies(scope: str = Query("cosmetic")):
+    """재무 탭 회사 행 데이터. scope: monitored | cosmetic | all."""
+    if scope not in _COMPANY_SCOPES:
+        return JSONResponse({"error": "알 수 없는 범위"}, status_code=400)
+    try:
+        from dashboard.generate import build_companies_payload
+        rows = await asyncio.to_thread(build_companies_payload, scope)
+        return JSONResponse({"scope": scope, "rows": rows})
+    except Exception as e:
+        logger.warning("회사 목록 조회 실패 [%s]: %s", scope, e)
+        return JSONResponse({"error": "조회 중 오류가 발생했습니다."}, status_code=500)
+
+
 # ── 로컬 실행 ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

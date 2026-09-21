@@ -4943,46 +4943,7 @@ def _build_full_html(
 
     _pd = period_data or {}
     period_data_for_js = {
-        str(p): {
-            "kpi": {
-                "total":     v["kpi"]["total"],
-                "high":      v["kpi"]["high"],
-                "brands":    v["kpi"]["brands"],
-                "countries": v["kpi"]["countries"],
-                "prev_total":     v["kpi"].get("prev_total", 0),
-                "prev_high":      v["kpi"].get("prev_high", 0),
-                "prev_brands":    v["kpi"].get("prev_brands", 0),
-                "prev_countries": v["kpi"].get("prev_countries", 0),
-                "spark":          v["kpi"].get("spark", []),
-            },
-            "articles":      v["articles"],
-            "country_stats": v["country_stats"],
-            "market":        _esc_s(v.get("market", "")),
-            "synth_html":    _render_synth(
-                {"total": v["kpi"]["total"], "high": v["kpi"]["high"],
-                 "brands_active": v["kpi"]["brands"], "countries_active": v["kpi"]["countries"]},
-                v.get("market", ""), growth_story or {}, composite or []),
-            "insights": {
-                brand: {
-                    "top_act":       _esc_s(ins["top_act"]),
-                    "top_pct":       ins["top_pct"],
-                    "high_pct":      ins["high_pct"],
-                    "strategy":      _esc_s(ins["strategy"]),
-                    "top_countries": ins["top_countries"],
-                    "key_articles":  [
-                        {
-                            "imp":      a.get("imp", "low"),
-                            "date":     a.get("date", ""),
-                            "act":      _esc_s(a.get("act", "")),
-                            "title_ko": _esc_s(a.get("title_ko", "")),
-                            "url":      a.get("url", ""),
-                        }
-                        for a in ins.get("key_articles", [])
-                    ],
-                }
-                for brand, ins in v.get("insights", {}).items()
-            },
-        }
+        str(p): _period_entry(v, _esc_s, growth_story, composite)
         for p, v in _pd.items()
     }
     period_data_json = json.dumps(period_data_for_js, ensure_ascii=False)
@@ -6677,7 +6638,54 @@ _ALLCO_STYLE = """<style>
 </style>"""
 
 
-def _render_all_companies(data: dict, dart: dict = None) -> str:
+
+def _period_entry(v: dict, _esc_s, growth_story=None, composite=None) -> dict:
+    """기간 하나를 JS가 쓰는 형태로 변환 — HTML 내장분과 /api/period-preset이 공유한다.
+
+    두 곳이 각자 dict를 만들면 화면과 API의 형태가 조용히 어긋난다.
+    """
+    return {
+            "kpi": {
+                "total":     v["kpi"]["total"],
+                "high":      v["kpi"]["high"],
+                "brands":    v["kpi"]["brands"],
+                "countries": v["kpi"]["countries"],
+                "prev_total":     v["kpi"].get("prev_total", 0),
+                "prev_high":      v["kpi"].get("prev_high", 0),
+                "prev_brands":    v["kpi"].get("prev_brands", 0),
+                "prev_countries": v["kpi"].get("prev_countries", 0),
+                "spark":          v["kpi"].get("spark", []),
+            },
+            "articles":      v["articles"],
+            "country_stats": v["country_stats"],
+            "market":        _esc_s(v.get("market", "")),
+            "synth_html":    _render_synth(
+                {"total": v["kpi"]["total"], "high": v["kpi"]["high"],
+                 "brands_active": v["kpi"]["brands"], "countries_active": v["kpi"]["countries"]},
+                v.get("market", ""), growth_story or {}, composite or []),
+            "insights": {
+                brand: {
+                    "top_act":       _esc_s(ins["top_act"]),
+                    "top_pct":       ins["top_pct"],
+                    "high_pct":      ins["high_pct"],
+                    "strategy":      _esc_s(ins["strategy"]),
+                    "top_countries": ins["top_countries"],
+                    "key_articles":  [
+                        {
+                            "imp":      a.get("imp", "low"),
+                            "date":     a.get("date", ""),
+                            "act":      _esc_s(a.get("act", "")),
+                            "title_ko": _esc_s(a.get("title_ko", "")),
+                            "url":      a.get("url", ""),
+                        }
+                        for a in ins.get("key_articles", [])
+                    ],
+                }
+                for brand, ins in v.get("insights", {}).items()
+            },
+    }
+
+def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = False):
     """NICE 전체 기업 재무 표 — 화장품업 기본 + 전체 전환, 검색·정렬, DART 최신 YoY 결합.
 
     단위 주의: nice_financials.amount는 **천원** 단위다(포스코인터내셔널 2.7e10 = 27조).
@@ -6686,7 +6694,7 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
     rows = (data or {}).get("rows") or []
     years = (data or {}).get("years") or []
     if not rows:
-        return ""
+        return [] if _payload_only else ""
     dart = dart or {}
     # DART는 브랜드 키 → 회사명으로 붙인다(기획팀은 회사명으로 봄).
     # NICE는 '(주)아모레퍼시픽', DART는 '아모레퍼시픽'처럼 법인 접두/접미가 달라
@@ -6712,11 +6720,10 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
     if _hit:
         logger.warning("DART 회사명 매칭 모호 — 실적 미표시: %s",
                        {k: sorted(_collide[k]) for k in _hit})
-    payload = []
-    for r in rows:
+    def _row(r):
         _k = _norm_co(r["company"])
         d = None if _k in _ambiguous else dart_by_corp.get(_k)
-        payload.append({
+        return {
             "c": r["company"], "i": (r["industry"] or "")[:24], "k": 1 if r["cosmetic"] else 0,
             "b": (r.get("brands") or "")[:90],
             # m: 모니터링 중인 경쟁 브랜드 / s: 회사≈브랜드 / l: 상장
@@ -6728,7 +6735,16 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
             # pv = 비교 대상(전년 같은 기간) 매출 — '무엇 대비'인지 화면에 그대로 적기 위해 같이 넘긴다
             "d": ({"y": d["year"], "p": d["reprt"], "v": d["revenue"],
                    "g": d["yoy"], "pv": d["prev"], "fs": d.get("fs", "")} if d else None),
-        })
+        }
+
+    # /api/companies는 HTML이 아니라 행 데이터만 필요하다(범위 필터는 호출부에서 끝냄).
+    if _payload_only:
+        return [_row(r) for r in rows]
+
+    # HTML에는 기본 화면(모니터링 브랜드)만 싣는다. 7,209개사를 통째로 박으면 979KB가
+    # 재무 탭을 열지 않는 사람에게도 매번 나가고, 구매 데이터(NICE)가 인증 없이 그대로
+    # 노출된다. 나머지 범위는 눌렀을 때 /api/companies로 가져온다.
+    payload = [_row(r) for r in rows if r.get("matched")]
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     # 단위를 각 열 머리에 직접 박는다 — 표 밑 각주는 스크롤하면 안 보여서 '얼마 기준'인지 놓친다
     yhead = "".join(f"<th data-k='r{i}'>{y} 매출<span class='ac-sub'>억원</span></th>"
@@ -6751,7 +6767,7 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
           <button id="ac-cos" onclick="acSetScope('cos')">화장품업 전체</button>
           <button id="ac-all" onclick="acSetScope('all')">전체 기업</button>
         </div>
-        <input class="ac-q" id="ac-q" placeholder="회사명·브랜드명 검색 (예: 아모레, 설화수, 아누아)" oninput="acRender()">
+        <input class="ac-q" id="ac-q" placeholder="회사명·브랜드명 검색 (예: 아모레, 설화수, 아누아)" oninput="acSearch()">
         <span class="ac-meta" id="ac-meta"></span>
       </div>
       <div class="ac-unit">모든 금액 단위 <b>억원</b> — 억원 미만은 반올림.
@@ -6798,11 +6814,41 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
     // 분기 보고서는 '연초부터 누적'이라 몇 월까지인지 적어줘야 오해가 없다
     var AC_SPAN={{'1분기':'1~3월 누적','상반기':'1~6월 누적','3분기누적':'1~9월 누적','연간':'연간(1~12월)'}};
     function acSpan(p){{ return AC_SPAN[p]||p; }}
-    function acSetScope(v){{ AC_SCOPE=v; AC_LIMIT=(v==='mon')?999:60;
+    // HTML에는 모니터링 브랜드만 실려 있다. 나머지 범위는 처음 누를 때 한 번만
+    // 받아와 캐시하고, 그 뒤로는 기존 클라이언트 정렬·검색 로직이 그대로 돈다.
+    var AC_CACHE={{mon:AC_DATA}}, AC_SCOPE_MAP={{cos:'cosmetic', all:'all'}};
+    function acSetScope(v){{
       ['mon','cos','all'].forEach(function(k){{
         document.getElementById('ac-'+k).className=(k===v)?'on':''; }});
-      acRender(); }}
+      AC_SCOPE=v; AC_LIMIT=(v==='mon')?999:60;
+      if(AC_CACHE[v]){{ AC_DATA=AC_CACHE[v]; acRender(); return; }}
+      var meta=document.getElementById('ac-meta');
+      meta.textContent='불러오는 중…';
+      fetch('/api/companies?scope='+AC_SCOPE_MAP[v])
+        .then(function(r){{ return r.json(); }})
+        .then(function(d){{
+          if(d.error){{ meta.textContent='불러오지 못했습니다: '+d.error; return; }}
+          AC_CACHE[v]=d.rows||[]; AC_DATA=AC_CACHE[v]; acRender(); }})
+        .catch(function(){{
+          // 실패하면 눌렀던 버튼을 되돌려 빈 표를 보여주지 않는다
+          meta.textContent='불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+          document.getElementById('ac-'+v).className='';
+          document.getElementById('ac-mon').className='on';
+          AC_SCOPE='mon'; AC_DATA=AC_CACHE.mon; }});
+    }}
     function acMore(){{ AC_LIMIT+=100; acRender(); }}
+    // 기본 화면에는 17개사만 있어서 '설화수'를 쳐도 안 나온다. 검색을 시작하면
+    // 전체 기업으로 자동 전환해 준다(이미 전체를 보고 있으면 그대로 검색만).
+    var AC_STIMER=null;
+    function acSearch(){{
+      var q=(document.getElementById('ac-q').value||'').trim();
+      if(q && AC_SCOPE==='mon'){{
+        clearTimeout(AC_STIMER);
+        AC_STIMER=setTimeout(function(){{ acSetScope('all'); }}, 350);
+        return;
+      }}
+      acRender();
+    }}
     function acRender(){{
       var q=(document.getElementById('ac-q').value||'').trim().toLowerCase();
       var list=AC_DATA.filter(function(r){{
@@ -6867,3 +6913,29 @@ def _render_all_companies(data: dict, dart: dict = None) -> str:
     }});
     acRender();
     </script>''')
+
+
+def build_companies_payload(scope: str = "all") -> list:
+    """재무 탭 행 데이터 — 대시보드 HTML과 /api/companies가 같은 형태를 쓰도록 공용.
+
+    HTML에는 모니터링 브랜드만 싣고(979KB→30KB), '화장품업 전체'·'전체 기업'을
+    누르면 이 함수가 만든 것을 API로 받아간다. 렌더러와 같은 코드 경로를 타야
+    화면에서 열이 어긋나지 않는다.
+    """
+    from analytics.queries import get_all_company_financials, get_dart_yoy
+    session = get_session()
+    try:
+        data = get_all_company_financials(session)
+        dart = get_dart_yoy(session)
+    finally:
+        session.close()
+    rows = (data or {}).get("rows") or []
+    if scope == "cosmetic":
+        rows = [r for r in rows if r.get("cosmetic")]
+    elif scope == "monitored":
+        rows = [r for r in rows if r.get("matched")]
+    # 렌더러가 만드는 것과 같은 dict를 얻으려고 같은 함수를 태운다.
+    html = _render_all_companies({"years": (data or {}).get("years") or [], "rows": rows},
+                                 dart, _payload_only=True)
+    return html
+
