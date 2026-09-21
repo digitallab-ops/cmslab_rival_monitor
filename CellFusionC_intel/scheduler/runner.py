@@ -157,6 +157,13 @@ def job_weekly_full() -> None:
 
 TIER_CHANGE_COOLDOWN_DAYS = 14   # 최근 변경 후 이 기간 내 재변경 금지 (플립플롭 방지)
 
+# 비율(모멘텀)과 무관하게 '양'만으로 승급시키는 기준. 티어는 '얼마나 자주 수집할까'를
+# 정하는 값인데 기존 승급 조건이 rising(비율>1.5)뿐이라, 꾸준히 많은 브랜드가 영영
+# 티어2에 남았다 — 실측에서 Celimax(최근4주 12건)가 Amuse(5건)보다 많은데 Amuse만 승급.
+# 10은 근거가 있다: 현재 티어1 최소가 10건이라 기존 티어1 전원이 만족하는 최대값이고,
+# 경계 역전(티어2 최대 12 > 티어1 최소 10)을 해소하는 최소값이다.
+TIER1_VOLUME_MIN = 10
+
 
 def job_weekly_momentum() -> None:
     """브랜드 모멘텀 계산 → momentum_score 갱신 + tier 자동 승급/강등."""
@@ -172,9 +179,16 @@ def job_weekly_momentum() -> None:
         for s in scores:
             upsert_brand_momentum(session, s["brand"], s["momentum"])
 
-            # 자동 티어링: 승급 T2→1(rising & 최근4주≥5), 강등 T1→2(cooling & 최근4주≤2)
-            want_promote = s["signal"] == "rising"  and s["tier"] == 2 and s["recent_4w"] >= 5
-            want_demote  = s["signal"] == "cooling" and s["tier"] == 1 and s["recent_4w"] <= 2
+            # 자동 티어링 — 승급 경로 둘, 강등 하나.
+            #  ① 급상승: rising(비율>1.5) & 최근4주≥5 — 작지만 빠르게 뜨는 브랜드
+            #  ② 절대량: 최근4주≥TIER1_VOLUME_MIN — 비율이 평평해도 양이 많으면 자주 봐야 한다
+            #  강등: cooling & 최근4주≤2 — 양까지 말랐을 때만(양이 많으면 비율이 꺾여도 유지)
+            _rising = s["signal"] == "rising" and s["recent_4w"] >= 5
+            _bulky = s["recent_4w"] >= TIER1_VOLUME_MIN
+            want_promote = s["tier"] == 2 and (_rising or _bulky)
+            want_demote = (s["signal"] == "cooling" and s["tier"] == 1
+                           and s["recent_4w"] <= 2)
+            promote_why = "급상승" if _rising else "활동량"
             if not (want_promote or want_demote):
                 continue
 
@@ -188,8 +202,8 @@ def job_weekly_momentum() -> None:
             update_brand_tier(session, s["brand"], new_tier)
             if want_promote:
                 promoted.append(s["brand"])
-                logger.info("⬆  승급 T2→1: %-20s  momentum=%.2fx  (최근4주=%d건)",
-                            s["brand"], s["momentum"], s["recent_4w"])
+                logger.info("⬆  승급 T2→1: %-20s  momentum=%.2fx  (최근4주=%d건 · 사유 %s)",
+                            s["brand"], s["momentum"], s["recent_4w"], promote_why)
             else:
                 demoted.append(s["brand"])
                 logger.info("⬇  강등 T1→2: %-20s  momentum=%.2fx  (최근4주=%d건)",
@@ -534,10 +548,13 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # 매주 월요일 19:00 KST — 모멘텀 계산 (풀스캔 전 실행)
+    # 매주 화요일 06:00 KST — 모멘텀 계산 + 티어 승급/강등.
+    # 월 19시(풀스캔 20시 '전')에 돌던 것을 뒤로 옮겼다. 풀스캔 전에 계산하면 그 주에
+    # 모은 데이터가 항상 다음 주에나 티어에 반영돼 판정이 일주일씩 밀렸다.
+    # 화 06시면 월요일 밤 풀스캔이 끝난 뒤이고 화 08시 아침 브리핑보다는 앞선다.
     scheduler.add_job(
         job_weekly_momentum,
-        trigger=CronTrigger(day_of_week="mon", hour=19, minute=0),
+        trigger=CronTrigger(day_of_week="tue", hour=6, minute=0),
         id="weekly_momentum",
         name="[주간] 브랜드 모멘텀 계산",
         max_instances=1,
