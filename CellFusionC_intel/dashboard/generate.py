@@ -4568,14 +4568,19 @@ def _brand_signal_strip(brand, velocity=None, social=None, hits=None) -> str:
         parts.append(f'<span title="{_esc(tip)}"><i>유튜브</i> '
                      f'<b>{s["views"]/10000:,.0f}만</b>회'
                      f'<u>{_esc(s["label"])}</u></span>')
+    # get_launch_hits는 {brand, announced[], retail[{product,country,category,rank,reviews}]}
+    # 구조라 country·rank가 최상위에 없다. 최상위에서 찾다가 KeyError가 나 이 신호가
+    # 통째로 죽고 있었다(브리핑 신호줄에 '신제품 순위 진입'이 한 번도 안 떴다).
     hb = [h for h in (hits or []) if h.get("brand") == brand]
-    if hb:
-        top = min(hb, key=lambda x: x.get("rank") or 999)
-        tip = "뉴스로 출시를 알린 신제품이 실제 아마존 판매 순위에 오른 사례(리뷰 100+ 기준) · " + \
-              " / ".join(f"{h['announced']}→{_bf_cty(h['country'])} {h['rank']}위" for h in hb[:3])
+    items = [r for h in hb for r in (h.get("retail") or []) if r.get("rank")]
+    if items:
+        ranked = sorted(items, key=lambda x: x.get("rank") or 999)
+        top = ranked[0]
+        _tip_parts = [_bf_cty(r.get("country") or "") + " " + str(r.get("rank")) + "위" for r in ranked[:3]]
+        tip = "뉴스로 출시를 알린 신제품이 실제 아마존 판매 순위에 오른 사례(리뷰 100+ 기준) · " + " / ".join(_tip_parts)
         parts.append(f'<span title="{_esc(tip)}"><i>신제품 순위 진입</i> '
-                     f'<b>{len(hb)}</b>건'
-                     f'<u>최고 {_esc(_bf_cty(top["country"]))} {top["rank"]}위</u></span>')
+                     f'<b>{len(items)}</b>건'
+                     f'<u>최고 {_esc(_bf_cty(top.get("country") or ""))} {top.get("rank")}위</u></span>')
     return f'<div class="bsigs">{"".join(parts)}</div>' if parts else ""
 
 

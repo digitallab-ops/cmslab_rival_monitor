@@ -2941,6 +2941,13 @@ def get_social_verdict(session: Session, platform: str = "youtube") -> dict:
     return out
 
 
+# 유럽 마켓(DE/ES/IT/FR) 리뷰수가 천단위 구분자 '.' 때문에 1/1000로 잘려 저장되던
+# 버그를 2026-09-18 수집분부터 고쳤다. 그 경계를 가로질러 증가분을 재면 같은 제품이
+# 하루 만에 1,000배 는 것으로 보인다(유럽 중앙값 20 → 15,040). 경계 이전 스냅샷은
+# 판매속도 계산에서 제외한다. 이 날짜 이후 데이터만 쌓이면 이 상수는 지워도 된다.
+REVIEW_PARSER_FIX_DATE = "2026-09-18"
+
+
 def get_sales_velocity(session: Session, days: int = 35, min_span_days: int = 7,
                        stale_days: int = 7) -> dict:
     """리뷰 증가 속도 — 판매 '규모'가 아니라 **반응이 쌓이는 속도**의 프록시.
@@ -2980,6 +2987,7 @@ def get_sales_velocity(session: Session, days: int = 35, min_span_days: int = 7,
                 WHERE review_count IS NOT NULL AND is_monitored
                   AND brand IS NOT NULL AND product_url IS NOT NULL
                   AND capture_date >= CURRENT_DATE - :days
+                  AND capture_date >= DATE :fixdate   -- 리뷰 파서 수정 경계(위 상수 주석)
                 GROUP BY 1, 2, 3
             ), snap AS (
                 SELECT *,
@@ -2995,7 +3003,8 @@ def get_sales_velocity(session: Session, days: int = 35, min_span_days: int = 7,
             JOIN snap l ON f.asin = l.asin AND f.country = l.country AND f.rf = 1 AND l.rl = 1
             WHERE (l.capture_date - f.capture_date) >= :span
               AND (CURRENT_DATE - l.capture_date) <= :stale
-        """), {"days": days, "span": min_span_days, "stale": stale_days}).fetchall()
+        """), {"days": days, "span": min_span_days, "stale": stale_days,
+                "fixdate": REVIEW_PARSER_FIX_DATE}).fetchall()
     except Exception as e:
         logger.warning("판매 속도 계산 실패: %s", e)
         return {}
