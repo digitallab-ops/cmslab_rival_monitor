@@ -8,7 +8,7 @@ AI(mini)로 '가장 가능성 높은 원인 + 확인/조치 방향'을 진단해
 
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import text
 
@@ -56,42 +56,55 @@ def check_collection_health(session, agg: dict | None = None) -> list[dict]:
     """소스별 급감·리테일 미갱신·오류율 이상을 찾아 findings 리스트로 반환."""
     findings: list[dict] = []
 
-    # 1) 소스(collector_type)별 — '평소 매일 오던 소스가 오늘 0건'을 핵심 신호로(오탐 최소화).
-    #    주간 풀스캔이 평균을 부풀리므로 평균 대신 '활동일수 + 중앙값'으로 판정.
+    # 1) 소스(collector_type)별 급감 판정.
+    #
+    #    기준일은 '오늘'이 아니라 **완결된 어제**다. 하루가 끝나기 전에 총량으로 재면
+    #    수집이 아직 안 끝난 것을 급감으로 오판한다 — 실제 사고: 월요일 19:19에
+    #    google_rss 2건으로 경보가 갔는데, 20시 주간 풀스캔이 돌자 최종 75건(중앙값의 4배)이었다.
+    #    하루 늦게 알게 되지만 급감 대응은 어차피 같고, 매일 오는 오탐이 사라진다.
+    #
+    #    날짜는 KST로 끊는다. DB가 UTC라 그냥 ::date를 쓰면 하루 경계가 KST 09시가 되는데,
+    #    바로 그 시각에 오전 수집이 돈다(실측 09:03~09:19). 몇 분만 당겨져도 전날로 밀린다.
+    #    주간 풀스캔이 평균을 부풀리므로 평균 대신 '활동일수 + 중앙값'으로 판정한다.
     try:
         rows = session.execute(text(f"""
-            SELECT collector_type, collected_at::date AS dt, count(*) AS c
+            SELECT collector_type,
+                   (collected_at + interval '9 hours')::date AS dt,
+                   count(*) AS c
             FROM {DB_SCHEMA}.news_articles
-            WHERE collected_at >= now() - interval '15 days' AND collector_type IS NOT NULL
+            WHERE collected_at >= now() - interval '16 days' AND collector_type IS NOT NULL
             GROUP BY 1, 2""")).fetchall()
-        today = session.execute(text("SELECT now()::date")).scalar()   # 서버 tz 기준 오늘
+        target = session.execute(text(
+            "SELECT ((now() + interval '9 hours')::date - 1)")).scalar()   # 어제(KST)
         per: dict = {}
         for ct, dt, c in rows:
-            d = per.setdefault(ct, {"today": 0, "prior": []})
-            if dt == today:
-                d["today"] += int(c)
+            if dt >= target + timedelta(days=1):
+                continue                                   # 진행 중인 오늘은 판정에서 제외
+            d = per.setdefault(ct, {"day": 0, "prior": []})
+            if dt == target:
+                d["day"] += int(c)
             else:
                 d["prior"].append(int(c))
         for ct, d in per.items():
             prior = sorted(d["prior"])
-            active_days = len(prior)                       # 최근 14일 중 수집된 날 수
+            active_days = len(prior)                       # 그 이전 14일 중 수집된 날 수
             med = prior[len(prior) // 2] if prior else 0   # 중앙값(주간 스파이크 영향 적음)
-            t = d["today"]
+            t = d["day"]
             if t == 0 and active_days >= 8:
-                # 거의 매일 오던 소스가 오늘 0건 → 명백한 이상
+                # 거의 매일 오던 소스가 어제 0건 → 명백한 이상
                 findings.append({
-                    "type": "source_drop", "key": f"src:{ct}",
-                    "title": f"수집 소스 '{ct}' 오늘 0건 (평소 거의 매일 수집)",
-                    "detail": (f"'{ct}'가 오늘 0건. 최근 14일 중 {active_days}일 수집(중앙값 {med}건/일)했는데 "
-                               f"오늘은 전무. 소스 URL/HTML 변경·차단·API 키 만료 등 가능성."),
+                    "type": "source_drop", "key": f"src:{ct}:{target}",
+                    "title": f"수집 소스 '{ct}' 어제({target}) 0건 — 평소 거의 매일 수집",
+                    "detail": (f"'{ct}'가 어제 0건. 그 전 14일 중 {active_days}일 수집(중앙값 {med}건/일)했는데 "
+                               f"어제는 전무. 소스 URL/HTML 변경·차단·API 키 만료 등을 확인할 것."),
                 })
             elif med >= 15 and active_days >= 10 and 0 < t < med * 0.2:
                 # 고빈도 소스가 중앙값의 20% 미만으로 급감
                 findings.append({
-                    "type": "source_drop", "key": f"src:{ct}",
-                    "title": f"수집 소스 '{ct}' 급감 — 오늘 {t}건 (중앙값 {med}건/일)",
-                    "detail": (f"'{ct}'가 오늘 {t}건으로 중앙값 {med}건의 {t/med*100:.0f}% 수준. "
-                               f"부분 실패·쿼리 변경·차단 가능성."),
+                    "type": "source_drop", "key": f"src:{ct}:{target}",
+                    "title": f"수집 소스 '{ct}' 급감 — 어제({target}) {t}건 (중앙값 {med}건/일)",
+                    "detail": (f"'{ct}'가 어제 {t}건으로 중앙값 {med}건의 {t/med*100:.0f}% 수준. "
+                               f"부분 실패·쿼리 변경·차단 등을 확인할 것."),
                 })
     except Exception as e:
         logger.warning("소스 헬스 체크 실패: %s", e)
@@ -138,12 +151,23 @@ def _diagnose(findings: list[dict]) -> dict:
         return {}
     lines = [f"[{i}] {f['title']} — {f['detail']}" for i, f in enumerate(findings)]
     prompt = f"""너는 데이터 수집 파이프라인(뉴스·리테일 스크래핑, Python/APScheduler) 운영 엔지니어다.
-아래는 오늘 감지된 이상 목록이다. 각 항목의 **가장 가능성 높은 원인**과 **확인/조치 방향**을 한 줄로 제시하라.
+아래 이상 항목마다 **무엇부터 확인해야 하는지**를 한 줄로 제시하라.
 
 {chr(10).join(lines)}
 
-- 각 45자 내외, 기술적·구체적으로(예: "RSS 피드 URL 변경 추정 → 소스 목록 점검", "아마존 노드ID 변경 → 셀렉터 확인").
-- 억측 금지, 근거 약하면 '점검 필요' 수준으로.
+규칙:
+- 너에게 주어진 것은 **건수뿐이다.** 로그도, 응답 코드도, 소스 목록도 보지 못했다.
+  그러니 원인을 단정하지 마라. "URL이 변경되었다", "차단되었다" 같은 서술은 금지다.
+  실제로 이런 오진이 있었다 — 건수만 보고 "RSS 피드 URL 변경 추정"이라 했는데
+  알고 보니 수집이 그 시각에 아직 안 끝났을 뿐 URL은 멀쩡했다.
+- 대신 **사람이 바로 실행할 수 있는 확인 절차**를 쓴다.
+  좋은 예: "해당 수집기 단독 실행해 응답 코드 확인"
+           "직전 잡 로그에서 예외·타임아웃 유무 확인"
+           "같은 날 다른 소스도 줄었는지 대조(네트워크 공통 문제 구분)"
+  나쁜 예: "RSS URL 변경 추정", "봇 차단됨", "API 키 만료"
+- 원인을 꼭 언급해야 하면 두 개 이상 병렬로 두고 구분법을 붙여라
+  (예: "부분 실패인지 소스 변경인지 — 단독 실행 결과로 구분").
+- 각 50자 내외, 한국어.
 반드시 JSON만: {{"reads": [{{"i": 0, "read": "..."}}, ...]}} — 모든 인덱스 포함."""
     try:
         from openai import OpenAI
