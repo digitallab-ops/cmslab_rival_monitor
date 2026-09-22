@@ -62,24 +62,45 @@ def _llm(model: str, prompt: str, max_tokens: int, temperature: float = 0.4) -> 
     return (resp.choices[0].message.content or "").strip()
 
 
-def _p_strat(brand_ko, cc, rec):
+def _p_strat(brand_ko, cc, rec, sig=""):
     chs = list((rec.get("channels") or {}).keys())[:4]
     tac = [TAC_KO.get(t, t) for t in (rec.get("tactics") or {}).keys()]
-    return f"""이 브랜드({brand_ko})가 {_cty(cc)}에서 이번 주 보인 움직임을 '전략 해석' 1~2문장으로 써라.
-- 반드시 **구체적 사실**을 담아라: 채널명·제품·수치·행사 등(아래 본문요지에서 근거). 뭉뚱그리기 금지.
-- 그리고 '그게 무슨 의미인지/왜 주목할 만한지'를 한 마디. 단 아래 **상투어는 절대 금지**(성의없어 보임):
-  '입지 강화', '프리미엄 포지셔닝 강화', '인지도 확보', '존재감 강화', '확장하려는 움직임', '경쟁력 강화', '주목된다'.
-- 매번 다른 각도로: 대형유통 침투 / 앰배서더·인플루언서 팬덤 / 틈새·면세·팝업 채널 / 신카테고리 진입 /
-  신흥시장 선점 / 가격 공세 / 성분·기능 차별화 등.
-- 60~95자. 이 브랜드의 움직임으로만 서술('K뷰티 브랜드들이'처럼 일반화 금지). 관찰·추정형(~보인다/~읽힌다).
-  단정·과장·우리 회사 언급 금지.
-- 아래면 시장전략과 무관 → 정확히 'SKIP'만: 실적/투자·펀드·지분·상장·M&A·합병, 골프·스포츠·시상,
-  소송·가품·분쟁, 단순 브랜드 나열.
+    return f"""이 브랜드({brand_ko})가 {_cty(cc)}에서 이번 주 보인 움직임을 1~2문장으로 써라.
+
+**[1단계] 먼저 이것부터 판단하라.** 아래 헤드라인이 다음 중 하나면 다른 규칙은 무시하고
+정확히 `SKIP` 네 글자만 출력하고 끝내라. 억지로 전략을 지어내지 마라.
+  · 실적·투자·펀드·지분·상장·M&A·합병      · 채용·인사·조직개편
+  · 골프·스포츠·시상·기부                   · 소송·가품·분쟁·단속
+  · 주가·증시                                · 단순 브랜드 나열(여러 브랜드를 열거만)
+채용은 '인재 확보·구인·공채·리크루팅'이 요지면 SKIP이다.
+단, **유통·입점·출시·마케팅 이야기면 검토·예정 단계여도 SKIP이 아니다.** 그건 시장 움직임이다.
+
+**[2단계] 통과했다면 — 사실을 되풀이하지 마라.**
+기사에 이미 적힌 내용을 다른 말로 바꿔 쓰는 것은 정보가 0이다. 실제로 이런 게 나갔다:
+  "팝업에 배우 수지를 초청했다. 이는 젊은 소비자층을 겨냥한 마케팅 전략으로 읽힌다."
+수지를 부르면 젊은 층 겨냥인 건 누구나 안다. 이런 문장은 쓰지 마라.
+
+쓸 게 있으면 아래 중 하나여야 한다. 없으면 사실만 쓰고 해석은 **붙이지 마라**.
+  · 지표와 엮기 — 아래 '지표'의 숫자를 인용해 움직임과 연결(가장 좋다)
+  · 패턴 — 이전·다른 나라와 같은 방식인지, 처음 보는 방식인지
+  · 이례성 — 이 브랜드·이 카테고리에서 흔치 않은 선택인지
+  · 규모 감각 — 채널 수, 매장 수, 가격대 등 크기를 가늠케 하는 것
+
+- 반드시 **구체적 사실**을 담아라: 채널명·제품·수치·행사 등(아래 본문요지 근거). 뭉뚱그리기 금지.
+- 아래 상투어 금지: '입지 강화', '프리미엄 포지셔닝 강화', '인지도 확보', '존재감 강화',
+  '확장하려는 움직임', '경쟁력 강화', '주목된다', '젊은 소비자층을 겨냥'.
+- **마무리를 일반론으로 끝내지 마라**: 'K뷰티의 상승세를 보여준다', '긍정적인 반응을 얻고 있다',
+  '중요한 과제로 떠오르고 있다' 같은 문장은 아무것도 말하지 않는다. 차라리 사실에서 끝내라.
+- 지표는 **이 나라 줄에 맞는 것만** 인용하라. '(글로벌)'이 붙은 것은 전 세계 합산이니
+  특정 국가 이야기인 것처럼 쓰지 마라.
+- 60~95자. 이 브랜드 움직임만('K뷰티 브랜드들이'처럼 일반화 금지). 관찰형(~보인다).
+  어느 쪽이 낫다는 우열 단정은 하지 마라.
 
 헤드라인: {rec.get('headline')}
 본문요지: {rec.get('summary') or '(없음)'}
 판매채널: {', '.join(chs) or '(없음)'}
-활동분류: {', '.join(tac) or '(없음)'}"""
+활동분류: {', '.join(tac) or '(없음)'}
+지표: {sig or '(없음)'}"""
 
 
 def _p_why(cc, it, ns):
@@ -124,6 +145,63 @@ def _p_watch(strat_examples, mktxt):
 급성장 시장: {mktxt}"""
 
 
+
+def collect_brand_signals(session) -> dict:
+    """브랜드별 수치 신호를 한 줄로 — 전략 해석이 인용할 근거.
+
+    판매속도·아마존 순위변동·유튜브·검색 모멘텀이 DB에 쌓여 있는데 브리핑은 순위
+    하나만 쓰고 나머지를 버리고 있었다. 해석이 사실을 되풀이하던 원인 중 하나다.
+    실패해도 브리핑이 죽지 않게 각 신호를 개별 try로 감싼다.
+    """
+    # 글로벌 신호(어느 나라 줄에서도 인용 가능)와 국가별 신호를 나눈다.
+    # 섞으면 '아누아·한국' 줄에 아마존 미국 순위가 붙어 문맥이 어긋난다.
+    glob: dict = defaultdict(list)
+    bycc: dict = defaultdict(list)
+    try:
+        from analytics.queries import get_sales_velocity
+        for b, d in (get_sales_velocity(session) or {}).items():
+            v = d.get("velocity") or 0
+            if v >= 50:
+                glob[b].append(f"아마존 전체 리뷰 하루 {v:,.0f}개씩 증가(상품 {d.get('products',0)}개)")
+    except Exception as e:
+        logger.warning("신호 수집(판매속도) 실패: %s", e)
+    try:
+        from analytics.queries import get_retail_rank_history
+        for h in (get_retail_rank_history(session) or []):
+            dl = h.get("delta") or 0
+            cc = h.get("country") or ""
+            if abs(dl) >= 3 and cc:
+                bycc[(h["brand"], cc)].append(
+                    f"아마존 {h.get('category','')} {h['ranks'][-1]}위"
+                    f"({'+' if dl > 0 else ''}{dl}계단)")
+    except Exception as e:
+        logger.warning("신호 수집(순위변동) 실패: %s", e)
+    try:
+        from analytics.queries import get_social_verdict
+        _V = {"organic_viral": "자발 바이럴", "paid_push": "광고성 밀어내기",
+              "mention_only": "조회는 많으나 스침 언급", "rising": "상승세"}
+        for b, d in (get_social_verdict(session) or {}).items():
+            lab = _V.get(d.get("verdict"))
+            if lab and (d.get("views") or 0) >= 300_000:
+                glob[b].append(f"유튜브 {d['views']:,}회 · {lab}")
+    except Exception as e:
+        logger.warning("신호 수집(유튜브) 실패: %s", e)
+    try:
+        from analytics.queries import get_search_momentum
+        for b, d in (get_search_momentum(session) or {}).items():
+            if d.get("signal") == "rising":
+                bycc[(b, "KR")].append(f"국내 검색량 {d.get('momentum')}배(직전 4주 대비)")
+    except Exception as e:
+        logger.warning("신호 수집(검색) 실패: %s", e)
+    return {"global": {b: v for b, v in glob.items()}, "by_cc": dict(bycc)}
+
+
+def signal_line(sigs: dict, brand: str, cc: str) -> str:
+    """이 브랜드·이 나라 줄에서 인용해도 되는 지표만 골라 한 줄로."""
+    parts = list((sigs.get("by_cc") or {}).get((brand, cc)) or [])
+    parts += [f"(글로벌) {x}" for x in ((sigs.get("global") or {}).get(brand) or [])]
+    return " · ".join(parts[:3])
+
 def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None):
     """브리핑 전략 콘텐츠 생성/캐시. 반환: {strat, why, bsum, tongp}.
     bko: 영문브랜드→한글 변환 함수(없으면 원문)."""
@@ -158,12 +236,19 @@ def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None
     for r in records:
         by_brand[r["brand"]].append(r)
 
-    # 1) 나라별 전략 해석(BS)
+    # 1) 나라별 전략 해석(BS) — 수치 신호를 근거로 함께 넘긴다
+    try:
+        sigs = collect_brand_signals(session)
+    except Exception as e:
+        logger.warning("브랜드 신호 수집 실패(해석은 계속): %s", e)
+        sigs = {"global": {}, "by_cc": {}}
     strat = {}
     for r in records:
         k = f"BS|{r['brand']}|{r['country']}"
         strat[(r["brand"], r["country"])] = _get_or_gen(
-            k, lambda r=r: _p_strat(bko(r["brand"]), r["country"], r), _MODEL_LINE, 160)
+            k, lambda r=r: _p_strat(bko(r["brand"]), r["country"], r,
+                                    signal_line(sigs, r["brand"], r["country"])),
+            _MODEL_LINE, 160)
 
     # 활동 있는 브랜드(=의미있는 라인 1개+) 판정
     active = set()

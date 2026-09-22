@@ -7,6 +7,7 @@
 """
 
 import logging
+import re
 from datetime import datetime, timedelta
 
 from openai import OpenAI
@@ -414,7 +415,10 @@ def _compose_brief_body(session, weekly: bool):
     for idx, (r, line_read) in enumerate(moves, 1):
         bn = _bko(r["brand"])
         if line_read.startswith(bn):
-            line_read = line_read[len(bn):].lstrip("가이은는을를 ·,").strip()
+            # 조사를 '문자 집합'으로 벗기면 본문을 갉아먹는다 — lstrip("가이은는…")은
+            # "는 가격을"에서 '는' 다음 '가'까지 먹어 "격을"이 된다. 딱 한 개만 뗀다.
+            line_read = re.sub(r"^(?:은|는|이|가|을|를|의|도|와|과|에서|에)?\s*[·,]?\s*",
+                               "", line_read[len(bn):]).strip()
         sig = _sig(r)
         head = f"*{idx}. {bn}* · {_cty_ko(r['country'])}"
         if sig:
