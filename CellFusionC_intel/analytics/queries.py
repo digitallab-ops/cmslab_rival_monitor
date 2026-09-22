@@ -42,7 +42,7 @@ def get_category_battle(session: Session, days: int = 30) -> list[dict]:
         FROM {DB_SCHEMA}.news_articles
         WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
           AND importance IN ('high','medium')
-          AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+          AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
           AND activity_type NOT IN ('실적_공시')  -- 실적·공시 store-only
           AND published_date >= :cutoff
     """), {"cutoff": cutoff}).fetchall()
@@ -95,7 +95,7 @@ def get_expansion_playbook(session: Session, days: int = 90) -> list[dict]:
         FROM {DB_SCHEMA}.news_articles
         WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
           AND activity_type IN ('신시장_진출','유통_채널')
-          AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+          AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
           AND published_date >= :cutoff
         ORDER BY published_date DESC
     """), {"cutoff": cutoff}).fetchall()
@@ -302,7 +302,7 @@ def get_high_articles(
             WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND importance IN ('high', 'medium')
               AND (
                   brand_focus IS NULL           -- 구기사: 필터 미적용
-                  OR brand_focus != 'incidental' -- 신기사: incidental 제외
+                  OR brand_focus NOT IN ('incidental','unrelated') -- 신기사: incidental 제외
                   OR importance = 'high'         -- HIGH는 incidental이어도 표시
               )
               AND activity_type NOT IN ('실적_공시')  -- 실적·공시는 적재만(store-only), 미노출
@@ -1038,12 +1038,12 @@ def get_country_signal_stats(session: Session, days: int = 30) -> dict:
             SELECT country,
                    COUNT(*) FILTER (WHERE importance = 'high') AS high,
                    COUNT(*) FILTER (WHERE importance = 'medium'
-                       AND (brand_focus IS NULL OR brand_focus != 'incidental')) AS medium
+                       AND (brand_focus IS NULL OR brand_focus NOT IN ('incidental','unrelated'))) AS medium
             FROM {DB_SCHEMA}.news_articles
             WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
               AND importance IN ('high', 'medium')
               AND country ~ '^[A-Z]{{2}}$'          -- null·global·LATAM 등 오분류 코드 제외
-              AND (brand_focus IS NULL OR brand_focus != 'incidental' OR importance = 'high')
+              AND (brand_focus IS NULL OR brand_focus NOT IN ('incidental','unrelated') OR importance = 'high')
             GROUP BY country
         """),
         {"cutoff": cutoff},
@@ -1072,7 +1072,7 @@ def get_ingredient_trends(session: Session, days: int = 30, limit: int = 15) -> 
                 FROM {DB_SCHEMA}.news_articles
                 WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
                   AND key_ingredients IS NOT NULL AND key_ingredients <> ''
-                  AND (brand_focus IS NULL OR brand_focus != 'incidental')
+                  AND (brand_focus IS NULL OR brand_focus NOT IN ('incidental','unrelated'))
             )
             SELECT ingredient, COUNT(*) AS mentions,
                    COUNT(DISTINCT brand) AS brand_cnt,
@@ -1108,7 +1108,7 @@ def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> l
             FROM {DB_SCHEMA}.news_articles
             WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND sentiment = 'negative'
               AND published_date >= :cutoff
-              AND (brand_focus IS NULL OR brand_focus != 'incidental')
+              AND (brand_focus IS NULL OR brand_focus NOT IN ('incidental','unrelated'))
               AND importance IN ('high', 'medium')
               -- 업종·증시·가품 등 브랜드 무관 노이즈 제외(제목 기준 1차 방어)
               AND COALESCE(title_ko, title) !~ '패션·섬유|뷰티주|증시|코스피|코스닥|종목|급등|급락|가품|위조|짝퉁|기권'
@@ -1558,7 +1558,7 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
                 FROM {DB_SCHEMA}.news_articles
                 WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
                   AND importance IN ('high','medium')
-                  AND (brand_focus IS NULL OR brand_focus != 'incidental')
+                  AND (brand_focus IS NULL OR brand_focus NOT IN ('incidental','unrelated'))
                   AND activity_type NOT IN ('실적_공시')  -- 실적·공시 store-only
                   AND country ~ '^[A-Z]{{2}}$'
             )
@@ -2073,7 +2073,7 @@ def get_market_growth_story(session: Session, top_n: int = 6,
             WHERE country = :cc
               AND published_date >= :cutoff
               AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
-              AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+              AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
               AND activity_type IN ({acts_ph})
             ORDER BY (importance = 'high') DESC,
                      COALESCE(strategic_score, 0) DESC,
@@ -2378,7 +2378,7 @@ def compute_brand_momentum(session: Session) -> list[dict]:
         FROM {DB_SCHEMA}.news_articles
         WHERE published_date >= :prev_start AND published_date < :now_cap
           AND (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE)
-          AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+          AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
         GROUP BY brand
         ORDER BY brand
     """), {
@@ -2520,7 +2520,7 @@ def get_brief_records(session: Session, days: int = 7, limit: int = 40) -> list[
               FROM {DB_SCHEMA}.news_articles
               WHERE published_date >= :since
                 AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
-                AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+                AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
                 AND brand IS NOT NULL AND country IS NOT NULL
                 AND activity_type NOT IN ('실적_공시')
             ),
@@ -2534,7 +2534,7 @@ def get_brief_records(session: Session, days: int = 7, limit: int = 40) -> list[
                 FROM {DB_SCHEMA}.news_articles
                 WHERE published_date >= :since
                   AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
-                  AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+                  AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
                   AND brand IS NOT NULL AND country IS NOT NULL
                   AND activity_type NOT IN ('실적_공시')
               ) q WHERE rn2 BETWEEN 2 AND 4
@@ -2588,7 +2588,7 @@ def get_brief_records(session: Session, days: int = 7, limit: int = 40) -> list[
             FROM {DB_SCHEMA}.news_articles
             WHERE published_date >= :since AND brand IS NOT NULL AND country IS NOT NULL
               AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
-              AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+              AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
             GROUP BY brand, country, activity_type, channel
         """), {"since": since}).fetchall():
             d = tac.setdefault((br, co), {"acts": {}, "channels": {}})
@@ -2694,7 +2694,7 @@ def get_brand_products_map(session: Session, days: int = 45, per_brand: int = 5)
               AND product_name IS NOT NULL AND product_name <> ''
               AND char_length(product_name) BETWEEN 2 AND 40
               AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
-              AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+              AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
             ORDER BY brand, published_date DESC
         """), {"since": since}).fetchall()
     except Exception:

@@ -34,7 +34,7 @@ def _fetch_rows(session, hours: int) -> list:
                COALESCE(strategic_score, 0) AS score, channel, evidence_level
         FROM {DB_SCHEMA}.news_articles
         WHERE collected_at >= :since
-          AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+          AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
           AND is_self IS NOT TRUE                    -- 자사(셀퓨전씨)는 경쟁 브리핑서 제외
           AND activity_type NOT IN ('실적_공시')     -- 실적·공시 store-only
           {_DUP_FILTER}
@@ -174,7 +174,7 @@ def _signal_digest(session, weekly: bool = True) -> str:
                    COALESCE(strategic_score,0) sc
             FROM {DB_SCHEMA}.news_articles
             WHERE collected_at >= :since AND importance='high'
-              AND (brand_focus != 'incidental' OR brand_focus IS NULL) {_DUP_FILTER}
+              AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL) {_DUP_FILTER}
             ORDER BY COALESCE(strategic_score,0) DESC
         """), {"since": since}).fetchall()
     except Exception:

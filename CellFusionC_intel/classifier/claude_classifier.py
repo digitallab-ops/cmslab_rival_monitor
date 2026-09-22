@@ -159,8 +159,10 @@ def _make_batch_schema() -> dict:
                               "description": "브랜드 관점 톤: positive=호재, neutral=중립, negative=악재(리콜·품질이슈·논란·규제·소송)"},
             "brand_focus":   {
                 "type": "string",
-                "enum": ["primary", "secondary", "incidental"],
-                "description": "기사에서 해당 브랜드의 비중: primary=주인공, secondary=주요 언급, incidental=예시로 잠깐 언급",
+                "enum": ["primary", "secondary", "incidental", "unrelated"],
+                "description": ("기사에서 해당 브랜드의 비중: primary=주인공, secondary=주요 언급, "
+                                "incidental=예시로 잠깐 언급, unrelated=이 브랜드 기사가 아님"
+                                "(기사 어디에도 브랜드가 안 나옴 — 억지로 고르지 말고 이 값을 쓸 것)"),
             },
             "confidence":    {"type": "number", "description": "분류 신뢰도 0.0~1.0"},
             "note":          {"anyOf": [{"type": "string"}, {"type": "null"}],

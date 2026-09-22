@@ -139,7 +139,7 @@ def get_market_intel(country: str, days: int = 30) -> dict:
             WHERE (is_duplicate IS NOT TRUE)
               AND country = :cc
               AND importance IN ('high','medium')
-              AND (brand_focus != 'incidental' OR brand_focus IS NULL)
+              AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
               AND published_date >= NOW() - (:days || ' days')::interval
             ORDER BY COALESCE(strategic_score,0) DESC, published_date DESC
             LIMIT 25

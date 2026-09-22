@@ -203,3 +203,38 @@ BRAND_KO_NAMES: dict[str, list[str]] = {
     "Celimax":          ["셀리맥스"],
     "CellFusionC":      ["셀퓨전씨", "셀퓨전C", "셀퓨전시씨"],   # 자사
 }
+
+
+def _merge_db_ko_names() -> None:
+    """monitored_brands의 ko_names를 BRAND_KO_NAMES에 병합.
+
+    슬랙 봇으로 승인한 브랜드는 DB(monitored_brands)에만 들어가고 이 파일은 그대로다.
+    그 결과 Amuse(어뮤즈)·Tirtir(티르티르)가 한글명 없이 남아, 한글명으로 검색하는
+    네이버·장업신문 수집기가 국내 기사를 아예 못 긁고 있었다(실측 2개 브랜드).
+    화면 표기(_bko)도 영문으로 나온다.
+
+    DB를 못 읽어도 위 하드코딩 목록으로 동작하므로 실패해도 무해하다.
+    """
+    try:
+        from sqlalchemy import text as _text
+        from storage.models import get_session as _gs
+        from config.settings import DB_SCHEMA as _S
+        se = _gs()
+        try:
+            rows = se.execute(_text(
+                f"SELECT name, ko_names FROM {_S}.monitored_brands WHERE is_active")).fetchall()
+        finally:
+            se.close()
+    except Exception:
+        return
+    for name, ko in rows:
+        vals = [k.strip() for k in (ko or []) if k and k.strip()]
+        if not vals:
+            continue
+        cur = BRAND_KO_NAMES.setdefault(name, [])
+        for v in vals:
+            if v not in cur:
+                cur.append(v)
+
+
+_merge_db_ko_names()
