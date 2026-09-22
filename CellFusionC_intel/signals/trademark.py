@@ -58,11 +58,39 @@ def _norm_applicant(s: str) -> str:
 
 
 def _is_own(brand: str, applicant: str) -> bool:
+    """출원인이 이 브랜드 운영사인가.
+
+    경계 없는 부분일치는 못 쓴다. 정규화가 공백·기호를 지우므로 'ABIB'가
+    'HABIBAMERICANBANK'(하비브은행) 안에 들어가고, 'DALBA'가 'DALBAGAYLLC'
+    (DAL BAGAY LLC) 안에 생긴다. 실측으로 Abib 자기출원 29건 중 25건이
+    하비브은행·러그회사·우주건축 회사였다.
+
+    별칭은 공백이 지워진 형태('GOODAIGLOBAL')로 저장돼 있어 원문 단어 경계와
+    직접 비교할 수 없다. 그래서 **출원인 앞 토큰들을 순서대로 이어붙인 것**과
+    별칭이 같은지 본다 — 회사명은 브랜드 운영사 이름으로 시작하기 때문이다.
+      'GOODAI GLOBAL Inc.' → GOODAI / GOODAIGLOBAL / GOODAIGLOBALINC  → 일치 ✓
+      'DAL BAGAY LLC'      → DAL / DALBAGAY / DALBAGAYLLC             → 불일치 ✓
+      'Abiboo Corp'        → ABIBOO / ABIBOOCORP                      → 불일치 ✓
+    """
+    import re as _re
     aliases = OWN_APPLICANTS.get(brand)
     if not aliases:
         return False
-    a = _norm_applicant(applicant)
-    return any(_norm_applicant(al) in a for al in aliases)
+    toks = [_norm_applicant(t) for t in _re.split(r"[\s,./()\-]+", (applicant or "").upper())]
+    toks = [t for t in toks if t]
+    # 앞에서부터만 이어붙이면 'THE FOUNDERS Co.'의 'FOUNDERS'를 놓친다.
+    # 연속된 토큰 묶음을 전부 만들어 비교한다(토큰 경계는 지키므로 HABIB 안의 ABIB는 안 걸린다).
+    runs = set()
+    for i in range(len(toks)):
+        acc = ""
+        for j in range(i, len(toks)):
+            acc += toks[j]
+            runs.add(acc)
+    for al in aliases:
+        n = _norm_applicant(al)
+        if n and len(n) >= 3 and n in runs:
+            return True
+    return False
 
 
 _FIELDS = {"applicant", "applicationNumber", "applicationDate", "registrationDate",

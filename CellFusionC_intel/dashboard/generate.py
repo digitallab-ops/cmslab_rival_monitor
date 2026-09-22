@@ -4313,7 +4313,7 @@ def _parse_insight_sections(strategy: str):
     synth = grab("종합 의견", "종합")
     moves = []
     for ln in grab("최근 움직임").splitlines():
-        t = ln.strip().lstrip("-•*·∙◦ ").strip()
+        t = _strip_bullet(ln)
         if t:
             moves.append(t)
     if not headline and not moves and not angle:          # 섹션 없는 폴백 텍스트
@@ -6684,6 +6684,21 @@ def _period_entry(v: dict, _esc_s, growth_story=None, composite=None) -> dict:
                 for brand, ins in v.get("insights", {}).items()
             },
     }
+
+def _strip_bullet(t: str) -> str:
+    """불릿 기호만 떼고 마크다운 강조는 텍스트로 되돌린다.
+
+    lstrip("-•*·∙◦ ")은 문자 집합이라 '- **제목** — 본문'에서 **여는 `**`까지 먹고**
+    닫는 `**`를 남긴다. 렌더러가 마크다운을 변환하지 않으므로 '제목** — 본문'이
+    그대로 화면에 나갔다(실측: 최근 움직임 불릿 125개 중 63개).
+    """
+    import re as _re
+    t = (t or "").strip()
+    t = _re.sub(r"^[-•·∙◦]\s*", "", t)          # 불릿 기호 하나만
+    t = _re.sub(r"\*\*(.+?)\*\*", r"\1", t)    # **강조** → 강조
+    t = _re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", t)   # *강조* → 강조
+    return t.replace("**", "").strip()
+
 
 def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = False):
     """NICE 전체 기업 재무 표 — 화장품업 기본 + 전체 전환, 검색·정렬, DART 최신 YoY 결합.

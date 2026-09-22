@@ -23,6 +23,31 @@ _DEFAULT_CMS_PROFILE = """[우리 회사 = 씨엠에스랩 / 브랜드 = 셀퓨�
 - 주력 시장: 한국 올리브영, 베트남(자외선차단 1위), 중국(선케어 1위), 일본. 미국은 확장 과제."""
 
 
+def _strip_html_comments(txt: str) -> str:
+    """마크다운에서 <!-- --> 주석 블록만 제거.
+
+    정규식으로는 안 된다. non-greedy는 주석 **본문에 적힌** 리터럴 "-->"에서 끊겨
+    뒷조각을 남기고(실제로 ")은 프롬프트에 포함돼도 무방하나…" 가 6개 프롬프트 맨
+    앞에 박혀 나갔다), greedy는 파일에 주석이 3블록이라 첫 <!--부터 마지막 -->까지
+    통째로 먹어 회사 정체성 줄까지 지운다. 줄 단위로 여는/닫는 마커를 세며 걷어낸다.
+    """
+    out, depth = [], 0
+    for ln in (txt or "").splitlines():
+        st = ln.strip()
+        if depth == 0 and st.startswith("<!--"):
+            # 한 줄짜리 주석(<!-- ... -->)이면 그 줄만 버리고 계속
+            if st.endswith("-->") and len(st) > 6:
+                continue
+            depth = 1
+            continue
+        if depth:
+            if st.endswith("-->"):
+                depth = 0
+            continue
+        out.append(ln)
+    return chr(10).join(out)
+
+
 def _load_cms_profile() -> str:
     """자사 프로필 로드. 파일 안의 HTML 주석은 '기획팀용 편집 안내'라 LLM엔 불필요 —
     매 호출마다 수백 토큰이 낭비되므로 제거하고 넣는다(사람이 읽는 파일은 그대로 유지)."""
@@ -31,7 +56,10 @@ def _load_cms_profile() -> str:
     try:
         with open(path, encoding="utf-8") as f:
             txt = f.read()
-        txt = re.sub(r"<!--.*?-->", "", txt, flags=re.S)        # 사람용 주석 제거
+        # 사람용 주석 제거. non-greedy를 쓰면 주석 본문 안에 적힌 리터럴 닫힘 마커에서
+        # 매칭이 끝나 뒷부분이 살아남는다 — 실제로 주석 조각이 6개 프롬프트 맨 앞에
+        # 박혀 나가고 있었다. 마지막 닫힘까지 먹도록 greedy로 바꾸고 고아 마커도 지운다.
+        txt = _strip_html_comments(txt)
         txt = re.sub(r"\n{3,}", "\n\n", txt).strip()
         if txt:
             return txt

@@ -57,6 +57,36 @@ def is_near_duplicate(
     return bool(find_near_duplicates(new_title, existing, threshold))
 
 
+# 광고·유입경로 추적용 파라미터. 기사 식별과 무관하므로 정규화 때 떼어낸다.
+_TRACKING_PARAMS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+    "fbclid", "gclid", "igshid", "ref", "referrer", "from", "src", "cmpid",
+    "spm", "scid", "s_cid", "mc_cid", "mc_eid", "_ga",
+}
+
+
+def normalize_url(url: str) -> str:
+    """중복 판정용 URL 정규화.
+
+    쿼리스트링을 통째로 버리면 안 된다. 한국 언론 CMS와 유튜브는 **기사 식별자가
+    쿼리에 있다**(articleView.html?idxno=310101, watch?v=...). 실측으로 저장된
+    기사 10,432건 중 88%가 쿼리스트링 URL이고, 통째로 버리면 한 사이트의 서로 다른
+    기사 72건이 같은 키가 돼 배치에서 1건만 남고 나머지가 조용히 폐기됐다.
+    추적 파라미터만 떼고 나머지는 정렬해 보존한다.
+    """
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    try:
+        sp = urlsplit((url or "").strip())
+    except Exception:
+        return (url or "").strip().rstrip("/")
+    keep = [(k, v) for k, v in parse_qsl(sp.query, keep_blank_values=True)
+            if k.lower() not in _TRACKING_PARAMS]
+    keep.sort()          # 파라미터 순서만 다른 같은 URL을 같은 키로
+    path = sp.path.rstrip("/")
+    return urlunsplit((sp.scheme.lower(), sp.netloc.lower(), path,
+                       urlencode(keep), ""))
+
+
 def deduplicate_batch(
     articles: list,
     existing: list[tuple[int, str]],
@@ -79,7 +109,7 @@ def deduplicate_batch(
     result = []
 
     for article in articles:
-        normalized_url = article.url.split("?")[0].rstrip("/")
+        normalized_url = normalize_url(article.url)
 
         if normalized_url in seen_urls:
             logger.debug("배치 내 URL 중복 제거: %s", article.title[:60])
