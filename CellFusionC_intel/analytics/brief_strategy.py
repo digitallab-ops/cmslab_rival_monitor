@@ -72,8 +72,13 @@ def _p_strat(brand_ko, cc, rec, sig=""):
   · 실적·투자·펀드·지분·상장·M&A·합병      · 채용·인사·조직개편
   · 골프·스포츠·시상·기부                   · 소송·가품·분쟁·단속
   · 주가·증시                                · 단순 브랜드 나열(여러 브랜드를 열거만)
-채용은 '인재 확보·구인·공채·리크루팅'이 요지면 SKIP이다.
-단, **유통·입점·출시·마케팅 이야기면 검토·예정 단계여도 SKIP이 아니다.** 그건 시장 움직임이다.
+
+**먼저 이 예외부터 본다 — 해당하면 위 목록과 겹쳐도 SKIP이 아니다.**
+유통·입점·출시·팝업·마케팅·앰배서더·인플루언서 협업 이야기면 시장 움직임이다.
+검토·예정 단계여도, 기사에 매출·지분 같은 수치가 곁들여 있어도 SKIP이 아니다.
+  (실제 누락 사례: '스킨1004 브라질 유통망 확대'가 매출 언급 때문에 SKIP됐고,
+   'Celimax 새 앰배서더 계약'이 인사로 읽혀 브랜드가 브리핑에서 통째로 사라졌다.)
+채용은 '인재 확보·구인·공채·리크루팅'이 **기사의 요지일 때만** SKIP이다.
 
 **[2단계] 통과했다면 — 사실을 되풀이하지 마라.**
 기사에 이미 적힌 내용을 다른 말로 바꿔 쓰는 것은 정보가 0이다. 실제로 이런 게 나갔다:
@@ -175,14 +180,12 @@ def collect_brand_signals(session) -> dict:
     # 섞으면 '아누아·한국' 줄에 아마존 미국 순위가 붙어 문맥이 어긋난다.
     glob: dict = defaultdict(list)
     bycc: dict = defaultdict(list)
-    try:
-        from analytics.queries import get_sales_velocity
-        for b, d in (get_sales_velocity(session) or {}).items():
-            v = d.get("velocity") or 0
-            if v >= 50:
-                glob[b].append(f"아마존 전체 리뷰 하루 {v:,.0f}개씩 증가(상품 {d.get('products',0)}개)")
-    except Exception as e:
-        logger.warning("신호 수집(판매속도) 실패: %s", e)
+    # 판매속도(리뷰 증가/일)는 당분간 인용하지 않는다.
+    # DE/ES/IT/FR 리뷰수가 천단위 구분자 파싱 문제로 폭주한다 — 같은 ASIN이 13일 만에
+    # 30 → 31,899로 뛴다(US·GB·AU·JP는 정상). 그 값이 "하루 19,065개 리뷰 증가"처럼
+    # 슬랙 브리핑 문장으로 나갔다. 파서를 고치고 과거 데이터를 재계산하기 전까지는
+    # 틀린 숫자를 인용하는 것보다 빼는 편이 낫다.
+    # TODO: signals/retail_ranking.py `_parse_reviews` 로케일 처리 점검 후 되살릴 것.
     try:
         from analytics.queries import get_retail_rank_history
         for h in (get_retail_rank_history(session) or []):
