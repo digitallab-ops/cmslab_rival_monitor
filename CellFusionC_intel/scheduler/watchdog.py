@@ -103,7 +103,10 @@ def check_collection_health(session, agg: dict | None = None) -> list[dict]:
             active_days = len(prior)                       # 그 이전 14일 중 수집된 날 수
             med = prior[len(prior) // 2] if prior else 0   # 중앙값(주간 스파이크 영향 적음)
             t = d["day"]
-            if t == 0 and active_days >= 8:
+            # 저빈도 소스는 0건이 평소에도 흔하다 — reddit은 15일 중 11일만 들어오고
+            # 중앙값이 2건이라 하루 0건이 정상 범위인데 경보가 갔다. 매일 꾸준히
+            # 들어오던 소스(중앙값 3건 이상 + 14일 중 12일 이상)에만 0건 경보를 건다.
+            if t == 0 and active_days >= 12 and med >= 3:
                 # 거의 매일 오던 소스가 어제 0건 → 명백한 이상
                 findings.append({
                     "type": "source_drop", "key": f"src:{ct}:{target}",
@@ -307,52 +310,68 @@ def check_data_drift(session) -> list[dict]:
 
 # ── 2단계: 분류 품질 스팟체크 ────────────────────────────────────────────────
 def check_classification_quality(session, sample: int = 10) -> list[dict]:
-    """최근 분류 표본을 AI가 재검토 → 오분류(중요도·브랜드·국가·활동유형) 이견만 리포트."""
+    """분류 품질 점검 — **코드로 확정할 수 있는 불일치만** 보고한다.
+
+    예전엔 표본 10건을 LLM에 주고 "이상한 것을 지적하라"고 했는데, 판정 기준을 주지
+    않아 취향 차이가 이견으로 나왔다("중요도를 medium으로 조정할 필요가 있음" 같은).
+    게다가 '최대 5건'이 사실상 목표치가 돼 매번 5건을 채워 왔다.
+
+    대신 규칙서에 명시된 두 가지만 본다. 둘 다 사람이 따질 여지가 없다.
+      · importance ↔ strategic_score 불일치 (규칙: >=75 high, 55~74 medium, <=54 low)
+      · 기사 어디에도 브랜드가 안 나오는데 incidental/unrelated가 아님
+    """
     try:
         rows = session.execute(text(f"""
-            SELECT id, brand, country, importance, activity_type,
-                   COALESCE(NULLIF(title_ko,''), title) AS t,
-                   LEFT(COALESCE(NULLIF(article_body_ko,''), details, ''), 220) AS body
+            SELECT id, brand, importance, COALESCE(strategic_score, 0),
+                   title, COALESCE(title_ko, ''), COALESCE(details, ''),
+                   COALESCE(brand_focus, '')
             FROM {DB_SCHEMA}.news_articles
             WHERE collected_at >= now() - interval '2 days'
               AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
-            ORDER BY random() LIMIT :n"""), {"n": sample}).fetchall()
+        """)).fetchall()
     except Exception as e:
         logger.warning("스팟체크 표본 조회 실패: %s", e)
         return []
     if not rows:
         return []
-    items = []
-    for r in rows:
-        items.append(f"[{r[0]}] 브랜드={r[1]} 국가={r[2]} 중요도={r[3]} 활동={r[4]}\n제목:{r[5]}\n요지:{r[6]}")
-    prompt = f"""너는 K뷰티 뉴스 분류 QA 검수자다. 아래 분류 결과 표본을 검토해 **명백히 이상한 것만** 지적하라.
-점검: 브랜드가 실제 기사 주체인지, 국가가 맞는지, 중요도(high/medium/low)가 과대/과소인지, 활동유형이 내용과 맞는지.
 
-{chr(10).join(items)}
-
-- 이상한 항목만 "[id] 무엇이 어떻게 이상(→ 제안)" 한 줄씩. 멀쩡하면 아무것도 쓰지 마라.
-- 애매한 건 넘어가라(과검출 금지). 최대 5건.
-반드시 JSON만: {{"issues": ["[123] ...", ...]}}"""
     try:
-        from openai import OpenAI
-        import json as _json
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        resp = client.chat.completions.create(
-            model=_WD_MODEL, max_tokens=500, temperature=0.2,
-            response_format={"type": "json_object"},
-            messages=[{"role": "user", "content": prompt}])
-        issues = (_json.loads(resp.choices[0].message.content or "{}").get("issues") or [])[:5]
-    except Exception as e:
-        logger.warning("스팟체크 LLM 실패: %s", e)
-        return []
-    if not issues:
-        return []
-    return [{
-        "type": "classify_qa", "key": "classify:qa",
-        "title": f"분류 스팟체크 — 표본 {len(rows)}건 중 이견 {len(issues)}건",
-        "detail": " / ".join(issues),
-        "read": "반복되면 분류 프롬프트·모델(classifier) 점검",
-    }]
+        from config.brands import BRAND_KO_NAMES
+    except Exception:
+        BRAND_KO_NAMES = {}
+
+    def _expect(sc):
+        return "high" if sc >= 75 else ("medium" if sc >= 55 else "low")
+
+    def _mentioned(r):
+        blob = " ".join([r[4] or "", r[5] or "", r[6] or ""]).lower()
+        cands = [r[1], (r[1] or "").replace(" ", "")] + list(BRAND_KO_NAMES.get(r[1], []))
+        return any(n and n.lower() in blob for n in cands)
+
+    mism = [r for r in rows if r[3] and _expect(r[3]) != r[2]]
+    ghost = [r for r in rows if r[7] not in ("incidental", "unrelated") and not _mentioned(r)]
+
+    findings = []
+    n = len(rows)
+    if mism and len(mism) / n >= 0.10:      # 산발적 1~2건은 굳이 알리지 않는다
+        ex = " / ".join(f"[{r[0]}] 점수 {r[3]}이면 {_expect(r[3])}인데 {r[2]}" for r in mism[:3])
+        findings.append({
+            "type": "classify_qa", "key": f"classify:score:{len(mism)}",
+            "title": f"중요도가 점수 기준과 어긋남 — 최근 2일 {len(mism)}/{n}건",
+            "detail": (f"분류 규칙은 strategic_score >=75 high, 55~74 medium, <=54 low인데 "
+                       f"{len(mism)}건이 다르다. {ex}"),
+            "read": "classifier/prompts.py의 점수↔중요도 정합 문구와 실제 출력 대조",
+        })
+    if ghost and len(ghost) / n >= 0.10:
+        ex = " / ".join(f"[{r[0]}] {r[1]}" for r in ghost[:3])
+        findings.append({
+            "type": "classify_qa", "key": f"classify:ghost:{len(ghost)}",
+            "title": f"브랜드가 기사에 없는데 무관 처리가 아님 — 최근 2일 {len(ghost)}/{n}건",
+            "detail": (f"제목·한글제목·본문 어디에도 브랜드명이 없는데 brand_focus가 "
+                       f"incidental/unrelated가 아니다. 지표와 브리핑에 그대로 섞인다. {ex}"),
+            "read": "brand_focus 'unrelated' 판정이 실제로 쓰이는지 분류 출력 확인",
+        })
+    return findings
 
 
 def _daily_deep_ok(session) -> bool:
