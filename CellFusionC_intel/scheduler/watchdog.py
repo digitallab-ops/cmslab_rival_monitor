@@ -85,6 +85,19 @@ def check_collection_health(session, agg: dict | None = None) -> list[dict]:
                 d["day"] += int(c)
             else:
                 d["prior"].append(int(c))
+        # 여러 소스가 **같이** 줄면 우리 장애가 아니라 바깥 사정(연휴·주말·뉴스 비수기)이다.
+        # 실제 오탐: 추석 연휴(9/24~) 기사량이 100건/일 → 6~12건/일로 떨어졌는데
+        # naver_news 급감으로 3일 연속 경보가 갔다. 수집기·API는 정상이었다.
+        _tot_t = sum(v["day"] for v in per.values())
+        _tot_p = [sum(v["prior"][i] for v in per.values() if i < len(v["prior"]))
+                  for i in range(max((len(v["prior"]) for v in per.values()), default=0))]
+        _tot_med = sorted(_tot_p)[len(_tot_p) // 2] if _tot_p else 0
+        _sitewide = bool(_tot_med) and _tot_t < _tot_med * 0.5
+        if _sitewide:
+            logger.info("전체 수집량이 중앙값의 %.0f%% — 소스별 급감 경보를 보류(바깥 사정 추정)",
+                        _tot_t / _tot_med * 100)
+            return findings
+
         for ct, d in per.items():
             prior = sorted(d["prior"])
             active_days = len(prior)                       # 그 이전 14일 중 수집된 날 수

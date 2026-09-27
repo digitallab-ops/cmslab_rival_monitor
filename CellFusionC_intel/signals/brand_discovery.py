@@ -47,7 +47,11 @@ _BLOCK = {
     "olive young", "oliveyoung", "올리브영", "cj올리브영", "cj olive", "다이소", "daiso",
     "다이소몰", "쿠팡", "coupang", "무신사", "musinsa", "세포라", "sephora", "ulta", "아마존",
     "amazon", "큐텐", "qoo10", "지그재그", "에이블리", "ably", "컬리", "kurly", "네이버", "naver",
-    "카카오", "kakao", "gs샵", "홈쇼핑", "免税", "면세",
+    "카카오", "kakao", "gs샵", "홈쇼핑", "免税", "면세", "올영", "올리브", "더현대",
+    "신세계", "롯데", "현대백화점", "이마트", "emart", "왓슨스", "watsons",
+    # 유통사 기획전·전용관·행사 이름(브랜드가 아니다)
+    "신상", "전용관", "기획전", "페스타", "festa", "세일", "위크", "week", "어워드", "award",
+    "팝업", "popup", "pop-up", "챌린지", "challenge", "콜라보", "collabo",
     # 제조사·그룹(모회사)
     "코스맥스", "cosmax", "한국콜마", "콜마", "kolmar", "아모레", "amore", "lg생활건강",
     "lg생건", "lg h&h", "애경", "cj", "cj제일제당",
@@ -171,6 +175,10 @@ def _extract_brands(headlines: list[str]) -> list[dict]:
 규칙:
 - 브랜드명만. 유통사(올리브영·쿠팡·무신사·세포라·아마존·큐텐), 성분(나이아신아마이드 등),
   일반명사(선크림·앰플·토너), 인물·매체명은 제외.
+- **유통사의 기획전·전용관·행사 이름은 브랜드가 아니다.** 실제 오탐: '올영신상'(올리브영
+  신상품 전용관)이 17건 언급으로 후보에 올라왔다. '○○페스타', '○○위크', '○○관',
+  '○○신상'처럼 유통사가 만든 코너·행사명은 전부 제외하라.
+  판단 기준: 그 이름으로 파는 **제품**이 있으면 브랜드, 제품을 **모아 파는 자리**면 아니다.
 - **운영사·제조사·지주사 이름은 브랜드가 아니다.** 대기업(아모레퍼시픽·LG생활건강)뿐 아니라
   신흥 운영사도 제외한다 — 에이피알(A.P.R.), 구다이글로벌, 달바글로벌, 더파운더즈,
   크레이버코퍼레이션, 엘앤피코스메틱, 해브앤비, 서린컴퍼니, 코스맥스, 한국콜마 등.
@@ -234,9 +242,12 @@ def run() -> dict:
             # 하루치 스냅샷만 보고 제안하면 보도자료 하나가 여러 매체에 실린 것도
             # 후보가 된다(A.P.R.이 그 사례 — 같은 날 운영사 비교 기사 2건).
             # 첫 포착은 watching으로 재워두고, **다른 날** 또 잡혀야 pending으로 올린다.
+            # 이름뿐 아니라 한글명으로도 찾는다. 안 그러면 같은 브랜드가 영문('Looncell')과
+            # 한글('루온셀')로 각각 후보가 된다(실제로 둘 다 목록에 올라왔다).
             prev = session.execute(text(
-                f"SELECT status, first_seen, last_seen FROM {DB_SCHEMA}.brand_candidates "
-                f"WHERE name = :n"), {"n": name}).fetchone()
+                f"SELECT status, first_seen, last_seen, name FROM {DB_SCHEMA}.brand_candidates "
+                f"WHERE name = :n OR (:ko <> '' AND (ko_name = :ko OR name = :ko))"),
+                {"n": name, "ko": ko or ""}).fetchone()
 
             if prev is None:
                 session.execute(text(f"""
@@ -247,7 +258,7 @@ def run() -> dict:
                 logger.info("   👀 관찰 시작: %s (언급 %d건)", name, cnt)
                 continue
 
-            status, first_seen, last_seen = prev[0], prev[1], prev[2]
+            status, first_seen, last_seen, row_name = prev[0], prev[1], prev[2], prev[3]
             if status != "watching":
                 continue                      # pending/approved/rejected는 건드리지 않는다
 
@@ -259,7 +270,7 @@ def run() -> dict:
                 session.execute(text(
                     f"UPDATE {DB_SCHEMA}.brand_candidates SET first_seen=:cap, last_seen=:cap, "
                     f"mention_count=:c, sample_titles=:s WHERE name=:n"),
-                    {"n": name, "c": cnt, "s": samples, "cap": cap})
+                    {"n": row_name, "c": cnt, "s": samples, "cap": cap})
                 logger.info("   👀 관찰 재시작(간격 초과): %s", name)
                 continue
 
@@ -268,7 +279,7 @@ def run() -> dict:
                 SET status='pending', last_seen=:cap, sample_titles=:s,
                     mention_count=GREATEST(mention_count, :c), proposed_at=NOW()
                 WHERE name=:n
-            """), {"n": name, "c": cnt, "s": samples, "cap": cap})
+            """), {"n": row_name, "c": cnt, "s": samples, "cap": cap})
             days = (cap - first_seen).days if first_seen else 0
             logger.info("   ✅ 제안 승격: %s (%d일에 걸쳐 재등장)", name, days)
             new_candidates.append({"name": name, "ko": ko, "count": cnt, "days": days,
