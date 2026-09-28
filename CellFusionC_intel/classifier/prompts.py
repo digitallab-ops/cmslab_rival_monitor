@@ -180,6 +180,12 @@ def build_classification_prompt(article, brand: str, country: str) -> str:
     body_section = f"\n본문: {body[:1000].strip()}" if body else ""
     lang = getattr(article, "language", "") or ""
     lang_hint = f"\n출처 언어: {lang}" if lang else ""
+    # 본문도 요약도 없이 제목만 있는 기사가 많다(구글뉴스 RSS는 링크만 준다).
+    # 그 사실을 모델에게 알려 없는 내용을 지어내지 않게 한다.
+    thin = (not body) and (summary == "(없음)")
+    thin_hint = ("\n\n[주의] 이 기사는 **제목만** 있다(본문·요약 없음). 제목에서 읽히는 것만 쓰고 "
+                 "확인되지 않는 것은 비워라. product_name·channel·city는 제목에 없으면 null, "
+                 "중요도는 제목만으로 판단 가능한 수준으로 보수적으로 매겨라." if thin else "")
     return (
         f"브랜드: {brand}\n"
         f"수집 파이프라인 국가: {country}  (수집 경로일 뿐, 내용에 따라 다른 시장으로 분류할 것)\n"
@@ -187,4 +193,5 @@ def build_classification_prompt(article, brand: str, country: str) -> str:
         f"제목: {article.title}\n"
         f"요약: {summary}{body_section}\n"
         f"URL: {article.url}"
+        + thin_hint
     )

@@ -292,7 +292,11 @@ def _brand_command(text: str, user_id: str = ""):
                     f"(당신 ID: `{user_id}` — `내 아이디`로도 확인)")
         return f"🔒 브랜드 등록/제외는 관리자만 가능해요. (당신 ID: `{user_id}`)"
 
-    if t in ("후보", "브랜드 후보", "후보 목록"):
+    # 정확한 단어만 받으면 '승인대기중인 브랜드'처럼 자연스러운 말이 LLM으로 새서
+    # 엉뚱한 답(상표 출원 목록)이 나간다. 실제로 그렇게 물어봤다가 못 찾았다.
+    _c = re.sub(r"[?？!！.\s]+", "", t.lower())
+    if re.fullmatch(r"(브랜드)?(신규|신흥|새)?(승인)?(대기|대기중인|추가)?(브랜드)?후보(목록|리스트|들)?", _c)             or _c in ("후보", "승인대기", "승인대기중인브랜드", "대기중인브랜드",
+                      "승인할브랜드", "등록대기", "pending", "candidates"):
         try:
             rows = _pending_candidates()
         except Exception as e:
