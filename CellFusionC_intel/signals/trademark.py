@@ -247,6 +247,7 @@ def run() -> dict:
     saved, cosmetic, own = 0, 0, 0
     by_brand: dict = {}
     new_filings: list = []
+    skipped_noncos = 0
     session = get_session()
     try:
         _ensure_table(session)
@@ -261,11 +262,19 @@ def run() -> dict:
                     logger.warning("해외상표 검색 실패 %s/%s: %s", brand, cc, e)
                     continue
                 for rec in recs:
+                    is_cos = _nice_has_cosmetic(rec.get("niceCode", ""),
+                                                rec.get("tradeMarkClassificationCode", ""))
+                    # 화장품류(니스 3류)가 아니면 저장하지 않는다.
+                    # 영어 일반명사 브랜드는 검색어가 아무 상표나 긁어온다 — 실측으로
+                    # Amuse 627건 중 화장품류는 36건(6%)뿐이었고 나머지는 'AMUSE-BOUCHE
+                    # APPAREL'(의류 25류), 'SOS AMUSEMENT PARK'(완구 28류) 같은 것이었다.
+                    # DB의 80%가 무관 상표라 '진출 선행신호'라는 목적 자체가 흐려진다.
+                    if not is_cos:
+                        skipped_noncos += 1
+                        continue
                     inserted = _save(session, brand, cc, rec)
                     saved += 1
                     n_b += 1
-                    is_cos = _nice_has_cosmetic(rec.get("niceCode", ""),
-                                                rec.get("tradeMarkClassificationCode", ""))
                     is_own_ = _is_own(brand, rec.get("applicant", ""))
                     if is_cos:
                         cosmetic += 1
@@ -284,8 +293,9 @@ def run() -> dict:
                 logger.info("  %-18s US+JP 상표 %d건(자기출원 %d)", brand, n_b, n_own)
     finally:
         session.close()
-    logger.info("해외상표 수집: 저장 %d건(화장품류 %d · 자기출원 %d · 신규 %d) · 브랜드 %d",
-                saved, cosmetic, own, len(new_filings), len(by_brand))
+    logger.info("해외상표 수집: 저장 %d건(화장품류 %d · 자기출원 %d · 신규 %d) · 브랜드 %d"
+                " · 비화장품 %d건 건너뜀",
+                saved, cosmetic, own, len(new_filings), len(by_brand), skipped_noncos)
     return {"searched": len(brands), "saved": saved, "cosmetic": cosmetic,
             "own": own, "by_brand": by_brand, "new_filings": new_filings}
 
