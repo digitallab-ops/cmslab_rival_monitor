@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class NewsClassification(BaseModel):
     brand: str = Field(description="브랜드명 (원본 영문)")
     country: str = Field(description="기사 관련 ISO 국가 코드 (예: US, PL, TH)")
-    brand_focus: Literal["primary", "secondary", "incidental"] = Field(
+    brand_focus: Literal["primary", "secondary", "incidental", "unrelated"] = Field(
         description="기사에서 브랜드의 비중: primary=주인공, secondary=주요 언급 중 하나, incidental=예시로 잠깐 언급"
     )
     activity_type: Literal[

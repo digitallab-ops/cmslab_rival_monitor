@@ -1344,7 +1344,7 @@ def get_self_position(session: Session) -> dict:
               SELECT brand, COUNT(*) c FROM {DB_SCHEMA}.news_articles
               WHERE is_self IS NOT TRUE AND is_duplicate IS NOT TRUE
                 AND published_date >= NOW()-interval '30 days'
-                AND (brand_focus!='incidental' OR brand_focus IS NULL)
+                AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
               GROUP BY brand) t
         """)).scalar()
         out["comp_median_news"] = int(med) if med is not None else 0
@@ -1590,7 +1590,7 @@ def get_opportunity_stories(session: Session, days: int = 30, limit: int = 8) ->
                 FROM {DB_SCHEMA}.news_articles
                 WHERE (is_duplicate IS NOT TRUE AND is_self IS NOT TRUE) AND published_date >= :cutoff
                   AND brand=:b AND country=:c AND importance IN ('high','medium')
-                  AND (brand_focus IS NULL OR brand_focus!='incidental')
+                  AND (brand_focus IS NULL OR brand_focus NOT IN ('incidental','unrelated'))
             """), {"cutoff": cutoff, "b": b, "c": c}).fetchone()
             prod_map[(b, c)] = list(agg[0] or [])[:4] if agg else []
             ings = []
