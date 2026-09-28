@@ -26,7 +26,10 @@ RESULTS_PER_QUERY = 10  # 브랜드당 최대 수집 건수 (최대 100)
 
 
 def _strip_html(text: str) -> str:
-    return re.sub(r"<[^>]+>", "", unescape(text)).strip()
+    # unescape를 먼저 하면 '&lt;코너명&gt;'이 '<코너명>'이 된 뒤 태그로 간주돼 지워진다.
+    # 한국 기사 제목의 <코너명> 관례와 충돌해 브랜드명까지 사라졌다.
+    # 진짜 HTML 태그(<b> 등)를 먼저 걷어내고 그다음 엔티티를 되돌린다.
+    return unescape(re.sub(r"<[^>]{1,40}>", "", text or "")).strip()
 
 
 def _parse_naver_date(date_str: str) -> datetime:

@@ -3625,10 +3625,15 @@ def _clean_product_name(name: str, brand: str) -> str:
     """제품명 정리 — 프로모 대괄호·선행 브랜드명 트림. (헤더에 브랜드 있으니 중복 제거)"""
     import re as _re
     n = name or ""
-    n = _re.sub(r"\[[^\]]*\]", "", n)                    # [Hudson's Pick] 등 프로모 태그 제거
+    # 대괄호를 그냥 지우면 구분자 역할을 하던 자리가 붙어버린다
+    # ('식물나라[산리오에디션]식물나라 보송' → '식물나라식물나라 보송'). 공백으로 바꾼다.
+    n = _re.sub(r"\[[^\]]*\]", " ", n)                   # [Hudson's Pick] 등 프로모 태그 제거
     n = _re.sub(r"^\s*(?:" + _re.escape(brand) + r"|d'?alba|skin1004|anua|cosrx)[\s\W]*", "",
                 n, flags=_re.I)                          # 선행 브랜드명 트림
-    n = n.split(",")[0]                                  # 첫 구절만(장황한 SEO 꼬리 제거)
+    # 첫 구절만 남겨 장황한 SEO 꼬리를 자르되, **천단위 쉼표에서는 자르지 않는다**
+    # ('Exosome Shot Zero 2,000 PPM Serum' → 'Exosome Shot Zero 2'가 되던 버그).
+    n = _re.split(r",(?!\d{3}(?:\D|$))", n)[0]
+    n = _re.sub(r"\s{2,}", " ", n)
     return n.strip(" -–—·")[:48] or (name or "")[:48]
 
 

@@ -444,14 +444,17 @@ def _memory_command(text: str, user_id: str = ""):
     try:
         # 삭제: "잊어" / "잊어 일본" / "기억 삭제 일본"
         if t.startswith("잊어") or t.startswith("기억 삭제") or t.startswith("기억삭제"):
-            key = t.replace("기억 삭제", "").replace("기억삭제", "").replace("잊어", "").strip()
+            # replace 체인은 문자열 '중간'의 같은 말까지 지운다
+            # ('기억 삭제 잊어버린 일정' → '버린 일정'). 앞머리 명령어만 한 번 뗀다.
+            key = re.sub(r"^(?:기억\s*삭제|잊어(?:버려|줘)?)\s*[:·,]?\s*", "", t).strip()
             n = delete_user_memory(s, user_id, key or None)
             if not n:
                 return "지울 기억이 없어요."
             return (f"🧹 기억 {n}건 지웠어요." if key else f"🧹 당신에 대한 기억 {n}건 전부 지웠어요.")
         # 추가: "기억해 나는 일본 담당이야"
         if t.startswith("기억해"):
-            val = t[3:].strip(" :·,")
+            # t[3:]는 '기억해' 뒤 세 글자만 떼므로 '기억해줘 X'가 '줘 X'로 저장됐다.
+            val = re.sub(r"^기억해(?:줘|둬|두라고|주세요|라)?\s*[:·,]?\s*", "", t).strip()
             if not val:
                 return "무엇을 기억할까요? 예) `기억해 나는 일본 시장 담당`"
             key = ("직접 입력 " + val[:20])

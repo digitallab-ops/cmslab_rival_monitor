@@ -114,7 +114,9 @@ def get_expansion_playbook(session: Session, days: int = 90) -> list[dict]:
         # 채널 필드(리테일러) 집계 — 진입 경로
         ch = (r[3] or "").strip()
         if ch:
-            for part in ch.replace("·", ",").replace("/", ",").split(","):
+            # '·'는 구분자로 쓰지 않는다 — '브라질 약국·헬스케어 유통망'처럼 채널명
+            # 자체에 들어 있어 없는 채널 두 개로 쪼개진다. 쉼표·슬래시만 구분자로 본다.
+            for part in ch.replace("/", ",").split(","):
                 p = part.strip()
                 if p:
                     m["channels"][p] = m["channels"].get(p, 0) + 1

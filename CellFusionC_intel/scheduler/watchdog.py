@@ -112,7 +112,7 @@ def check_collection_health(session, agg: dict | None = None) -> list[dict]:
                     "type": "source_drop", "key": f"src:{ct}:{target}",
                     "title": f"수집 소스 '{ct}' 어제({target}) 0건 — 평소 거의 매일 수집",
                     "detail": (f"'{ct}'가 어제 0건. 그 전 14일 중 {active_days}일 수집(중앙값 {med}건/일)했는데 "
-                               f"어제는 전무. 소스 URL/HTML 변경·차단·API 키 만료 등을 확인할 것."),
+                               f"어제는 전무. 수집기를 단독 실행해 응답을 먼저 확인할 것."),
                 })
             elif med >= 15 and active_days >= 10 and 0 < t < med * 0.2:
                 # 고빈도 소스가 중앙값의 20% 미만으로 급감
@@ -120,7 +120,7 @@ def check_collection_health(session, agg: dict | None = None) -> list[dict]:
                     "type": "source_drop", "key": f"src:{ct}:{target}",
                     "title": f"수집 소스 '{ct}' 급감 — 어제({target}) {t}건 (중앙값 {med}건/일)",
                     "detail": (f"'{ct}'가 어제 {t}건으로 중앙값 {med}건의 {t/med*100:.0f}% 수준. "
-                               f"부분 실패·쿼리 변경·차단 등을 확인할 것."),
+                               f"수집기 단독 실행과 직전 잡 로그를 먼저 확인할 것."),
                 })
     except Exception as e:
         logger.warning("소스 헬스 체크 실패: %s", e)
@@ -138,7 +138,7 @@ def check_collection_health(session, agg: dict | None = None) -> list[dict]:
                     "type": "retail_stale", "key": f"retail:{cap}",
                     "title": f"아마존 리테일 {age}일째 미갱신 (최신 {cap})",
                     "detail": (f"retail_rankings 최신 capture_date={cap} ({age}일 전). 아마존 베스트셀러 "
-                               f"페이지 구조 변경·봇 차단·네트워크 문제 가능성."),
+                               f"수집 잡 로그와 단독 실행 결과를 확인할 것."),
                 })
     except Exception as e:
         logger.warning("리테일 신선도 체크 실패: %s", e)
