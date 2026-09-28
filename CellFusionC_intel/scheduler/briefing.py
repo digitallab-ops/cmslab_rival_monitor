@@ -414,10 +414,21 @@ def _compose_brief_body(session, weekly: bool):
     move_lines = []
     for idx, (r, line_read) in enumerate(moves, 1):
         bn = _bko(r["brand"])
+        # 별칭이 여럿이면 **긴 것부터** 떼야 한다. _bko()는 첫 별칭('리쥬란')만 주는데
+        # 본문은 '리쥬란코스메틱이…'로 시작해, 짧은 쪽을 떼면 '코스메틱이…'가 남는다.
+        try:
+            from config.brands import BRAND_KO_NAMES as _BKN
+            _cands = sorted({bn, *(_BKN.get(r["brand"]) or []), r["brand"]}, key=len, reverse=True)
+        except Exception:
+            _cands = [bn]
+        for _c in _cands:
+            if _c and line_read.startswith(_c):
+                bn = _c
+                break
         if line_read.startswith(bn):
             # 조사를 '문자 집합'으로 벗기면 본문을 갉아먹는다 — lstrip("가이은는…")은
             # "는 가격을"에서 '는' 다음 '가'까지 먹어 "격을"이 된다. 딱 한 개만 뗀다.
-            line_read = re.sub(r"^(?:은|는|이|가|을|를|의|도|와|과|에서|에)?\s*[·,]?\s*",
+            line_read = re.sub(r"^(?:에서는|에서도|으로는|에게는|이라는|라는|에서|에게|으로|은|는|이|가|을|를|의|도)?\s*[·,]?\s*",
                                "", line_read[len(bn):]).strip()
         sig = _sig(r)
         head = f"*{idx}. {bn}* · {_cty_ko(r['country'])}"

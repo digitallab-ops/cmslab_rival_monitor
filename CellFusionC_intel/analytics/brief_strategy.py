@@ -109,10 +109,26 @@ def _p_strat(brand_ko, cc, rec, sig=""):
 
 
 def _p_why(cc, it, ns):
-    return f"""아마존 {_cty(cc)}에서 {it.get('category','')} 카테고리 {it['rank']}위인 제품이 왜 그 나라에서 잘 팔리는지 한 줄(28~40자)로 설명해라.
-- 근거는 아래 실제 지표에서만: 리뷰 {it.get('review_count') or 0:,}개, 별점 {it.get('rating')}, 순위 {it['rank']}위, 제품명 속 성분/기능.
-- 리뷰 많으면 '검증된 스테디셀러', 상위 순위면 '카테고리 주력' 식으로 근거를 밝혀라. 리뷰 적으면 그렇게 부르지 마라.
-- 추정형(~로 보인다). 없는 사실 지어내기 금지. 브랜드명 생략.
+    rv = it.get("review_count") or 0
+    # 리뷰 규모를 구간으로 나눠 라벨을 다르게 주지 않으면 모두 '검증된 스테디셀러'가 된다
+    # (실측: 캐시 27건 전부 같은 표현, 리뷰 3,855개와 26,063개가 동급 취급).
+    band = ("리뷰 3만 이상 — 카테고리 대표급" if rv >= 30000 else
+            "리뷰 1만~3만 — 두터운 사용층" if rv >= 10000 else
+            "리뷰 3천~1만 — 자리 잡은 제품" if rv >= 3000 else
+            "리뷰 1천~3천 — 오르는 중" if rv >= 1000 else
+            "리뷰 1천 미만 — 아직 초기")
+    return f"""아마존 {_cty(cc)}에서 {it.get('category','')} 카테고리 {it['rank']}위인 제품이
+그 나라에서 왜 팔리는지 한 줄(28~40자)로 써라.
+
+- 근거는 아래 지표와 제품명뿐이다. 없는 사실을 지어내지 마라.
+- **'검증된 스테디셀러'라는 표현을 쓰지 마라.** 아래 규모 구간을 네 말로 풀어 쓰되,
+  리뷰 수가 다르면 다르게 말해야 한다. 3천짜리와 3만짜리가 같은 문장이면 실패다.
+- 순위와 리뷰 수 중 **더 특징적인 쪽**을 골라 말하라
+  (순위는 높은데 리뷰가 적으면 '최근 치고 올라온', 리뷰는 많은데 순위가 낮으면 '오래 팔린' 식).
+- 제품명에 성분·기능이 있으면 그것을 근거로 붙여라.
+- 추정형(~로 보인다). 브랜드명 생략.
+
+지표: {band} (리뷰 {rv:,}개 · 별점 {it.get('rating')} · {it['rank']}위)
 제품명: {it.get('product')}
 관련 뉴스요지: {(ns or '(없음)')[:120]}"""
 
@@ -220,7 +236,10 @@ def collect_brand_signals(session) -> dict:
 def signal_line(sigs: dict, brand: str, cc: str) -> str:
     """이 브랜드·이 나라 줄에서 인용해도 되는 지표만 골라 한 줄로."""
     parts = list((sigs.get("by_cc") or {}).get((brand, cc)) or [])
-    parts += [f"(글로벌) {x}" for x in ((sigs.get("global") or {}).get(brand) or [])]
+    # '(글로벌)' 접두는 규칙 목록에 묻혀 모델이 무시했다(전 세계 누적 조회수가
+    # "이번 캠페인 조회수"로 둔갑). 꼬리표 대신 문장 자체에 범위를 박아 넣는다.
+    parts += [f"{x} ← 이 나라가 아니라 전 세계 합산이다. 특정 국가·특정 캠페인 수치로 쓰지 말 것"
+              for x in ((sigs.get("global") or {}).get(brand) or [])]
     return " · ".join(parts[:3])
 
 def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None):
