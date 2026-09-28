@@ -15,7 +15,7 @@ from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.events import EVENT_JOB_ERROR
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 
 from config.brands import TIER1_BRANDS, ALL_BRANDS, TIER1_COUNTRIES, COUNTRIES
 from config.settings import TITLE_SIMILARITY_THRESHOLD
@@ -554,13 +554,60 @@ def _on_job_error(event) -> None:
         diagnose_failure(getattr(event, "job_id", "?"),
                          getattr(event, "exception", Exception("unknown")),
                          getattr(event, "traceback", "") or "")
+        _log_job_run(getattr(event, "job_id", "?"), ok=False,
+                     detail=str(getattr(event, "exception", ""))[:400])
     except Exception as e:
         logger.warning("job error 리스너 처리 실패: %s", e)
 
 
+
+def _ensure_job_log(session) -> None:
+    from sqlalchemy import text
+    session.execute(text("""
+        CREATE TABLE IF NOT EXISTS rival_intel.job_runs (
+            job_id      VARCHAR(60) NOT NULL,
+            ran_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+            ok          BOOLEAN NOT NULL DEFAULT TRUE,
+            detail      TEXT,
+            PRIMARY KEY (job_id, ran_at)
+        )
+    """))
+    session.commit()
+
+
+def _log_job_run(job_id: str, ok: bool = True, detail: str = "") -> None:
+    """잡 실행 이력 기록.
+
+    지금까지는 실패(EVENT_JOB_ERROR)만 잡고 '아예 안 돌았다'는 못 잡았다. 월간 잡은
+    한 번 걸러도 한 달을 모른다 — 실제로 상표 수집이 9/4에 안 돌았는데 25일 뒤
+    수동 점검에서야 발견했다. 파수꾼이 이 이력을 보고 미실행을 감지한다.
+    """
+    from sqlalchemy import text
+    try:
+        se = get_session()
+        try:
+            _ensure_job_log(se)
+            se.execute(text("INSERT INTO rival_intel.job_runs (job_id, ok, detail) "
+                            "VALUES (:j, :o, :d)"),
+                       {"j": job_id[:60], "o": bool(ok), "d": (detail or "")[:500]})
+            se.commit()
+        finally:
+            se.close()
+    except Exception as e:
+        logger.warning("잡 이력 기록 실패 [%s]: %s", job_id, e)
+
+
+def _on_job_executed(event) -> None:
+    try:
+        _log_job_run(getattr(event, "job_id", "?"), ok=True)
+    except Exception:
+        pass
+
+
 def create_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-    scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)   # 실패 자동진단
+    scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)      # 실패 자동진단
+    scheduler.add_listener(_on_job_executed, EVENT_JOB_EXECUTED)  # 실행 이력(미실행 감지용)
 
     # 매일 09:00 & 18:00 KST — 하루 2회 수집(오전·저녁) → HIGH 속보를 오전/저녁 두 번 포착
     scheduler.add_job(

@@ -230,6 +230,55 @@ def _suggest_country_ko(codes: list[str]) -> dict:
     return out
 
 
+
+# 잡별 '이 주기 안에는 한 번 돌았어야 한다' 상한(일). 크론 주기보다 넉넉히 잡아
+# 하루이틀 밀린 것으로는 안 울리게 한다.
+_JOB_MAX_GAP_DAYS = {
+    "daily_tier1": 2, "weekly_full": 10, "weekly_momentum": 10,
+    "brand_discovery": 3, "retail_ranking": 5, "oliveyoung_ranking": 3,
+    "search_trends": 7, "google_trends": 5, "youtube_buzz": 3,
+    "export_stats": 40, "dart_financials": 20, "trademark": 40,
+    "score_snapshot": 10, "weekly_dedup": 10,
+}
+
+
+def check_job_runs(session) -> list[dict]:
+    """예정대로 돌았어야 할 잡이 안 돈 것을 잡는다.
+
+    지금까지는 실패(EVENT_JOB_ERROR)만 알렸고 '아예 실행되지 않은' 경우는 몰랐다.
+    월간 잡은 한 번 걸러도 한 달을 모른다 — 실제로 상표 수집이 9/4에 안 돌았는데
+    25일 뒤 수동 점검에서야 발견했다.
+
+    job_runs 이력이 아직 없으면(기능 도입 직후) 조용히 넘어간다.
+    """
+    try:
+        rows = session.execute(text("""
+            SELECT job_id, MAX(ran_at)::date, (CURRENT_DATE - MAX(ran_at)::date)
+            FROM rival_intel.job_runs WHERE ok GROUP BY job_id""")).fetchall()
+    except Exception:
+        return []                       # 테이블 없음 = 아직 기록 시작 전
+    if not rows:
+        return []
+    seen = {r[0]: (r[1], int(r[2] or 0)) for r in rows}
+    late = []
+    for jid, maxgap in _JOB_MAX_GAP_DAYS.items():
+        if jid not in seen:
+            continue                    # 한 번도 안 돈 잡은 도입 직후라 판단 보류
+        last, gap = seen[jid]
+        if gap > maxgap:
+            late.append((jid, last, gap, maxgap))
+    if not late:
+        return []
+    late.sort(key=lambda x: -x[2])
+    body = " / ".join(f"{j} 마지막 {d}({g}일 전, 기준 {m}일)" for j, d, g, m in late[:5])
+    return [{
+        "type": "job_missed", "key": "job:missed:" + ",".join(j for j, *_ in late),
+        "title": f"예정대로 안 돈 잡 {len(late)}건",
+        "detail": (f"실패가 아니라 **실행 자체가 없었다**. {body}. "
+                   f"스케줄러가 그 시각에 꺼져 있었거나 크론이 어긋났을 수 있다."),
+        "read": "스케줄러 프로세스 가동 이력과 해당 잡의 CronTrigger 설정을 확인할 것",
+    }]
+
 def check_data_drift(session) -> list[dict]:
     """미매핑 국가코드·새 활동유형·제품명 이상치를 감지 → 매핑/점검 제안."""
     findings: list[dict] = []
@@ -395,6 +444,10 @@ def run_watchdog(agg: dict | None = None) -> int:
                 findings += check_classification_quality(session)
             except Exception as e:
                 logger.warning("스팟체크 실패: %s", e)
+            try:
+                findings += check_job_runs(session)
+            except Exception as e:
+                logger.warning("잡 미실행 체크 실패: %s", e)
         fresh = [f for f in findings if _dedup_ok(session, f["key"])]
         if not fresh:
             logger.info("watchdog: 새 이상 없음(전체 %d, 쿨다운 후 0)", len(findings))
