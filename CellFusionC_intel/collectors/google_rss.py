@@ -98,6 +98,9 @@ def _extract_body(html):
     if len(txt) < 200:                    # 문단 태그를 안 쓰는 사이트 폴백
         plain = _re.sub(r"(?is)<[^>]+>", " ", h)
         txt = _re.sub(r"\\s+", " ", _unescape(plain)).strip()
+    # NUL과 제어문자 제거 — Postgres text 컬럼은 0x00을 거부한다(백필이 여기서 죽었다).
+    txt = txt.replace(chr(0), "")
+    txt = "".join(c for c in txt if c in (chr(10), chr(9)) or ord(c) >= 32)
     return txt[:_BODY_MAX]
 
 

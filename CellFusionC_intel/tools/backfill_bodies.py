@@ -71,23 +71,39 @@ def run(limit: int = 0, months: int = 0) -> dict:
                 if not real:
                     failed += 1
                     continue
-                # URL만 복원돼도 저장한다 — 출처 링크가 구글이 아닌 실제 기사로 바뀐다
-                if body:
-                    session.execute(text(
-                        f"UPDATE {DB_SCHEMA}.news_articles "
-                        f"SET article_body = :b, source_url = :u WHERE id = :i"),
-                        {"b": body, "u": real, "i": aid})
-                    filled += 1
-                else:
-                    session.execute(text(
-                        f"UPDATE {DB_SCHEMA}.news_articles "
-                        f"SET source_url = :u WHERE id = :i"), {"u": real, "i": aid})
-                    url_only += 1
+                # URL만 복원돼도 저장한다 — 출처 링크가 구글이 아닌 실제 기사로 바뀐다.
+                # 한 건이 터져도 전체가 멈추지 않게 건별로 감싼다(실제로 본문에 섞인
+                # NUL 문자 때문에 6,500건짜리 백필이 130건에서 죽었다).
+                try:
+                    if body:
+                        session.execute(text(
+                            f"UPDATE {DB_SCHEMA}.news_articles "
+                            f"SET article_body = :b, source_url = :u WHERE id = :i"),
+                            {"b": body, "u": real, "i": aid})
+                        filled += 1
+                    else:
+                        session.execute(text(
+                            f"UPDATE {DB_SCHEMA}.news_articles "
+                            f"SET source_url = :u WHERE id = :i"), {"u": real, "i": aid})
+                        url_only += 1
+                except Exception as e:
+                    session.rollback()
+                    failed += 1
+                    logger.warning("저장 실패 id=%s: %s", aid, str(e)[:80])
+                    continue
                 if done % _COMMIT_EVERY == 0:
-                    session.commit()
+                    try:
+                        session.commit()
+                    except Exception as e:
+                        session.rollback()
+                        logger.warning("중간 커밋 실패: %s", str(e)[:80])
                     logger.info("  %d/%d — 본문 %d · URL만 %d · 실패 %d",
                                 done, total, filled, url_only, failed)
-        session.commit()
+        try:
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.warning("최종 커밋 실패: %s", str(e)[:80])
         logger.info("백필 완료 — 대상 %d · 본문 %d · URL만 %d · 실패 %d",
                     total, filled, url_only, failed)
         return {"total": total, "filled": filled, "url_only": url_only, "failed": failed}
