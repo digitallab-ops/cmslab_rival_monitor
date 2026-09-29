@@ -6665,12 +6665,25 @@ _ALLCO_STYLE = """<style>
 #allco .ac-meta{font-size:13px;color:#93a0bd;margin-left:auto}
 #allco .ac-unit{display:inline-block;font-size:12.5px;color:#e6c179;background:rgba(224,173,74,.12);
   border:1px solid rgba(224,173,74,.28);border-radius:6px;padding:3px 10px;margin:0 0 10px}
-#allco .ac-wrap{max-height:600px;overflow:auto;border:1px solid #26314e;border-radius:10px}
+/* 600px면 24개 회사 중 대여섯 줄만 보여 계속 스크롤해야 한다. 화면 높이에
+   맞춰 늘리되(최대 80vh) 너무 짧아지지 않게 하한을 둔다. */
+#allco .ac-wrap{max-height:min(80vh,900px);min-height:420px;overflow:auto;
+  border:1px solid #26314e;border-radius:10px}
 #allco table{border-collapse:collapse;width:100%;font-size:15px}
 #allco thead th{position:sticky;top:0;z-index:2;background:#141d33;color:#aab6d4;font-size:13px;font-weight:700;
-  padding:11px 9px;text-align:right;border-bottom:2px solid #2f3c60;white-space:nowrap;cursor:pointer}
+  padding:11px 9px;text-align:right;border-bottom:2px solid #2f3c60;white-space:nowrap;cursor:pointer;
+  vertical-align:bottom}
 #allco thead th:hover{color:#cfe0ff}
 #allco thead th:first-child,#allco thead th:nth-child(2){text-align:left}
+/* 열이 9개라 좁은 화면에선 가로 스크롤을 없앨 수 없다. 대신 브랜드·회사 열을
+   고정해 옆으로 밀어도 '어느 회사 줄인지'가 남게 한다. */
+#allco tbody td:first-child{position:sticky;left:0;z-index:1;background:#0f1726}
+#allco tbody tr:nth-child(even) td:first-child{background:#131b2b}
+#allco tbody tr:hover td:first-child{background:#1a2942}
+#allco thead th:first-child{position:sticky;left:0;z-index:3;background:#141d33}
+#allco tbody td:first-child,#allco thead th:first-child{box-shadow:1px 0 0 rgba(47,60,96,.9)}
+/* 분기 펼침 행은 colspan 한 칸이라 위 규칙에 걸리면 패널 전체가 왼쪽에 붙어버린다 */
+#allco tbody tr.ac-qrow td{position:static;box-shadow:none}
 #allco tbody td{padding:11px 9px;border-bottom:1px solid rgba(38,49,78,.55);text-align:right;
   font-variant-numeric:tabular-nums;color:#dbe3f4;white-space:nowrap;letter-spacing:.2px}
 #allco tbody tr:nth-child(even){background:rgba(255,255,255,.018)}
@@ -6685,7 +6698,11 @@ _ALLCO_STYLE = """<style>
 #allco .ac-lead{color:#ffffff;font-weight:700}
 #allco .yoy-up{color:#63e3a5;font-weight:700;font-size:15.5px}
 #allco .yoy-dn{color:#ff7a62;font-weight:700;font-size:15.5px}
-#allco .ac-sub{display:block;font-size:12px;color:#8490b0;font-weight:400;margin-top:3px}
+/* 부제목이 길면(‘억원 (전년비) · 증권사 컨센서스’) th의 nowrap 때문에 줄바꿈을
+   못 하고 왼쪽 칸 위로 넘쳐 글자가 겹친다. 여기서만 줄바꿈을 허용한다. */
+#allco .ac-sub{display:block;font-size:12px;color:#8490b0;font-weight:400;margin-top:3px;
+  white-space:normal;line-height:1.35;max-width:150px;margin-left:auto}
+#allco thead th:first-child .ac-sub,#allco thead th:nth-child(2) .ac-sub{margin-left:0}
 #allco .ac-brand{display:block;font-size:12.5px;color:#8fb4ff;font-weight:500;margin-top:4px;
   max-width:300px;white-space:normal;line-height:1.45}
 #allco .ac-mon{font-size:15.5px;font-weight:700;color:#ffffff}
@@ -6922,6 +6939,12 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
       if(Math.abs(n)<0.05) return '0';          // 소수1자리로도 0이면 부호 없이 0
       if(Math.abs(n)<1) return n.toFixed(1);    // -0.5억을 '-0'이 아니라 '-0.5'로
       return n.toLocaleString(undefined,{{maximumFractionDigits:0}}); }}
+    // 컨센서스(분기 시계열·올해 예상)는 DB에 **이미 억원**으로 들어 있다.
+    // NICE용 acFmt(÷100,000)에 태우면 800억이 0.008 → '0'이 된다. 전용 포맷터를 쓴다.
+    function acEok(v){{ if(v===null||v===undefined) return '—';
+      if(Math.abs(v)<0.05) return '0';
+      if(Math.abs(v)<1) return v.toFixed(1);
+      return v.toLocaleString(undefined,{{maximumFractionDigits:0}}); }}
     // DART는 원 단위라 ÷1억. suffix=0이면 '억' 생략(열 머리에 단위가 이미 있음)
     function acDart(v,noSuffix){{ if(v===null||v===undefined) return '—';
       return (v/100000000).toLocaleString(undefined,{{maximumFractionDigits:0}})+(noSuffix===0?'':'억'); }}
@@ -6961,11 +6984,12 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         btn.setAttribute('aria-expanded','false'); btn.textContent='▾'; return;
       }}
       var r=AC_SHOWN[i]; if(!r||!r.q) return;
-      var mx=Math.max.apply(null, r.q.map(function(x){{ return x.v; }}));
+      var mx=Math.max.apply(null, r.q.map(function(x){{ return x.v||0; }}));
       var bars=r.q.map(function(x){{
-        var h=Math.max(6, Math.round(x.v/mx*72));
+        // mx가 0이면 0/0=NaN이라 막대 높이가 통째로 깨진다
+        var h=mx>0 ? Math.max(6, Math.round((x.v||0)/mx*72)) : 6;
         return '<div class="acq-i'+(x.e?' est':'')+'">'
-             + '<div class="acq-v">'+acFmt(x.v)+'</div>'
+             + '<div class="acq-v">'+acEok(x.v)+'</div>'
              + '<div class="acq-b" style="height:'+h+'px"></div>'
              + '<div class="acq-l">'+x.l+(x.e?'<i>추정</i>':'')+'</div></div>';
       }}).join('');
@@ -7047,7 +7071,7 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         if(r.e){{
           var g = (r.e.g===null||r.e.g===undefined) ? ''
                 : '<span class="'+(r.e.g>=0?'yoy-up':'yoy-dn')+'">'+(r.e.g>=0?'+':'')+r.e.g.toFixed(1)+'%</span>';
-          ev='<td class="ac-ecol"><b class="ac-lead">'+acFmt(r.e.v)+'</b> '+g
+          ev='<td class="ac-ecol"><b class="ac-lead">'+acEok(r.e.v)+'</b> '+g
             +'<span class="ac-sub">추정 '+r.e.n+'개 분기 포함</span></td>';
         }} else if(r.l){{
           ev='<td class="ac-ecol"><span class="ac-none">컨센서스 없음</span></td>';
