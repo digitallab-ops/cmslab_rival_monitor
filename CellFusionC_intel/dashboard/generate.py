@@ -5187,15 +5187,16 @@ def _build_full_html(
         <button class="dx-go" onclick="dxLoad(0)">조회</button>
         <label class="dx-bodychk" id="dx-bodychk" hidden>
           <input type="checkbox" id="dx-withbody"> 본문 포함</label>
-        <button class="dx-csv" onclick="dxCsv()">🔒 CSV 내려받기</button>
+        <button class="dx-csv" onclick="dxCsv()">🔒 CSV 내려받기<span id="dx-csvspan"></span></button>
       </div>
 
       <div class="dx-meta" id="dx-meta">위에서 데이터 종류를 고르세요.</div>
       <div class="dx-wrap"><table id="dx-tbl"><thead id="dx-head"></thead><tbody id="dx-body"></tbody></table></div>
       <div class="dx-page" id="dx-page"></div>
-      <p class="dx-note">한 번에 200행씩 보여준다. <b>🔒 CSV 내려받기</b>는 지금 걸어둔 조건 그대로
-        최대 5만 행을 받는다(엑셀에서 바로 열린다). 대량 추출이라 <b>관리자 비밀번호</b>가 필요하고,
-        상한에 걸려 일부만 담기면 파일명에 <code>partial</code>로 표시된다.
+      <p class="dx-note">한 번에 200행씩 보여준다. <b>🔒 CSV 내려받기</b>는 위에 걸어둔
+        <b>기간·브랜드·국가</b>가 그대로 적용된 채 최대 5만 행을 받는다(엑셀에서 바로 열린다).
+        받을 기간은 버튼에 표시되고 파일명에도 남는다. 대량 추출이라 <b>관리자 비밀번호</b>가
+        필요하고, 상한에 걸려 일부만 담기면 파일명에 <code>partial</code>로 표시된다.
         뉴스는 <b>본문 포함</b>을 켜면 기사 전문이 열로 붙는다 — 한 건이 평균 3,300자라
         파일이 무거워지므로 이때는 8천 행까지만 담는다.<br>
         모든 건수는 <b>분석에 쓰는 기준</b>으로 걸러진 수다 — 뉴스는 중복·자사 기사를 빼고,
@@ -6422,7 +6423,8 @@ _DX_STYLE = """<style>
 #dx .dx-go,#dx .dx-csv{border-radius:6px;padding:7px 16px;font-size:13.5px;font-weight:700;cursor:pointer;
   font-family:inherit;border:1px solid}
 #dx .dx-go{background:rgba(74,143,212,.2);border-color:rgba(74,143,212,.55);color:#8fb4ff}
-#dx .dx-csv{background:rgba(91,217,154,.12);border-color:rgba(91,217,154,.42);color:#63e3a5}
+#dx .dx-csv{background:rgba(91,217,154,.12);border-color:rgba(91,217,154,.42);color:#63e3a5;white-space:nowrap}
+#dx .dx-csv #dx-csvspan{font-weight:500;opacity:.8;font-variant-numeric:tabular-nums}
 #dx .dx-bodychk{margin-left:auto;font-size:13px;color:#93a0bd;display:flex;align-items:center;gap:6px;cursor:pointer}
 #dx .dx-bodychk input{accent-color:#5bd99a;cursor:pointer}
 #dx .dx-go:hover{background:rgba(74,143,212,.32)}
@@ -6490,6 +6492,7 @@ function dxSyncFilters(){
   // 본문 열은 뉴스에만 있다 — 없는 데이터셋에서 켤 수 있으면 켜도 안 나오는 칸이 된다
   var bc=document.getElementById('dx-bodychk');
   if(bc) bc.hidden = !sp.has_body;
+  dxCsvLabel();
   [['dx-brand','brands','브랜드'],['dx-country','countries','국가']].forEach(function(t){
     var sel=document.getElementById(t[0]), vals=sp[t[1]]||[];
     if(!sel) return;
@@ -6510,13 +6513,13 @@ function dxPick(k){
 
 function dxSpan(days){
   var f=document.getElementById('dx-from'), t=document.getElementById('dx-to');
-  if(!days){ f.value=''; t.value=''; dxLoad(0); return; }
+  if(!days){ f.value=''; t.value=''; dxCsvLabel(); dxLoad(0); return; }
   // toISOString()은 UTC라 한국 오전 9시 이전에는 하루 전 날짜가 나온다.
   // 사용자가 보는 '오늘'과 어긋나면 당일 수집분이 통째로 빠진다 → 현지 날짜로 만든다.
   var iso=function(d){
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
   var to=new Date(), from=new Date(to.getTime()-(days-1)*86400000);
-  f.value=iso(from); t.value=iso(to); dxLoad(0);
+  f.value=iso(from); t.value=iso(to); dxCsvLabel(); dxLoad(0);
 }
 
 function dxParams(){
@@ -6575,6 +6578,18 @@ function dxPager(shown){
     '<button onclick="dxLoad(DX_OFF+DX_LIMIT)"'+(hasNext?'':' disabled')+'>다음 →</button>';
 }
 
+// 받기 직전에 어떤 기간이 담기는지 버튼에 그대로 보여준다 — 화면의 기간이
+// 내려받기에도 걸린다는 걸 눌러보기 전에 알 수 있게.
+function dxCsvLabel(){
+  var el=document.getElementById('dx-csvspan');
+  if(!el) return;
+  var sp=DX_SPEC[DX_DS]||{};
+  if(!sp.has_date){ el.textContent=''; return; }
+  var f=(document.getElementById('dx-from')||{}).value||'';
+  var t=(document.getElementById('dx-to')||{}).value||'';
+  el.textContent = (f||t) ? ' · '+(f||'처음')+'~'+(t||'지금') : ' · 전체 기간';
+}
+
 // CSV는 대량 추출이라 관리자만 — 잠겨 있으면 여기서 바로 비밀번호를 받는다
 function dxCsv(){
   var cb=document.getElementById('dx-withbody');
@@ -6598,7 +6613,7 @@ var DX_INIT=false;
 function dxInit(){ if(DX_INIT) return; DX_INIT=true; dxCards(); }
 ['dx-brand','dx-country','dx-from','dx-to'].forEach(function(id){
   var el=document.getElementById(id);
-  if(el) el.addEventListener('change', function(){ dxLoad(0); });
+  if(el) el.addEventListener('change', function(){ dxCsvLabel(); dxLoad(0); });
 });
 </script>"""
 
