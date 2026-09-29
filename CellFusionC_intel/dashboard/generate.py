@@ -6632,8 +6632,11 @@ function dxInit(){ if(DX_INIT) return; DX_INIT=true; dxCards(); }
 
 
 _ALLCO_STYLE = """<style>
-/* 올해 예상(컨센서스) 열 — DART 주황 두 칸과 구분되게 푸른 계열로 */
-#allco th.ac-ecol,#allco td.ac-ecol{background:rgba(74,143,212,.07)}
+/* 올해 예상(컨센서스) 열 — DART 주황 두 칸과 구분되게 푸른 계열로.
+   헤더는 sticky라 **반투명이면 안 된다** — 스크롤한 행이 헤더를 뚫고 비쳐
+   글자가 겹쳐 보인다(DART 열이 th만 불투명 #1b2440인 것도 같은 이유). */
+#allco td.ac-ecol{background:rgba(74,143,212,.07)}
+#allco th.ac-ecol{background:#18233f;color:#9fc4f5}
 #allco td.ac-ecol{border-left:1px solid rgba(74,143,212,.22)}
 #allco .ac-none{color:#5d6784;font-size:12.5px}
 /* 분기 추이 펼치기 */
