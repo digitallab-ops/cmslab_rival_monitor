@@ -49,6 +49,12 @@ OWN_APPLICANTS: dict[str, list[str]] = {
     "Mixsoon": ["PARKET"], "Numbuzin": ["BENOW"], "Rejuran": ["PHARMARESEARCH"],
     "Roundlab": ["ROUNDLAB"], "Skin1004": ["CRAVER", "SKIN1004"], "Torriden": ["TORRIDEN"],
     "VT Cosmetics": ["VTCOSMETIC", "VTGMP"], "Abib": ["FOURCOMPANY", "ABIB"], "Zeroid": ["ZEROID"],
+    # 나중에 추가된 브랜드는 여기 별칭이 없으면 자사 출원을 전부 남의 것으로 본다.
+    # 화면 피드가 is_own만 태우므로 브랜드가 통째로 사라진다 — 실측으로 메디큐브
+    # 12건·티르티르 7건·어뮤즈 1건이 그렇게 빠져 있었다.
+    "Medicube": ["APR", "APRILSKIN"], "Tirtir": ["TIRTIR"], "Amuse": ["AMUSEKOREA"],
+    "Biodance": ["BIODANCE"], "COSRX": ["COSRX"], "Looncell": ["LOONCELL"],
+    "b.plain": ["BPLAIN"],
 }
 
 

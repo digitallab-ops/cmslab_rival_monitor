@@ -455,7 +455,31 @@ def generate_trademark_reads(brand_marks: dict) -> dict:
     피드백 8번: 상표를 나열만 하지 말고 조합이 뜻하는 방향을 유추.
     brand_marks: {brand: [상표명, ...]}. 반환: {brand: "유추 한 줄"}. 실패 시 {}.
     """
-    items = [(b, ms) for b, ms in brand_marks.items() if ms]
+    # 브랜드명만 반복된 상표에서는 방향을 읽을 수 없다. 그래도 물어보면 모델은
+    # 뭐라도 만들어낸다 — 실측으로 'TORRIDEN TORRIDEN TORRIDEN' 하나를 주자
+    # "브랜드 아이덴티티 강화 전략으로 보임"이라는 근거 없는 서사가 나왔다.
+    # 상표명에서 브랜드 토큰을 걷어내고, 남는 단어가 2개 미만이면 아예 묻지 않는다.
+    import re as _re
+
+    def _signal_words(brand: str, marks: list) -> set:
+        bt = {t for t in _re.split(r"[^A-Za-z0-9가-힣]+", (brand or "").upper()) if t}
+        out = set()
+        for m in marks:
+            for t in _re.split(r"[^A-Za-z0-9가-힣]+", (m or "").upper()):
+                if t and t not in bt and len(t) > 1:
+                    out.add(t)
+        return out
+
+    items, thin = [], []
+    for b, ms in brand_marks.items():
+        if not ms:
+            continue
+        if len(_signal_words(b, ms)) < 2:
+            thin.append(b)
+            continue
+        items.append((b, ms))
+    if thin:
+        logger.info("상표 판독 생략(브랜드명 외 단서 부족): %s", ", ".join(thin))
     if not items:
         return {}
     # 브랜드명은 화면에서 별도로 표기하므로, LLM에는 한국어명을 참고로만 주고
@@ -478,6 +502,10 @@ def generate_trademark_reads(brand_marks: dict) -> dict:
 
 - 예: "괄사(gua sha)+스킨케어 상표 동시 출원 → 뷰티툴·디바이스 라인 확장 가능성"
 - 상표명에서 읽히는 **제품군/성분/폼팩터**를 근거로. 억지 추측은 피하고 근거 약하면 '~일 수 있음' 정도로.
+- **상표명을 우리말로 옮겨 적기만 한 판독은 금지**한다. 'SKINREADY'를 '스킨케어 준비
+  제품군'이라고 쓰는 식은 아무 정보가 없다. 여러 상표를 **묶어서** 읽히는 방향을 써라.
+- 성분·제형·카테고리 단서가 상표명에 실제로 있으면 **그 단어를 판독문에 그대로 넣어라**
+  (예: 퀘르세틴올·펩타이드처럼). 단서가 없으면 지어내지 말고 "방향을 읽기 어려움"이라고 써라.
 - **브랜드명은 화면에 따로 표기되니 판독문에 브랜드명을 다시 쓰지 말고, 방향(동사구)으로 시작**하세요.
   (예: "센텔라·프로바이오틱스 성분 강화 제품군으로 확장하는 것으로 보임")
 - 각 35자 내외, 한국어.

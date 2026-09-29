@@ -6153,10 +6153,13 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             if _tm_cached:
                 trademark_sig["reads"] = json.loads(_tm_cached)
             else:
-                _bm = {}
-                for _f in (trademark_sig.get("feed") or []):
-                    if _f.get("mark"):
-                        _bm.setdefault(_f["brand"], []).append(_f["mark"])
+                # 화면 피드(전체 24행 상한)가 아니라 브랜드별로 모은 상표를 쓴다.
+                # 피드를 쓰면 출원이 많은 브랜드가 잘려 한두 건으로 방향을 유추하게 된다.
+                _bm = dict(trademark_sig.get("marks_by_brand") or {})
+                if not _bm:
+                    for _f in (trademark_sig.get("feed") or []):
+                        if _f.get("mark"):
+                            _bm.setdefault(_f["brand"], []).append(_f["mark"])
                 _reads = generate_trademark_reads(_bm)
                 trademark_sig["reads"] = _reads
                 if _reads:

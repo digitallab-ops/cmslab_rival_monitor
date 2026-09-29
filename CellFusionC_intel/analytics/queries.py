@@ -1963,7 +1963,12 @@ def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -
     import re as _re
     from difflib import SequenceMatcher as _SM
     def _norm_mk(s):
-        toks = _re.sub(r"[^A-Za-z0-9가-힣 ]", "", (s or "").upper()).split()
+        # NBSP( ) 같은 비ASCII 공백을 먼저 보통 공백으로 바꾼다. 안 그러면 아래
+        # 정규식이 '공백이 아니'라서 지워버려 단어가 붙는다 — 실측으로
+        # 'TORRIDEN TORRIDEN TORRIDEN'이 'TORRIDENTORRIDEN TORRIDEN'이 되어
+        # 반복단어 축약을 빠져나가고 같은 상표가 둘로 남았다.
+        toks = _re.sub(r"[^A-Za-z0-9가-힣 ]", "",
+                       _re.sub(r"\s", " ", (s or "").upper())).split()
         # 반복 단어 축약(TORRIDEN TORRIDEN TORRIDEN → TORRIDEN ...)
         dedup_toks = []
         for t in toks:
@@ -1982,7 +1987,19 @@ def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -
     brands = [{"brand": r[0], "country": r[1], "recent": r[2] or 0,
                "total": r[3] or 0, "latest": str(r[4]) if r[4] else None}
               for r in brand_rows]
-    return {"feed": feed, "brands": brands}
+    # 판독(AI 유추)은 화면 피드를 쓰면 안 된다. 피드는 전체 24행 상한이라
+    # 출원이 많은 브랜드가 잘린다 — 메디큐브는 자사 상표 12건 중 1건만 남아
+    # '헤어브러시 하나'로 브랜드 방향을 유추하게 된다. 브랜드별로 따로 모은다.
+    marks: dict = {}
+    seen: dict = {}
+    for r in feed_rows:
+        nm = _norm_mk(r[2])
+        ks = seen.setdefault(r[0], [])
+        if any(_SM(None, k, nm).ratio() >= 0.85 for k in ks):
+            continue
+        ks.append(nm)
+        marks.setdefault(r[0], []).append(r[2])
+    return {"feed": feed, "brands": brands, "marks_by_brand": marks}
 
 
 def get_competitor_financials(session: Session) -> list[dict]:
@@ -2694,6 +2711,7 @@ def get_brand_products_map(session: Session, days: int = 45, per_brand: int = 5)
             FROM {DB_SCHEMA}.news_articles
             WHERE published_date >= :since
               AND product_name IS NOT NULL AND product_name <> ''
+              AND lower(product_name) NOT IN ('null', 'none', 'n/a', '-')
               AND char_length(product_name) BETWEEN 2 AND 40
               AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
               AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
@@ -2701,11 +2719,25 @@ def get_brand_products_map(session: Session, days: int = 45, per_brand: int = 5)
         """), {"since": since}).fetchall()
     except Exception:
         return {}
+    import re as _re
+
+    def _norm_pn(x: str) -> str:
+        """비교용 정규화 — 공백·기호를 지운다.
+
+        '비타 토너, 세럼...'과 '비타토너, 세럼...', '프로 인텐시브 수딩'과
+        '프로 인텐시브 스딩'(오타)이 각각 다른 제품으로 둘 다 올라오고 있었다.
+        """
+        return _re.sub(r"[^0-9a-z가-힣]", "", (x or "").lower())
+
     out: dict = {}
     for brand, country, pname, title, _pd in rows:
         if not brand:
             continue
         name = (pname or "").strip()
+        # 한 칸에 제품 여러 개를 쉼표로 늘어놓은 경우가 많다
+        # ('제로모공패드, PDRN 핑크 펩타이드 앰플, 콜라겐 나...'). 첫 제품만 쓴다.
+        # 천단위 쉼표('2,000 PPM')에서는 자르지 않는다.
+        name = _re.split(r",(?!\d{3}(?:\D|$))", name)[0].strip()
         # 제목류·문장류(따옴표·말줄임·… 포함)나 너무 긴 건 제외 — 진짜 제품명만
         if not name or len(name) > 40 or any(c in name for c in ("…", "”", "“", "?")):
             continue
@@ -2713,8 +2745,14 @@ def get_brand_products_map(session: Session, days: int = 45, per_brand: int = 5)
         if len(o["global"]) + len(o["domestic"]) >= per_brand:
             continue
         bucket = "domestic" if (country or "").upper() == "KR" else "global"
-        key = name[:12]
-        if any(key in x["name"] or x["name"][:12] in name
+        nn = _norm_pn(name)
+        if not nn:
+            continue
+        # 포함관계 + 유사도로 같은 제품을 묶는다. 앞자리 비교만으로는 오타가 뒤에
+        # 있으면 못 잡는다 — '프로 인텐시브 수딩'과 '프로 인텐시브 스딩'이 둘 다 올라왔다.
+        from difflib import SequenceMatcher as _SMp
+        if any(nn[:8] in (_p := _norm_pn(x["name"])) or _p[:8] in nn
+               or _SMp(None, nn, _p).ratio() >= 0.85
                for x in (o["global"] + o["domestic"])):
             continue
         o[bucket].append({"name": name, "country": country or "",
