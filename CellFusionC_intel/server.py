@@ -614,12 +614,65 @@ async def api_explore_csv(dataset: str = Query("news"),
 # 매번 나가고, 구매 데이터(NICE BizLine)가 인증 없이 그대로 노출된다. HTML에는
 # 모니터링 브랜드만 싣고 '화장품업 전체'·'전체 기업'을 누를 때 여기서 받아간다.
 
-_COMPANY_SCOPES = {"monitored", "cosmetic", "all"}
+# 'all'(7,200개사)은 뺐다. 화면에서 토글만 감추면 URL을 아는 사람은 그대로 받아갈
+# 수 있어 NICE 구매 데이터가 통째로 열린 경로가 된다. 화장품업까지만 연다.
+_COMPANY_SCOPES = {"monitored", "cosmetic"}
+
+
+@app.get("/api/finance/csv")
+async def api_finance_csv(key: str = Query("")):
+    """재무 전체 내려받기 — 화면에 없는 금액·분기까지. 관리자 전용.
+
+    화면엔 기획팀 요청대로 매출·영업이익률·광고비율만 둔다. 영업이익 금액·
+    광고비 금액·분기별 수치는 여기서 본다.
+    """
+    import csv
+    import io as _io
+
+    from fastapi.responses import StreamingResponse
+
+    if not _admin_ok(key):
+        return JSONResponse({"error": "unauthorized"}, status_code=403)
+
+    def _fetch():
+        from analytics.queries import get_financial_export
+        from storage.models import get_session
+        se = get_session()
+        try:
+            return get_financial_export(se)
+        finally:
+            se.close()
+
+    try:
+        data = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        logger.warning("재무 CSV 실패: %s", e)
+        return JSONResponse({"error": "내려받기 중 오류가 발생했습니다."}, status_code=500)
+
+    def _stream():
+        buf = _io.StringIO()
+        w = csv.writer(buf)
+
+        def _flush():
+            out = buf.getvalue()
+            buf.seek(0); buf.truncate(0)
+            return out
+
+        yield "﻿".encode("utf-8")      # 엑셀이 UTF-8로 읽게 하는 BOM
+        w.writerow(data.get("cols") or [])
+        yield _flush().encode("utf-8")
+        for row in (data.get("rows") or []):
+            w.writerow(["" if v is None else v for v in row])
+            yield _flush().encode("utf-8")
+
+    headers = {"Content-Disposition": 'attachment; filename="financials.csv"'}
+    return StreamingResponse(_stream(), media_type="text/csv; charset=utf-8",
+                             headers=headers)
 
 
 @app.get("/api/companies")
 async def api_companies(scope: str = Query("cosmetic")):
-    """재무 탭 회사 행 데이터. scope: monitored | cosmetic | all."""
+    """재무 탭 회사 행 데이터. scope: monitored | cosmetic."""
     if scope not in _COMPANY_SCOPES:
         return JSONResponse({"error": "알 수 없는 범위"}, status_code=400)
     try:

@@ -43,6 +43,7 @@ LISTED_PARENTS: dict = {
     "Aestura": "아모레퍼시픽",
     "Dalba": "달바글로벌",
     "VT Cosmetics": "브이티",
+    "Manyo": "마녀공장",          # 2026-09-30 등록(KOSDAQ 439090)
 }
 
 # 우리가 쓰는 지표만. PER·PBR·목표주가·시세는 주식 투자용이라 받지 않는다.

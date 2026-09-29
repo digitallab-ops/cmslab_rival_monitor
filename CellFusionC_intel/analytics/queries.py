@@ -2076,6 +2076,80 @@ def get_quarterly_series(session: Session, brands: "list | None" = None) -> dict
     return out
 
 
+def get_financial_export(session: Session) -> dict:
+    """재무 내려받기용 전체 표 — 화면에 안 보이는 금액·분기까지 전부.
+
+    기획팀이 준 엑셀(2026-09-29) 구성을 그대로 따른다. 화면에는 노란칸(매출·
+    영업이익률·광고비율)만 두고, 영업이익 금액·광고비 금액·분기별 수치는
+    여기서 본다. 반환 {cols:[...], rows:[[...]]}.
+    """
+    from signals.nice_financials import _brand_aliases  # noqa: F401  (임포트 순환 방지용 지연)
+
+    data = get_all_company_financials(session)
+    qs = get_quarterly_series(session)
+    years = [y for y in (data.get("years") or []) if int(y) >= 2024]
+    est_y = datetime.utcnow().year
+
+    import re as _re
+
+    def _norm_co(n):
+        t = _re.sub(r"\(주\)|\(유\)|㈜|주식회사|유한회사|_", "", n or "")
+        return _re.sub(r"\s+", "", t).lower()
+
+    qs_by_corp = {}
+    for v in qs.values():
+        if v.get("corp"):
+            qs_by_corp.setdefault(_norm_co(v["corp"]), v)
+
+    cols = ["회사명", "브랜드명"]
+    for y in years:
+        cols.append(f"{y}년 매출(억원)")
+    cols.append(f"{est_y}년 매출(억원·추정)")
+    for y in years:
+        cols += [f"{y}년 영업이익(억원)", f"{y}년 영업이익률(%)"]
+    cols.append(f"{est_y}년 영업이익률(%·추정)")
+    for y in years:
+        cols += [f"{y}년 광고비(억원)", f"{y}년 광고비율(%)"]
+    # 분기는 최근 것부터 고정 8칸 — 행마다 열 수가 달라지면 CSV가 깨진다
+    for n in range(1, 9):
+        cols += [f"분기{n} 기간", f"분기{n} 매출(억원)", f"분기{n} 영업이익률(%)",
+                 f"분기{n} 구분"]
+
+    def _eok(v):
+        return round(v / 100000, 1) if v is not None else None      # NICE 천원 → 억원
+
+    def _rate(n, d):
+        return round(n / d * 100, 1) if (n is not None and d) else None
+
+    rows = []
+    for r in (data.get("rows") or []):
+        if not r.get("matched"):
+            continue                      # 내려받기도 유관 기업만
+        rev = {y: r["rev"].get(y) for y in years}
+        row = [r["company"], r.get("matched") or ""]
+        row += [_eok(rev[y]) for y in years]
+        v = qs_by_corp.get(_norm_co(r["company"]))
+        ser = (v or {}).get("series") or []
+        cur = [x for x in ser if x["label"].startswith(str(est_y))]
+        row.append(round(sum(x["revenue"] for x in cur)) if cur else None)
+        for y in years:
+            row += [_eok(r["op"].get(y)), _rate(r["op"].get(y), rev[y])]
+        ops = [x for x in cur if x.get("op_income") is not None]
+        row.append(round(sum(x["op_income"] for x in ops)
+                         / sum(x["revenue"] for x in ops) * 100, 1)
+                   if ops and sum(x["revenue"] for x in ops) else None)
+        for y in years:
+            row += [_eok(r["ad"].get(y)), _rate(r["ad"].get(y), rev[y])]
+        for n in range(8):
+            x = ser[-8:][n] if n < len(ser[-8:]) else None
+            row += ([x["label"], round(x["revenue"]),
+                     (round(x["op_margin"], 1) if x.get("op_margin") is not None else None),
+                     "추정" if x["est"] else "확정"] if x else [None, None, None, None])
+        rows.append(row)
+    rows.sort(key=lambda x: -(x[2 + len(years) - 1] or 0))
+    return {"cols": cols, "rows": rows}
+
+
 def get_competitor_financials(session: Session) -> list[dict]:
     """
     경쟁사 실적(DART) — 브랜드별 최신 매출·영업이익·영업이익률 + 매출 YoY.

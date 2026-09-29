@@ -16,10 +16,17 @@ TIER1_BRANDS = [
     "Medicube",          # 메디큐브(APR) — 미국 아마존 뷰티 상위·에이지알 디바이스
     "Biodance",          # 바이오던스 — 아마존 8개국 1위(콜라겐 마스크)
     "COSRX",             # 코스알엑스 — 아마존 4개국 상위, 스네일 뮤신
+    "Dr.G",              # 닥터지 — 고운세상코스메틱, 더마. 올리브영 1위권
+    "Manyo",             # 마녀공장 — 상장(KOSDAQ 439090)
 ]
 
 # Tier 2: 주 1회 수집
 TIER2_BRANDS = [
+    "Make Prem",         # 메이크프렘 — 선케어(국내). 2026-09-30 등록
+    "S.NATURE",          # 에스네이처 — 선케어·스킨케어(국내)
+    "Lagom",             # 라곰 — 클렌징(국내)
+    "Blanc Nature",      # 블랑네이처 — 스킨케어·클렌징(국내)
+    "Objet",             # 오브제 — 선스틱(국내). 상장사 "오브젠"과 무관
     "Cos de Baha",       # 코스드바하 — 소규모, momentum 승급 시 T1
     "By Wishtrend",      # 바이위시트렌드 — 소규모, momentum 승급 시 T1
     "Roundlab",          # 라운드랩
@@ -216,6 +223,13 @@ BRAND_KO_NAMES: dict[str, list[str]] = {
     "Medicube":         ["메디큐브"],
     "Biodance":         ["바이오던스"],
     "COSRX":            ["코스알엑스"],
+    "Dr.G":             ["닥터지"],
+    "Manyo":            ["마녀공장"],
+    "Make Prem":        ["메이크프렘"],
+    "S.NATURE":         ["에스네이처"],
+    "Lagom":            ["라곰"],
+    "Blanc Nature":     ["블랑네이처"],
+    "Objet":            ["오브제"],
     "Abib":             ["아비브"],
     "Rejuran":          ["리쥬란", "리쥬란코스메틱"],
     "Mixsoon":          ["믹순"],

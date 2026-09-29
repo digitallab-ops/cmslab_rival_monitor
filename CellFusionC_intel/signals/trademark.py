@@ -54,7 +54,7 @@ OWN_APPLICANTS: dict[str, list[str]] = {
     # 12건·티르티르 7건·어뮤즈 1건이 그렇게 빠져 있었다.
     "Medicube": ["APR", "APRILSKIN"], "Tirtir": ["TIRTIR"], "Amuse": ["AMUSEKOREA"],
     "Biodance": ["BIODANCE"], "COSRX": ["COSRX"], "Looncell": ["LOONCELL"],
-    "b.plain": ["BPLAIN"],
+    "b.plain": ["BPLAIN"], "Dr.G": ["GOWOONSESANG"], "Manyo": ["MANYO"],
 }
 
 

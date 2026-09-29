@@ -64,6 +64,11 @@ BRAND_CORP: dict[str, dict] = {
     "b.plain":         {"names": ["비플레인"], "brand_level": True},             # ?
     "Zeroid":          {"names": ["네오팜"], "brand_level": False},              # 제로이드=네오팜(상장)
     "Tirtir":          {"names": ["티르티르"], "brand_level": True},             # ?
+    # 국내 경쟁군(2026-09-30). NICE 태그로 회사를 확인한 둘만 넣는다 —
+    # 나머지(메이크프렘·에스네이처·라곰·블랑네이처·오브제)는 회사가 확인 안 돼
+    # 잘못 매핑하느니 비워둔다.
+    "Dr.G":            {"names": ["고운세상코스메틱"], "brand_level": True},
+    "Manyo":           {"names": ["마녀공장"], "brand_level": True},
     "Biodance":        {"names": ["바이오던스"], "brand_level": True},           # ?
     "COSRX":           {"names": ["코스알엑스"], "brand_level": True},           # ?
     "Celimax":         {"names": ["셀리맥스"], "brand_level": True},             # ?

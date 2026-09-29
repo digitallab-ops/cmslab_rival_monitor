@@ -6639,6 +6639,10 @@ _ALLCO_STYLE = """<style>
 #allco th.ac-ecol{background:#18233f;color:#9fc4f5}
 #allco td.ac-ecol{border-left:1px solid rgba(74,143,212,.22)}
 #allco .ac-none{color:#5d6784;font-size:12.5px}
+#allco .ac-csv{margin-left:auto;background:rgba(91,217,154,.12);border:1px solid rgba(91,217,154,.42);
+  color:#63e3a5;border-radius:6px;padding:7px 16px;font-size:13.5px;font-weight:700;
+  font-family:inherit;cursor:pointer;white-space:nowrap}
+#allco .ac-csv:hover{background:rgba(91,217,154,.22)}
 /* 분기 추이 펼치기 */
 #allco button.ac-x{margin-left:8px;background:transparent;border:1px solid #2c3854;border-radius:5px;
   color:#8592b3;font-size:11px;font-family:inherit;padding:1px 6px;cursor:pointer;vertical-align:middle}
@@ -6858,6 +6862,7 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         q = [{"l": x["label"], "v": round(x["revenue"]), "m": (round(x["op_margin"], 1)
               if x.get("op_margin") is not None else None), "e": 1 if x["est"] else 0}
              for x in ser[-10:]]
+        _ = q  # (막대 표시용)
         # 올해 예상 = 추정 분기들의 합 + 올해 확정 분기들의 합
         cy = str(datetime.utcnow().year)
         cur = [x for x in ser if x["label"].startswith(cy)]
@@ -6866,8 +6871,14 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
             tot = sum(x["revenue"] for x in cur)
             prev = [x for x in ser if x["label"].startswith(str(int(cy) - 1))]
             pv = sum(x["revenue"] for x in prev) if len(prev) == 4 else None
+            # 올해 영업이익률 = 분기 영업이익 합 / 매출 합. 분기마다 이익률이 다르므로
+            # 단순 평균이 아니라 금액으로 합산해야 맞는다.
+            ops = [x for x in cur if x.get("op_income") is not None]
+            m = (sum(x["op_income"] for x in ops) / sum(x["revenue"] for x in ops) * 100
+                 if ops and sum(x["revenue"] for x in ops) else None)
             e = {"v": round(tot), "g": (round((tot / pv - 1) * 100, 1) if pv else None),
-                 "n": sum(1 for x in cur if x["est"])}
+                 "n": sum(1 for x in cur if x["est"]),
+                 "m": (round(m, 1) if m is not None else None)}
         return {"q": q or None, "e": e}
 
     # /api/companies는 HTML이 아니라 행 데이터만 필요하다(범위 필터는 호출부에서 끝냄).
@@ -6880,8 +6891,19 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
     payload = [_row(r) for r in rows if r.get("matched")]
     js = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     # 단위를 각 열 머리에 직접 박는다 — 표 밑 각주는 스크롤하면 안 보여서 '얼마 기준'인지 놓친다
-    yhead = "".join(f"<th data-k='r{i}'>{y} 매출<span class='ac-sub'>억원</span></th>"
-                    for i, y in enumerate(years))
+    # 기획팀 요청(2026-09-29 엑셀): 화면엔 매출·영업이익률·광고비율만. 금액(영업이익·
+    # 광고비)과 분기별 수치는 내려받기에서 본다. 2023년은 빼고 24년부터.
+    _yrs = [y for y in years if int(y) >= 2024] or years
+    _yi = {y: years.index(y) for y in _yrs}
+    yhead = "".join(f"<th data-k='r{_yi[y]}'>{y} 매출<span class='ac-sub'>억원</span></th>"
+                    for y in _yrs)
+    est_y = datetime.utcnow().year
+    mhead = "".join(f"<th data-k='m{_yi[y]}'>{y} 영업이익률<span class='ac-sub'>%</span></th>"
+                    for y in _yrs)
+    mhead += f"<th data-k='me' class='ac-ecol'>{est_y} 영업이익률<span class='ac-sub'>% · 추정</span></th>"
+    # 광고비는 NICE만 있고 추정치가 없다 — 확정 연도만 낸다.
+    ahead = "".join(f"<th data-k='p{_yi[y]}'>{y} 광고비율<span class='ac-sub'>매출 대비 %</span></th>"
+                    for y in _yrs)
     last_y = years[-1] if years else ""
     n_cos = sum(1 for r in rows if r["cosmetic"])
     n_mon = sum(1 for r in rows if r.get("matched"))
@@ -6898,21 +6920,19 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         <div class="ac-tog">
           <button id="ac-mon" class="on" onclick="acSetScope('mon')">모니터링 브랜드</button>
           <button id="ac-cos" onclick="acSetScope('cos')">화장품업 전체</button>
-          <button id="ac-all" onclick="acSetScope('all')">전체 기업</button>
         </div>
         <input class="ac-q" id="ac-q" placeholder="회사명·브랜드명 검색 (예: 아모레, 설화수, 아누아)" oninput="acSearch()">
         <span class="ac-meta" id="ac-meta"></span>
+        <button class="ac-csv" onclick="acCsv()">🔒 전체 내려받기</button>
       </div>
       <div class="ac-unit">모든 금액 단위 <b>억원</b> — 억원 미만은 반올림.
         예를 들어 <b>26,537</b>은 2조 6,537억원(≈ 2,653,700,000,000원)이다.</div>
       <div class="ac-wrap">
         <table><thead><tr>
-          <th data-k="c">브랜드 · 회사</th><th data-k="i">업종</th>{yhead}
-          <th data-k="o">{last_y} 영업이익<span class="ac-sub">억원 (이익률)</span></th>
-          <th data-k="a">{last_y} 광고비<span class="ac-sub">억원 (매출비)</span></th>
-          <th data-k="v" class="ac-dcol">최신 실적<span class="ac-sub">억원 · DART 공시</span></th>
-          <th data-k="g" class="ac-dcol">전년 같은 기간 대비<span class="ac-sub">성장률</span></th>
-          <th data-k="e" class="ac-ecol">올해 예상<span class="ac-sub">억원 (전년비) · 증권사 컨센서스</span></th>
+          <th data-k="c">브랜드 · 회사</th>{yhead}
+          <th data-k="e" class="ac-ecol">{est_y} 매출<span class="ac-sub">억원 (전년비) · 증권사 추정</span></th>
+          {mhead}
+          {ahead}
         </tr></thead><tbody id="ac-body"></tbody></table>
       </div>
       <div class="ac-more" id="ac-more" onclick="acMore()"></div>
@@ -6932,7 +6952,8 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         Cos de Baha·b.plain·에스트라·제로이드는 NICE 미포함이다.</p>
     </div>
     <script>
-    var AC_DATA={js}, AC_YEARS={json.dumps(years)}, AC_SCOPE='mon', AC_LIMIT=60,
+    var AC_DATA={js}, AC_YEARS={json.dumps(years)}, AC_YI={json.dumps([_yi[y] for y in _yrs])},
+        AC_SCOPE='mon', AC_LIMIT=60,
         AC_SORT='r{max(len(years)-1,0)}', AC_DESC=true;
     // 원본에 음수 광고비·음수 영업이익이 실제로 섞여 있다. 억원으로 반올림하면 -0.5억이
     // '-0'으로 찍혀 옆 칸의 '—'(결측)와 구분이 안 된다. 억 미만은 소수 1자리를 살려
@@ -6956,7 +6977,9 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
     function acSpan(p){{ return AC_SPAN[p]||p; }}
     // HTML에는 모니터링 브랜드만 실려 있다. 나머지 범위는 처음 누를 때 한 번만
     // 받아와 캐시하고, 그 뒤로는 기존 클라이언트 정렬·검색 로직이 그대로 돈다.
-    var AC_CACHE={{mon:AC_DATA}}, AC_SCOPE_MAP={{cos:'cosmetic', all:'all'}};
+    // '전체 기업'(7,200개사)은 뺐다 — 경쟁 인텔리전스에서 무관한 회사가 대부분이고
+    // NICE 구매 데이터가 통째로 노출되는 경로이기도 했다. 모니터링/화장품업 둘만 둔다.
+    var AC_CACHE={{mon:AC_DATA}}, AC_SCOPE_MAP={{cos:'cosmetic'}};
     function acSetScope(v){{
       ['mon','cos','all'].forEach(function(k){{
         document.getElementById('ac-'+k).className=(k===v)?'on':''; }});
@@ -6977,6 +7000,21 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
           AC_SCOPE='mon'; AC_DATA=AC_CACHE.mon; }});
     }}
     function acMore(){{ AC_LIMIT+=100; acRender(); }}
+
+    // 화면엔 매출·영업이익률·광고비율만 둔다(기획팀 요청). 영업이익 금액·광고비
+    // 금액·분기별 수치는 여기서 받는다. 대량 추출이라 관리자 비밀번호가 필요하다.
+    function acCsv(){{
+      var go=function(){{ window.location.href='/api/finance/csv?key='
+        +encodeURIComponent(window.ADMIN_KEY||''); }};
+      if(window.ADMIN_KEY){{ go(); return; }}
+      var k=prompt('전체 내려받기는 관리자 전용입니다. 관리자 비밀번호를 입력하세요');
+      if(k===null) return;
+      fetch('/api/admin-check?key='+encodeURIComponent(k))
+        .then(function(r){{ return r.json(); }})
+        .then(function(d){{ if(d&&d.ok){{ window.ADMIN_KEY=k; go(); }}
+                          else alert('비밀번호가 틀렸습니다.'); }})
+        .catch(function(){{ alert('확인 실패 — 잠시 후 다시 시도하세요.'); }});
+    }}
 
     // 분기 추이 — 숫자 하나로는 방향이 안 보인다. 확정과 추정을 한 줄에 이어 그린다.
     var AC_SHOWN=[];
@@ -7004,14 +7042,14 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
       tr.parentNode.insertBefore(det, tr.nextSibling);
       btn.setAttribute('aria-expanded','true'); btn.textContent='▴';
     }}
-    // 기본 화면에는 17개사만 있어서 '설화수'를 쳐도 안 나온다. 검색을 시작하면
-    // 전체 기업으로 자동 전환해 준다(이미 전체를 보고 있으면 그대로 검색만).
+    // 기본 화면은 모니터링 브랜드뿐이라 '설화수'를 쳐도 안 나온다. 검색을 시작하면
+    // 화장품업 전체로 자동 전환해 준다('전체 기업' 범위는 제거됐다).
     var AC_STIMER=null;
     function acSearch(){{
       var q=(document.getElementById('ac-q').value||'').trim();
       if(q && AC_SCOPE==='mon'){{
         clearTimeout(AC_STIMER);
-        AC_STIMER=setTimeout(function(){{ acSetScope('all'); }}, 350);
+        AC_STIMER=setTimeout(function(){{ acSetScope('cos'); }}, 350);
         return;
       }}
       acRender();
@@ -7028,11 +7066,12 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
       var si=AC_SORT;
       list.sort(function(a,b){{
         var av,bv;
+        var _rt=function(x,i,arr){{ var n=x[arr][i], d=x.r[i]; return (n!==null&&n!==undefined&&d)?n/d:null; }};
         if(si[0]==='r'){{ var i=+si.slice(1); av=a.r[i]; bv=b.r[i]; }}
-        else if(si==='o'){{ av=a.o[a.o.length-1]; bv=b.o[b.o.length-1]; }}
-        else if(si==='a'){{ av=a.a[a.a.length-1]; bv=b.a[b.a.length-1]; }}
-        else if(si==='v'){{ av=a.d?a.d.v:null; bv=b.d?b.d.v:null; }}
-        else if(si==='g'){{ av=a.d?a.d.g:null; bv=b.d?b.d.g:null; }}
+        else if(si[0]==='m'&&si!=='me'){{ var i=+si.slice(1); av=_rt(a,i,'o'); bv=_rt(b,i,'o'); }}
+        else if(si==='me'){{ av=a.e?a.e.m:null; bv=b.e?b.e.m:null; }}
+        else if(si[0]==='p'){{ var i=+si.slice(1); av=_rt(a,i,'a'); bv=_rt(b,i,'a'); }}
+        else if(si==='e'){{ av=a.e?a.e.v:null; bv=b.e?b.e.v:null; }}
         else {{ av=a[si]; bv=b[si]; }}
         if(typeof av==='string'||typeof bv==='string') return (AC_DESC?-1:1)*String(bv||'').localeCompare(String(av||''));
         av=(av===null||av===undefined)?-Infinity:av; bv=(bv===null||bv===undefined)?-Infinity:bv;
@@ -7040,26 +7079,19 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
       var shown=list.slice(0,AC_LIMIT);
       AC_SHOWN=shown;
       document.getElementById('ac-body').innerHTML=shown.map(function(r,i){{
-        // 맨 오른쪽 = 최신 연도 매출. 표를 훑는 기준값이라 밝게 세운다
-        var tds=r.r.map(function(v,i){{
-          return '<td'+(i===r.r.length-1?' class="ac-lead"':'')+'>'+acFmt(v)+'</td>'; }}).join('');
-        var op=r.o[r.o.length-1], ad=r.a[r.a.length-1], rv=r.r[r.r.length-1];
-        // 기존 브랜드별 표에 있던 이익률·매출대비를 그대로 흡수 — 금액만으론 규모 비교가 안 된다
-        var pct=function(v){{ return (v!==null&&v!==undefined&&rv)?
-          '<span class="ac-pct">'+Math.round(v/rv*100)+'%</span>':''; }};
-        var dv='<td class="ac-dcol">—</td><td class="ac-dcol">—</td>';
-        if(r.d){{
-          // 좌: 이번 실적이 '언제 것'인지, 우: '무엇 대비'인지를 각각 칸 안에 적는다
-          var cur='<b class="ac-lead">'+acDart(r.d.v,0)+'</b><span class="ac-sub">'+r.d.y+'년 '+
-                  acSpan(r.d.p)+(r.d.fs?' · '+r.d.fs:'')+'</span>';
-          var cmp='—';
-          if(r.d.g!==null && r.d.g!==undefined){{
-            // toFixed(1) — 안 하면 '+16%'와 '+11.5%'가 한 열에 섞여 자릿수가 들쭉날쭉해진다
-            cmp='<span class="'+(r.d.g>=0?'yoy-up':'yoy-dn')+'">'+(r.d.g>=0?'+':'')+r.d.g.toFixed(1)+'%</span>'+
-                '<span class="ac-sub">'+(r.d.y-1)+'년 '+acSpan(r.d.p)+' '+acDart(r.d.pv)+'</span>';
-          }}
-          dv='<td class="ac-dcol">'+cur+'</td><td class="ac-dcol">'+cmp+'</td>';
-        }}
+        // 화면엔 매출·영업이익률·광고비율만. 금액과 분기별은 내려받기에서 본다.
+        var tds=AC_YI.map(function(i,n){{
+          return '<td'+(n===AC_YI.length-1?' class="ac-lead"':'')+'>'+acFmt(r.r[i])+'</td>'; }}).join('');
+        var rate=function(num,den){{ return (num!==null&&num!==undefined&&den)?
+          (num/den*100).toFixed(1)+'%' : '—'; }};
+        var mds=AC_YI.map(function(i){{
+          return '<td>'+rate(r.o[i], r.r[i])+'</td>'; }}).join('');
+        // 추정 영업이익률 — 올해 추정 분기들의 가중평균(매출로 가중)
+        var em='—';
+        if(r.e && r.e.m!==null && r.e.m!==undefined) em=r.e.m.toFixed(1)+'%';
+        mds+='<td class="ac-ecol">'+em+'</td>';
+        var ads=AC_YI.map(function(i){{
+          return '<td>'+rate(r.a[i], r.r[i])+'</td>'; }}).join('');
         // 모니터링 브랜드는 브랜드명을 앞세운다 — 기획팀이 회사명보다 브랜드로 기억한다
         var head = r.m
           ? '<span class="ac-mon">'+r.m+'</span><span class="ac-co">'+r.c+'</span>'
@@ -7081,8 +7113,7 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         }}
         var exp = (r.q&&r.q.length)
           ? '<button class="ac-x" onclick="acQ(this,'+i+')" aria-expanded="false" title="분기 추이">▾</button>' : '';
-        return '<tr><td>'+co+exp+'</td><td title="'+r.i+'">'+r.i+'</td>'+tds+
-               '<td>'+acFmt(op)+' '+pct(op)+'</td><td>'+acFmt(ad)+' '+pct(ad)+'</td>'+dv+ev+'</tr>'; }}).join('');
+        return '<tr><td>'+co+exp+'</td>'+tds+ev+mds+ads+'</tr>'; }}).join('');
       document.getElementById('ac-meta').textContent=list.length.toLocaleString()+'개사 중 '+shown.length+'개 표시';
       document.getElementById('ac-more').textContent = list.length>AC_LIMIT ? ('+ 더 보기 ('+(list.length-AC_LIMIT).toLocaleString()+'개 남음)') : '';
     }}
