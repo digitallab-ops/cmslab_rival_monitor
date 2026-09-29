@@ -5185,6 +5185,8 @@ def _build_full_html(
         <select class="dx-f" id="dx-brand"><option value="">브랜드 전체</option></select>
         <select class="dx-f" id="dx-country"><option value="">국가 전체</option></select>
         <button class="dx-go" onclick="dxLoad(0)">조회</button>
+        <label class="dx-bodychk" id="dx-bodychk" hidden>
+          <input type="checkbox" id="dx-withbody"> 본문 포함</label>
         <button class="dx-csv" onclick="dxCsv()">🔒 CSV 내려받기</button>
       </div>
 
@@ -5193,7 +5195,9 @@ def _build_full_html(
       <div class="dx-page" id="dx-page"></div>
       <p class="dx-note">한 번에 200행씩 보여준다. <b>🔒 CSV 내려받기</b>는 지금 걸어둔 조건 그대로
         최대 5만 행을 받는다(엑셀에서 바로 열린다). 대량 추출이라 <b>관리자 비밀번호</b>가 필요하고,
-        상한에 걸려 일부만 담기면 파일명에 <code>partial</code>로 표시된다.<br>
+        상한에 걸려 일부만 담기면 파일명에 <code>partial</code>로 표시된다.
+        뉴스는 <b>본문 포함</b>을 켜면 기사 전문이 열로 붙는다 — 한 건이 평균 3,300자라
+        파일이 무거워지므로 이때는 8천 행까지만 담는다.<br>
         모든 건수는 <b>분석에 쓰는 기준</b>으로 걸러진 수다 — 뉴스는 중복·자사 기사를 빼고,
         아마존 순위는 모니터링 대상만, 해외 상표는 타사 출원분만 센다.<br>
         기간을 비우면 전체 구간이다. 해외 상표 321건 중 <b>36건은 출원일이 공란</b>이라 기간을 걸면 빠진다.</p>
@@ -6418,7 +6422,9 @@ _DX_STYLE = """<style>
 #dx .dx-go,#dx .dx-csv{border-radius:6px;padding:7px 16px;font-size:13.5px;font-weight:700;cursor:pointer;
   font-family:inherit;border:1px solid}
 #dx .dx-go{background:rgba(74,143,212,.2);border-color:rgba(74,143,212,.55);color:#8fb4ff}
-#dx .dx-csv{background:rgba(91,217,154,.12);border-color:rgba(91,217,154,.42);color:#63e3a5;margin-left:auto}
+#dx .dx-csv{background:rgba(91,217,154,.12);border-color:rgba(91,217,154,.42);color:#63e3a5}
+#dx .dx-bodychk{margin-left:auto;font-size:13px;color:#93a0bd;display:flex;align-items:center;gap:6px;cursor:pointer}
+#dx .dx-bodychk input{accent-color:#5bd99a;cursor:pointer}
 #dx .dx-go:hover{background:rgba(74,143,212,.32)}
 #dx .dx-csv:hover{background:rgba(91,217,154,.22)}
 #dx .dx-meta{font-size:13px;color:#93a0bd;margin:0 0 8px}
@@ -6481,6 +6487,9 @@ function dxSyncFilters(){
   var sp=DX_SPEC[DX_DS]||{};
   var dw=document.getElementById('dx-datewrap');
   if(dw) dw.style.display = sp.has_date ? '' : 'none';
+  // 본문 열은 뉴스에만 있다 — 없는 데이터셋에서 켤 수 있으면 켜도 안 나오는 칸이 된다
+  var bc=document.getElementById('dx-bodychk');
+  if(bc) bc.hidden = !sp.has_body;
   [['dx-brand','brands','브랜드'],['dx-country','countries','국가']].forEach(function(t){
     var sel=document.getElementById(t[0]), vals=sp[t[1]]||[];
     if(!sel) return;
@@ -6568,8 +6577,10 @@ function dxPager(shown){
 
 // CSV는 대량 추출이라 관리자만 — 잠겨 있으면 여기서 바로 비밀번호를 받는다
 function dxCsv(){
+  var cb=document.getElementById('dx-withbody');
+  var wb=(cb && !cb.disabled && cb.checked && !document.getElementById('dx-bodychk').hidden) ? '&body=1' : '';
   var go=function(){ window.location.href='/api/explore/csv?'+dxParams().toString()
-    +'&key='+encodeURIComponent(window.ADMIN_KEY||''); };
+    +wb+'&key='+encodeURIComponent(window.ADMIN_KEY||''); };
   if(window.ADMIN_KEY){ go(); return; }
   var k=prompt('CSV 내려받기는 관리자 전용입니다. 관리자 비밀번호를 입력하세요');
   if(k===null) return;

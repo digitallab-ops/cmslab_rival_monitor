@@ -3224,6 +3224,9 @@ EXPLORE_DATASETS = {
                  ("product_name", "제품"), ("source_url", "링크")],
         "brand": "brand", "country": "country",
         "where": "is_duplicate IS NOT TRUE AND is_self IS NOT TRUE",
+        # 본문은 평균 2,700자라 목록에 실으면 한 쪽이 1.4MB가 된다. 행 id만 같이
+        # 내려보내고 펼칠 때 explore_body()로 그 한 건만 가져온다.
+        "body": "article_body",
     },
     "retail": {
         "label": "아마존 순위", "table": "retail_rankings", "date": "capture_date",
@@ -3268,12 +3271,15 @@ EXPLORE_DATASETS = {
 
 def explore_query(session: Session, dataset: str, date_from: str = "", date_to: str = "",
                   brand: str = "", country: str = "", limit: int = 500,
-                  offset: int = 0, max_rows: int = 5000) -> dict:
+                  offset: int = 0, max_rows: int = 5000,
+                  with_body: bool = False) -> dict:
     """데이터 탐색 — 화이트리스트 기반 안전 조회.
 
     반환 {cols, rows, total, label, ignored}. ignored는 이 데이터셋에 적용할 수
     없어 무시된 필터 이름 목록이다(예: 재무는 기간·브랜드 축이 없다).
     max_rows는 한 번에 가져올 상한 — 화면은 5천, CSV 내려받기는 더 크게 준다.
+    with_body는 기사 본문을 열로 붙인다(내려받기 전용). 본문은 평균 3,300자라
+    화면 목록에 실으면 한 쪽이 수 MB가 된다.
     """
     spec = EXPLORE_DATASETS.get(dataset)
     if not spec:
@@ -3304,7 +3310,10 @@ def explore_query(session: Session, dataset: str, date_from: str = "", date_to: 
         else:
             ignored.append("국가")
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
-    sel = ", ".join(f"{expr} AS c{i}" for i, (expr, _lbl) in enumerate(spec["cols"]))
+    cols = list(spec["cols"])
+    if with_body and spec.get("body"):
+        cols.append((f"COALESCE({spec['body']}, '')", "본문"))
+    sel = ", ".join(f"{expr} AS c{i}" for i, (expr, _lbl) in enumerate(cols))
     # 날짜만으로 정렬하면 동률군(예: 같은 날 135행)의 순서가 페이지마다 달라져
     # 1쪽과 2쪽에 같은 행이 나오고 어떤 쪽에도 안 나오는 행이 생긴다.
     # id를 tie-breaker로 붙여 전체 순서를 유일하게 고정한다. NULL 날짜는 뒤로.
@@ -3325,9 +3334,10 @@ def explore_query(session: Session, dataset: str, date_from: str = "", date_to: 
         logger.warning("데이터 탐색 실패 [%s]: %s", dataset, e)
         return {"cols": [], "rows": [], "total": 0, "label": spec["label"],
                 "ignored": [], "error": "조회 중 오류가 발생했습니다."}
-    return {"cols": [lbl for _e, lbl in spec["cols"]],
-            "rows": [[("" if v is None else v) for v in r] for r in rows],
-            "total": int(total), "label": spec["label"], "ignored": ignored}
+    out = {"cols": [lbl for _e, lbl in cols],
+           "rows": [[("" if v is None else v) for v in r] for r in rows],
+           "total": int(total), "label": spec["label"], "ignored": ignored}
+    return out
 
 
 def _explore_distinct(session: Session, spec: dict, col: str) -> list:
@@ -3377,6 +3387,7 @@ def explore_summary(session: Session) -> list:
         # 어떤 필터를 걸 수 있는 데이터셋인지 화면이 알아야 쓸 수 없는 칸을 감출 수 있다
         out[-1].update({
             "has_date": bool(spec["date"]),
+            "has_body": bool(spec.get("body")),   # 내려받기에 본문을 붙일 수 있는 데이터셋
             "brands": _explore_distinct(session, spec, "brand"),
             "countries": _explore_distinct(session, spec, "country"),
         })

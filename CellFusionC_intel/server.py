@@ -463,18 +463,21 @@ async def api_cell_insight(
 
 _EXPLORE_MAX = 5000        # 화면 표시 상한
 _EXPLORE_CSV_MAX = 50000   # 내려받기 상한 — 엑셀이 감당하는 선
+# 본문을 붙이면 한 행이 평균 3,300자다. 5만 행이면 결과를 담는 것만으로 167MB라
+# Render 인스턴스가 버티지 못한다. 본문 포함일 때만 상한을 따로 둔다.
+_EXPLORE_CSV_BODY_MAX = 8000
 
 
 def _explore_fetch(dataset: str, date_from: str, date_to: str,
                    brand: str, country: str, limit: int, offset: int,
-                   max_rows: int = _EXPLORE_MAX) -> dict:
+                   max_rows: int = _EXPLORE_MAX, with_body: bool = False) -> dict:
     from analytics.queries import explore_query
     from storage.models import get_session
     session = get_session()
     try:
         return explore_query(session, dataset, date_from=date_from, date_to=date_to,
                              brand=brand, country=country, limit=limit, offset=offset,
-                             max_rows=max_rows)
+                             max_rows=max_rows, with_body=with_body)
     finally:
         session.close()
 
@@ -525,7 +528,7 @@ async def api_explore_csv(dataset: str = Query("news"),
                           from_date: str = Query("", alias="from"),
                           to_date: str = Query("", alias="to"),
                           brand: str = Query(""), country: str = Query(""),
-                          key: str = Query("")):
+                          key: str = Query(""), body: int = Query(0)):
     """지금 보고 있는 조건 그대로 CSV로 내려받기(최대 5만 행). 관리자 전용.
 
     화면 조회는 열어두되 대량 추출만 막는다 — 무인증으로 6만여 행 원본을 반복해서
@@ -550,10 +553,13 @@ async def api_explore_csv(dataset: str = Query("news"),
             return JSONResponse({"error": "날짜 형식 오류(YYYY-MM-DD)"}, status_code=400)
     if from_date and to_date and from_date > to_date:
         return JSONResponse({"error": "시작일이 종료일보다 늦습니다"}, status_code=400)
+    from analytics.queries import EXPLORE_DATASETS as _DS
+    want_body = bool(body) and bool(_DS[dataset].get("body"))
+    cap = _EXPLORE_CSV_BODY_MAX if want_body else _EXPLORE_CSV_MAX
     try:
         data = await asyncio.to_thread(
             _explore_fetch, dataset, from_date, to_date, brand[:200], country[:200],
-            _EXPLORE_CSV_MAX, 0, _EXPLORE_CSV_MAX)
+            cap, 0, cap, want_body)
     except Exception as e:
         logger.warning("CSV 내려받기 실패: %s", e)
         return JSONResponse({"error": "내려받기 중 오류가 발생했습니다."}, status_code=500)
@@ -591,6 +597,8 @@ async def api_explore_csv(dataset: str = Query("news"),
             parts.append(f"{from_date or 'all'}_{to_date or 'all'}")
         else:
             parts.append("nodatefilter")
+    if want_body:
+        parts.append("withbody")
     if len(rows) < total:
         parts.append(f"partial{len(rows)}of{total}")   # ASCII만 — 헤더는 latin-1이다
     fname = "-".join(parts) + ".csv"
