@@ -4844,6 +4844,7 @@ def _build_full_html(
     oliveyoung_reviews: list = None,
     brief_feed_html: str = "",
     all_companies: dict = None,
+    quarterly_series: dict = None,
     dart_yoy: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
@@ -4883,7 +4884,8 @@ def _build_full_html(
     radar_html        = _render_brand_radar(brand_radar or [])
     demand_html       = _render_demand_signal(demand_tri or [])
     export_growth_html = _render_export_growth(export_growth or [], export_period or {}, export_stacked or {})
-    all_companies_html = _render_all_companies(all_companies or {}, dart_yoy or {})
+    all_companies_html = _render_all_companies(all_companies or {}, dart_yoy or {},
+                                               qseries=quarterly_series or {})
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
     self_position_html = _render_self_position(self_position or {})
@@ -5929,6 +5931,13 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception as _e:
             logger.warning("전체 기업 재무 조회 실패: %s", _e)
             all_companies, dart_yoy = {"years": [], "rows": []}, {}
+        # 분기 시계열(과거 DART 확정 + 앞으로 증권사 추정). 실패해도 표는 그대로 뜬다.
+        try:
+            from analytics.queries import get_quarterly_series
+            quarterly_series = get_quarterly_series(session)
+        except Exception as _e:
+            logger.warning("분기 시계열 조회 실패: %s", _e)
+            quarterly_series = {}
         try:
             ingredient_trends = get_ingredient_trends(session, days=30, limit=12)
         except Exception:
@@ -6258,6 +6267,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brand_signals=brand_signals,
         brief_feed_html=brief_feed_html,
         all_companies=all_companies,
+        quarterly_series=quarterly_series,
         dart_yoy=dart_yoy,
         stories=stories,
         category_battle=category_battle,
@@ -6622,6 +6632,25 @@ function dxInit(){ if(DX_INIT) return; DX_INIT=true; dxCards(); }
 
 
 _ALLCO_STYLE = """<style>
+/* 올해 예상(컨센서스) 열 — DART 주황 두 칸과 구분되게 푸른 계열로 */
+#allco th.ac-ecol,#allco td.ac-ecol{background:rgba(74,143,212,.07)}
+#allco td.ac-ecol{border-left:1px solid rgba(74,143,212,.22)}
+#allco .ac-none{color:#5d6784;font-size:12.5px}
+/* 분기 추이 펼치기 */
+#allco button.ac-x{margin-left:8px;background:transparent;border:1px solid #2c3854;border-radius:5px;
+  color:#8592b3;font-size:11px;font-family:inherit;padding:1px 6px;cursor:pointer;vertical-align:middle}
+#allco button.ac-x:hover{border-color:#4a8fd4;color:#cfe0ff}
+#allco tr.ac-qrow td{background:#0c1322;padding:14px 18px}
+#allco .acq-h{font-size:13px;font-weight:700;color:#c6d0e6;margin:0 0 12px}
+#allco .acq-h span{font-weight:400;color:#6b769a;font-size:11.5px;margin-left:8px}
+#allco .acq-bars{display:flex;gap:14px;align-items:flex-end}
+#allco .acq-i{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:56px}
+#allco .acq-v{font-size:12px;color:#c6d0e6;font-variant-numeric:tabular-nums}
+#allco .acq-b{width:100%;background:linear-gradient(180deg,#4a8fd4,#2f6ba8);border-radius:3px 3px 0 0}
+#allco .acq-i.est .acq-b{background:repeating-linear-gradient(135deg,#31537a,#31537a 4px,#27415f 4px,#27415f 8px)}
+#allco .acq-i.est .acq-v{color:#8592b3}
+#allco .acq-l{font-size:11px;color:#6b769a;font-variant-numeric:tabular-nums;text-align:center}
+#allco .acq-l i{display:block;font-style:normal;font-size:10px;color:#5d6784}
 /* 열이 9개라 page-body(1500px) 안에서는 가로 스크롤바가 생긴다. 이 표만 좌우로
    내밀어 한 화면에 담는다. 화면이 좁아지면 내밀기를 거둬 넘치지 않게 한다. */
 #allco{margin-left:-120px;margin-right:-120px}
@@ -6739,7 +6768,8 @@ def _strip_bullet(t: str) -> str:
     return t.replace("**", "").strip()
 
 
-def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = False):
+def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = False,
+                          qseries: dict = None):
     """NICE 전체 기업 재무 표 — 화장품업 기본 + 전체 전환, 검색·정렬, DART 최신 YoY 결합.
 
     단위 주의: nice_financials.amount는 **천원** 단위다(포스코인터내셔널 2.7e10 = 27조).
@@ -6762,6 +6792,12 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
     for b, v in dart.items():
         if v.get("corp"):
             dart_by_corp.setdefault(_norm_co(v["corp"]), v)
+
+    # 분기 시계열(과거 DART 확정 + 앞으로 네이버 추정)도 회사명으로 붙인다.
+    qs_by_corp = {}
+    for b, v in (qseries or {}).items():
+        if v.get("corp"):
+            qs_by_corp.setdefault(_norm_co(v["corp"]), v)
 
     # 정규화가 서로 다른 회사를 같은 키로 뭉갤 수 있다('(주)레토' vs '레토(주)' 등 10건).
     # 그런 키에 DART 회사가 걸리면 두 회사 모두에 같은 실적이 붙어버린다 — 조용히 틀리느니
@@ -6789,7 +6825,30 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
             # pv = 비교 대상(전년 같은 기간) 매출 — '무엇 대비'인지 화면에 그대로 적기 위해 같이 넘긴다
             "d": ({"y": d["year"], "p": d["reprt"], "v": d["revenue"],
                    "g": d["yoy"], "pv": d["prev"], "fs": d.get("fs", "")} if d else None),
+            # q: 분기 시계열(펼쳤을 때) / e: 올해 예상 연간(열에 바로 표시)
+            **_qcols(_k),
         }
+
+    def _qcols(norm_key):
+        """분기 시계열 + 올해 예상 한 줄. 비상장은 시계열 자체가 없다."""
+        v = qs_by_corp.get(norm_key)
+        if not v:
+            return {"q": None, "e": None}
+        ser = v.get("series") or []
+        q = [{"l": x["label"], "v": round(x["revenue"]), "m": (round(x["op_margin"], 1)
+              if x.get("op_margin") is not None else None), "e": 1 if x["est"] else 0}
+             for x in ser[-10:]]
+        # 올해 예상 = 추정 분기들의 합 + 올해 확정 분기들의 합
+        cy = str(datetime.utcnow().year)
+        cur = [x for x in ser if x["label"].startswith(cy)]
+        e = None
+        if cur and any(x["est"] for x in cur):
+            tot = sum(x["revenue"] for x in cur)
+            prev = [x for x in ser if x["label"].startswith(str(int(cy) - 1))]
+            pv = sum(x["revenue"] for x in prev) if len(prev) == 4 else None
+            e = {"v": round(tot), "g": (round((tot / pv - 1) * 100, 1) if pv else None),
+                 "n": sum(1 for x in cur if x["est"])}
+        return {"q": q or None, "e": e}
 
     # /api/companies는 HTML이 아니라 행 데이터만 필요하다(범위 필터는 호출부에서 끝냄).
     if _payload_only:
@@ -6833,6 +6892,7 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
           <th data-k="a">{last_y} 광고비<span class="ac-sub">억원 (매출비)</span></th>
           <th data-k="v" class="ac-dcol">최신 실적<span class="ac-sub">억원 · DART 공시</span></th>
           <th data-k="g" class="ac-dcol">전년 같은 기간 대비<span class="ac-sub">성장률</span></th>
+          <th data-k="e" class="ac-ecol">올해 예상<span class="ac-sub">억원 (전년비) · 증권사 컨센서스</span></th>
         </tr></thead><tbody id="ac-body"></tbody></table>
       </div>
       <div class="ac-more" id="ac-more" onclick="acMore()"></div>
@@ -6891,6 +6951,32 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
           AC_SCOPE='mon'; AC_DATA=AC_CACHE.mon; }});
     }}
     function acMore(){{ AC_LIMIT+=100; acRender(); }}
+
+    // 분기 추이 — 숫자 하나로는 방향이 안 보인다. 확정과 추정을 한 줄에 이어 그린다.
+    var AC_SHOWN=[];
+    function acQ(btn, i){{
+      var tr=btn.closest('tr'), nx=tr.nextElementSibling;
+      if(nx && nx.classList.contains('ac-qrow')){{
+        nx.parentNode.removeChild(nx);
+        btn.setAttribute('aria-expanded','false'); btn.textContent='▾'; return;
+      }}
+      var r=AC_SHOWN[i]; if(!r||!r.q) return;
+      var mx=Math.max.apply(null, r.q.map(function(x){{ return x.v; }}));
+      var bars=r.q.map(function(x){{
+        var h=Math.max(6, Math.round(x.v/mx*72));
+        return '<div class="acq-i'+(x.e?' est':'')+'">'
+             + '<div class="acq-v">'+acFmt(x.v)+'</div>'
+             + '<div class="acq-b" style="height:'+h+'px"></div>'
+             + '<div class="acq-l">'+x.l+(x.e?'<i>추정</i>':'')+'</div></div>';
+      }}).join('');
+      var det=document.createElement('tr');
+      det.className='ac-qrow';
+      det.innerHTML='<td colspan="'+tr.children.length+'"><div class="acq">'
+        +'<div class="acq-h">분기별 매출 <span>억원 · 색이 옅은 칸은 증권사 추정</span></div>'
+        +'<div class="acq-bars">'+bars+'</div></div></td>';
+      tr.parentNode.insertBefore(det, tr.nextSibling);
+      btn.setAttribute('aria-expanded','true'); btn.textContent='▴';
+    }}
     // 기본 화면에는 17개사만 있어서 '설화수'를 쳐도 안 나온다. 검색을 시작하면
     // 전체 기업으로 자동 전환해 준다(이미 전체를 보고 있으면 그대로 검색만).
     var AC_STIMER=null;
@@ -6925,7 +7011,8 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         av=(av===null||av===undefined)?-Infinity:av; bv=(bv===null||bv===undefined)?-Infinity:bv;
         return AC_DESC?(bv-av):(av-bv); }});
       var shown=list.slice(0,AC_LIMIT);
-      document.getElementById('ac-body').innerHTML=shown.map(function(r){{
+      AC_SHOWN=shown;
+      document.getElementById('ac-body').innerHTML=shown.map(function(r,i){{
         // 맨 오른쪽 = 최신 연도 매출. 표를 훑는 기준값이라 밝게 세운다
         var tds=r.r.map(function(v,i){{
           return '<td'+(i===r.r.length-1?' class="ac-lead"':'')+'>'+acFmt(v)+'</td>'; }}).join('');
@@ -6954,8 +7041,21 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
                 + (r.m ? (r.s?'<span class="ac-tag ac-single">회사=브랜드</span>'
                              :'<span class="ac-tag ac-whole">회사전체</span>') : '');
         var co = head + tag + (r.b?'<span class="ac-brand">'+r.b+'</span>':'');
-        return '<tr><td>'+co+'</td><td title="'+r.i+'">'+r.i+'</td>'+tds+
-               '<td>'+acFmt(op)+' '+pct(op)+'</td><td>'+acFmt(ad)+' '+pct(ad)+'</td>'+dv+'</tr>'; }}).join('');
+        // 올해 예상 — 상장사만 있다. 비상장은 값이 '없는' 게 아니라 컨센서스가
+        // 애초에 존재하지 않는다. 빈칸으로 두면 수집 누락으로 오해하니 그렇게 적는다.
+        var ev='<td class="ac-ecol"><span class="ac-none">비상장</span></td>';
+        if(r.e){{
+          var g = (r.e.g===null||r.e.g===undefined) ? ''
+                : '<span class="'+(r.e.g>=0?'yoy-up':'yoy-dn')+'">'+(r.e.g>=0?'+':'')+r.e.g.toFixed(1)+'%</span>';
+          ev='<td class="ac-ecol"><b class="ac-lead">'+acFmt(r.e.v)+'</b> '+g
+            +'<span class="ac-sub">추정 '+r.e.n+'개 분기 포함</span></td>';
+        }} else if(r.l){{
+          ev='<td class="ac-ecol"><span class="ac-none">컨센서스 없음</span></td>';
+        }}
+        var exp = (r.q&&r.q.length)
+          ? '<button class="ac-x" onclick="acQ(this,'+i+')" aria-expanded="false" title="분기 추이">▾</button>' : '';
+        return '<tr><td>'+co+exp+'</td><td title="'+r.i+'">'+r.i+'</td>'+tds+
+               '<td>'+acFmt(op)+' '+pct(op)+'</td><td>'+acFmt(ad)+' '+pct(ad)+'</td>'+dv+ev+'</tr>'; }}).join('');
       document.getElementById('ac-meta').textContent=list.length.toLocaleString()+'개사 중 '+shown.length+'개 표시';
       document.getElementById('ac-more').textContent = list.length>AC_LIMIT ? ('+ 더 보기 ('+(list.length-AC_LIMIT).toLocaleString()+'개 남음)') : '';
     }}
@@ -6976,11 +7076,13 @@ def build_companies_payload(scope: str = "all") -> list:
     누르면 이 함수가 만든 것을 API로 받아간다. 렌더러와 같은 코드 경로를 타야
     화면에서 열이 어긋나지 않는다.
     """
-    from analytics.queries import get_all_company_financials, get_dart_yoy
+    from analytics.queries import (get_all_company_financials, get_dart_yoy,
+                                   get_quarterly_series)
     session = get_session()
     try:
         data = get_all_company_financials(session)
         dart = get_dart_yoy(session)
+        qs = get_quarterly_series(session)
     finally:
         session.close()
     rows = (data or {}).get("rows") or []
@@ -6990,6 +7092,6 @@ def build_companies_payload(scope: str = "all") -> list:
         rows = [r for r in rows if r.get("matched")]
     # 렌더러가 만드는 것과 같은 dict를 얻으려고 같은 함수를 태운다.
     html = _render_all_companies({"years": (data or {}).get("years") or [], "rows": rows},
-                                 dart, _payload_only=True)
+                                 dart, _payload_only=True, qseries=qs)
     return html
 

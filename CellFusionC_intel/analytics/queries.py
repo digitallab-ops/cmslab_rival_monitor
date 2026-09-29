@@ -2002,6 +2002,80 @@ def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -
     return {"feed": feed, "brands": brands, "marks_by_brand": marks}
 
 
+def get_quarterly_series(session: Session, brands: "list | None" = None) -> dict:
+    """브랜드별 분기 실적 시계열 — 과거는 DART(확정), 앞은 네이버(추정).
+
+    반환 {brand: {"corp": str, "listed": bool,
+                  "series": [{label, revenue, op_income, op_margin, est}]}}
+
+    **DART 분기보고서는 누적이다**(3분기 = 1~9월 합계). 네이버는 단독분기라
+    그대로 이어붙이면 눈금이 안 맞는다. 차분해서 단독분기로 바꾼다 —
+    1Q = 1Q누적 · 2Q = 반기 - 1Q · 3Q = 3Q누적 - 반기 · 4Q = 연간 - 3Q누적.
+    """
+    _Q = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}
+    out: dict = {}
+    try:
+        rows = session.execute(text(f"""
+            SELECT brand, corp_name, bsns_year, reprt_code, revenue, op_income
+            FROM {DB_SCHEMA}.competitor_financials
+            WHERE revenue IS NOT NULL
+            ORDER BY brand, bsns_year, reprt_code
+        """)).fetchall()
+        cons = session.execute(text(f"""
+            SELECT brand, corp_name, period_key, period_label, is_estimate,
+                   revenue, op_income, op_margin
+            FROM {DB_SCHEMA}.consensus_financials
+            WHERE period_type = 'quarter' AND revenue IS NOT NULL
+            ORDER BY brand, period_key
+        """)).fetchall()
+    except Exception as e:
+        logger.warning("분기 시계열 조회 실패: %s", e)
+        return {}
+
+    # ── DART 누적 → 단독분기
+    cum: dict = {}
+    for b, corp, yr, rc, rev, op in rows:
+        q = _Q.get(rc)
+        if not q:
+            continue
+        cum.setdefault(b, {"corp": corp, "q": {}})["q"][(yr, q)] = (rev, op)
+    for b, d in cum.items():
+        ser = []
+        for (yr, q) in sorted(d["q"]):
+            rev, op = d["q"][(yr, q)]
+            if q > 1:
+                prev = d["q"].get((yr, q - 1))
+                if not prev or prev[0] is None:
+                    continue          # 앞 분기가 없으면 차분 불가 — 건너뛴다
+                rev = (rev or 0) - prev[0]
+                op = None if (op is None or prev[1] is None) else op - prev[1]
+            # 억원 환산(DART는 원 단위)
+            rev = rev / 1e8 if rev is not None else None
+            op = op / 1e8 if op is not None else None
+            if rev is None or rev <= 0:
+                continue              # 차분이 음수면 공시 기준이 어긋난 것 — 버린다
+            ser.append({"label": f"{yr}.{q * 3:02d}", "key": f"{yr}{q * 3:02d}",
+                        "revenue": rev, "op_income": op,
+                        "op_margin": (op / rev * 100) if (op and rev) else None,
+                        "est": False, "src": "dart"})
+        out[b] = {"corp": d["corp"], "listed": False, "series": ser}
+
+    # ── 네이버(확정+추정)로 덮어쓰기·이어붙이기
+    for b, corp, key, label, est, rev, op, opm in cons:
+        e = out.setdefault(b, {"corp": corp, "listed": True, "series": []})
+        e["listed"] = True
+        e["corp"] = e.get("corp") or corp
+        e["series"] = [x for x in e["series"] if x["key"] != key]
+        e["series"].append({"label": label, "key": key, "revenue": rev,
+                            "op_income": op, "op_margin": opm,
+                            "est": bool(est), "src": "naver"})
+    for e in out.values():
+        e["series"].sort(key=lambda x: x["key"])
+    if brands:
+        out = {k: v for k, v in out.items() if k in brands}
+    return out
+
+
 def get_competitor_financials(session: Session) -> list[dict]:
     """
     경쟁사 실적(DART) — 브랜드별 최신 매출·영업이익·영업이익률 + 매출 YoY.

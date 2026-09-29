@@ -69,10 +69,19 @@ def _brand_aliases() -> dict:
     return d
 
 
-# 태그에 브랜드명이 없지만 운영사명으로 매칭되는 케이스(수동 보강)
+# 태그에 브랜드명이 없지만 운영사명으로 매칭되는 케이스(수동 보강).
+# NICE 태그는 회사의 대표 브랜드만 적혀 있어 우리가 보는 브랜드가 빠질 때가 있다 —
+# 네오팜 태그는 '아토팜·리얼베리어'뿐이라 제로이드가, 아모레퍼시픽 태그엔 에스트라가 없다.
 _BRAND_COMPANY = {
     "Abib": ["포컴퍼니"], "Mixsoon": ["파켓"], "By Wishtrend": ["위시컴퍼니"],
+    "Zeroid": ["네오팜"], "Aestura": ["아모레퍼시픽"], "Medicube": ["에이피알"],
 }
+
+def _co_key(name: str) -> str:
+    """회사명에서 법인격·공백을 떼어 비교용으로. '(주)아모레퍼시픽' → '아모레퍼시픽'."""
+    import re as _re
+    t = _re.sub(r"\(주\)|\(유\)|㈜|주식회사|유한회사", "", name or "")
+    return _re.sub(r"\s+", "", t).lower()
 
 
 def _match_monitored(brand_tags: str, company: str, aliases: dict) -> list:
@@ -83,9 +92,44 @@ def _match_monitored(brand_tags: str, company: str, aliases: dict) -> list:
     for brand, al in aliases.items():
         if t and any(a and a in t for a in al):
             hit.append(brand)
-        elif any(c in co for c in _BRAND_COMPANY.get(brand, [])):
+        # 회사명 매칭은 **정확일치**여야 한다. 부분일치로 두면 지주회사
+        # ('아모레퍼시픽홀딩스')와 가맹점('아모레퍼시픽서신점cafeN')까지 걸린다.
+        elif _co_key(co) in {_co_key(c) for c in _BRAND_COMPANY.get(brand, [])}:
             hit.append(brand)
     return hit
+
+
+def recompute_matches() -> dict:
+    """엑셀을 다시 읽지 않고 matched_brands만 다시 계산한다.
+
+    브랜드를 새로 등록하면 이 표가 낡는다 — 매칭이 적재 시점에 한 번 계산되기
+    때문이다. 실제로 메디큐브·제로이드·에스트라가 미매칭으로 남아 재무 탭
+    기본 화면에서 통째로 빠져 있었다. 브랜드 추가 후 이걸 돌리면 된다.
+    반환 {rows, matched, changed}.
+    """
+    aliases = _brand_aliases()
+    session = get_session()
+    try:
+        rows = session.execute(text(
+            f"SELECT industry_code, company, COALESCE(brand_tags,''), "
+            f"COALESCE(matched_brands,'') FROM {DB_SCHEMA}.nice_company_brands")).fetchall()
+        changed = matched = 0
+        for ic, co, tags, cur in rows:
+            new = ",".join(_match_monitored(tags, co, aliases))
+            if new:
+                matched += 1
+            if new != cur:
+                session.execute(text(
+                    f"UPDATE {DB_SCHEMA}.nice_company_brands SET matched_brands = :m "
+                    f"WHERE industry_code = :ic AND company = :co"),
+                    {"m": new, "ic": ic, "co": co})
+                changed += 1
+        session.commit()
+        logger.info("NICE 브랜드 매칭 재계산 — %d행 중 매칭 %d · 변경 %d",
+                    len(rows), matched, changed)
+        return {"rows": len(rows), "matched": matched, "changed": changed}
+    finally:
+        session.close()
 
 
 def load(xlsx_path: str = None) -> dict:

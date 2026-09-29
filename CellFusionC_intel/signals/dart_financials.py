@@ -45,6 +45,9 @@ BRAND_CORP: dict[str, dict] = {
     "VT Cosmetics": {"names": ["브이티", "브이티지엠피"], "brand_level": True},  # 브이티(상장)
     "Aestura":      {"names": ["아모레퍼시픽"], "brand_level": False},         # 에스트라=아모레퍼시픽
     "Dr.Jart+":     {"names": ["해브앤비"], "brand_level": True},             # 닥터자르트=해브앤비(에스티로더)
+    "Medicube":     {"names": ["에이피알"], "brand_level": False},            # 메디큐브=에이피알(상장)
+    # 제로이드는 브랜드명이고 회사는 네오팜이다. 회사명 자리에 브랜드명을 적어둬서
+    # 계속 미매칭이었다(아토팜·리얼베리어도 같은 회사).
     # ── 비상장/외감(될 수도, 안 될 수도) ──
     "Anua":            {"names": ["더파운더즈"], "brand_level": True},
     "Beauty of Joseon":{"names": ["구다이글로벌"], "brand_level": True},
@@ -59,7 +62,10 @@ BRAND_CORP: dict[str, dict] = {
     "Skin1004":        {"names": ["스킨천사", "스킨1004"], "brand_level": True},   # ?
     "Cos de Baha":     {"names": ["코스드바하"], "brand_level": True},            # ?
     "b.plain":         {"names": ["비플레인"], "brand_level": True},             # ?
-    "Zeroid":          {"names": ["제로이드"], "brand_level": True},             # ?
+    "Zeroid":          {"names": ["네오팜"], "brand_level": False},              # 제로이드=네오팜(상장)
+    "Tirtir":          {"names": ["티르티르"], "brand_level": True},             # ?
+    "Biodance":        {"names": ["바이오던스"], "brand_level": True},           # ?
+    "COSRX":           {"names": ["코스알엑스"], "brand_level": True},           # ?
     "Celimax":         {"names": ["셀리맥스"], "brand_level": True},             # ?
 }
 
@@ -219,8 +225,13 @@ def _save(session, brand, meta, year, fin) -> None:
     session.commit()
 
 
-def run(years: int = 3) -> dict:
-    """경쟁사 운영사 최근 years년 재무 수집. 반환 {resolved, saved, unmatched, no_data}."""
+def run(years: int = 5, quarters: bool = True) -> dict:
+    """경쟁사 운영사 최근 years년 재무 수집. 반환 {resolved, saved, unmatched, no_data}.
+
+    quarters=True면 각 연도의 1분기·반기·3분기 누적까지 전부 받는다. 오래
+    연간+최신분기만 받아서 '2024년 3분기'처럼 지난 분기를 볼 수가 없었다.
+    분기 시계열이 있어야 네이버 컨센서스(추정 분기)와 이어붙일 수 있다.
+    """
     if not _key():
         logger.warning("OPENDART_KEY 미설정 — DART 재무 수집 스킵")
         return {"resolved": 0, "saved": 0, "unmatched": [], "no_data": []}
@@ -252,13 +263,25 @@ def run(years: int = 3) -> dict:
             meta = {"corp_name": corp_name, "corp_code": corp_code,
                     "stock_code": stock_code, "brand_level": spec["brand_level"]}
             got_any = False
-            for yr in target_years:                      # 확정 연간
-                fin = _fetch_financials(corp_code, yr, "11011")
-                if fin:
-                    _save(session, brand, meta, yr, fin)
-                    saved += 1
-                    got_any = True
-                time.sleep(0.15)          # API 예의(초당 제한 회피)
+            # 확정 연간 + (옵션) 그 해의 분기 누적 전부
+            codes = ["11011"] + (["11013", "11012", "11014"] if quarters else [])
+            for yr in target_years:
+                for rc in codes:
+                    fin = _fetch_financials(corp_code, yr, rc)
+                    if fin:
+                        _save(session, brand, meta, yr, fin)
+                        saved += 1
+                        got_any = True
+                    time.sleep(0.15)      # API 예의(초당 제한 회피)
+            # 올해 분기 누적 — 최신 하나만 받으면 올해 1분기·반기가 빈다
+            if quarters:
+                for rc in ("11013", "11012", "11014"):
+                    fin = _fetch_financials(corp_code, cur_year, rc)
+                    if fin:
+                        _save(session, brand, meta, cur_year, fin)
+                        saved += 1
+                        got_any = True
+                    time.sleep(0.15)
             # 올해 최신 분기 누적 + 같은 분기의 작년 값(동일 기간 YoY용)
             cur = _fetch_latest(corp_code, cur_year)
             if cur:

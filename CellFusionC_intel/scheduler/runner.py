@@ -304,6 +304,31 @@ def job_dart_financials() -> None:
         logger.info("DART 재무 수집 완료: 매칭 %d / 저장 %d행", r["resolved"], r["saved"])
     except Exception as e:
         logger.warning("DART 재무 수집 스킵(OPENDART_KEY/네트워크 확인): %s", e)
+    # DART 적재 후 NICE 브랜드 매칭을 다시 계산한다. 매칭은 NICE 엑셀 적재 시점에
+    # 한 번만 계산돼서, 브랜드를 새로 등록하면 그 회사가 재무 탭에서 통째로 빠진다
+    # (메디큐브·제로이드·에스트라가 실제로 그랬다).
+    try:
+        from signals.nice_financials import recompute_matches
+        r = recompute_matches()
+        logger.info("NICE 브랜드 매칭 재계산: 매칭 %d / 변경 %d", r["matched"], r["changed"])
+    except Exception as e:
+        logger.warning("NICE 매칭 재계산 스킵: %s", e)
+
+
+def job_naver_consensus() -> None:
+    """상장 경쟁사 확정·추정 실적(네이버 증권). 주1회 — 컨센서스는 자주 안 바뀐다.
+
+    DART엔 없는 '앞으로 얼마 할 것 같은지'가 여기서만 온다. 공식 오픈API가
+    아니라 화면 내부 엔드포인트라 실패할 수 있고, 실패해도 기존 재무는 그대로다.
+    """
+    logger.info("=== [주간] 네이버 컨센서스 수집 시작 ===")
+    try:
+        from signals.naver_consensus import run as run_cons
+        r = run_cons()
+        logger.info("컨센서스 수집 완료: 회사 %d / %d행 / 추정 %d",
+                    r["companies"], r["rows"], r["estimates"])
+    except Exception as e:
+        logger.warning("컨센서스 수집 스킵(네이버 응답 확인): %s", e)
 
 
 def job_google_trends() -> None:
@@ -690,6 +715,17 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day=3, hour=6, minute=30),
         id="export_stats",
         name="[월간] 관세청 화장품 수출통계 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매주 목 07:10 KST — 네이버 컨센서스(추정 실적). 증권사 전망은 실적 발표
+    # 전후로 바뀌므로 월1회는 늦고, 매일은 의미 없는 호출이라 주1회로 둔다.
+    scheduler.add_job(
+        job_naver_consensus,
+        trigger=CronTrigger(day_of_week="thu", hour=7, minute=10),
+        id="naver_consensus",
+        name="[주간] 네이버 컨센서스(추정 실적)",
         max_instances=1,
         coalesce=True,
     )
