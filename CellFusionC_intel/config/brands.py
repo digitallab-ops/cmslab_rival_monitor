@@ -14,6 +14,8 @@ TIER1_BRANDS = [
     "Dr.Jart+",          # 닥터자르트 — 에스티로더 인수, 미주 강세
     "Torriden",          # 토리든 — 일본·미국 인플루언서 성장
     "Medicube",          # 메디큐브(APR) — 미국 아마존 뷰티 상위·에이지알 디바이스
+    "Biodance",          # 바이오던스 — 아마존 8개국 1위(콜라겐 마스크)
+    "COSRX",             # 코스알엑스 — 아마존 4개국 상위, 스네일 뮤신
 ]
 
 # Tier 2: 주 1회 수집
@@ -35,6 +37,24 @@ TIER2_BRANDS = [
 ]
 
 ALL_BRANDS = TIER1_BRANDS + TIER2_BRANDS
+
+
+def canonical_brand(name: str) -> "str | None":
+    """외부 사이트가 쓴 브랜드 표기를 우리 등록명으로 되돌린다.
+
+    아마존은 같은 브랜드를 'TirTir'로, 우리는 'Tirtir'로 적는다. 대소문자·공백·
+    점·하이픈만 다른 표기를 단순 문자열 비교로 넘기면 등록된 브랜드가 '미등록'으로
+    기록된다(실제로 TirTir 199행이 그렇게 샜다). 못 찾으면 None.
+    """
+    k = _brand_key(name)
+    return _BRAND_BY_KEY.get(k) if k else None
+
+
+def _brand_key(name: str) -> str:
+    return "".join(c for c in (name or "").lower() if c.isalnum())
+
+
+_BRAND_BY_KEY = {_brand_key(b): b for b in ALL_BRANDS}
 
 # 자사(씨엠에스랩 대표 브랜드) — 경쟁사 집계와 분리하는 기준선(baseline).
 # 경쟁사 목록(ALL_BRANDS)엔 넣지 않고, 전용 수집 잡 + is_self 플래그로 분리한다.
@@ -194,6 +214,8 @@ BRAND_KO_NAMES: dict[str, list[str]] = {
     "Goodal":           ["구달"],
     "Torriden":         ["토리든"],
     "Medicube":         ["메디큐브"],
+    "Biodance":         ["바이오던스"],
+    "COSRX":            ["코스알엑스"],
     "Abib":             ["아비브"],
     "Rejuran":          ["리쥬란", "리쥬란코스메틱"],
     "Mixsoon":          ["믹순"],
@@ -206,7 +228,7 @@ BRAND_KO_NAMES: dict[str, list[str]] = {
 
 
 def _merge_db_ko_names() -> None:
-    """monitored_brands의 ko_names를 BRAND_KO_NAMES에 병합.
+    """monitored_brands의 브랜드명·ko_names를 이 모듈의 목록에 병합.
 
     슬랙 봇으로 승인한 브랜드는 DB(monitored_brands)에만 들어가고 이 파일은 그대로다.
     그 결과 Amuse(어뮤즈)·Tirtir(티르티르)가 한글명 없이 남아, 한글명으로 검색하는
@@ -228,6 +250,11 @@ def _merge_db_ko_names() -> None:
     except Exception:
         return
     for name, ko in rows:
+        # 승인된 브랜드는 이 파일에 없어도 '모니터링 중'이다. 이름을 안 들여오면
+        # 아마존·올리브영 수집기가 is_monitored=False로 적어 미등록처럼 보인다.
+        if name and canonical_brand(name) is None:
+            ALL_BRANDS.append(name)
+            _BRAND_BY_KEY[_brand_key(name)] = name
         vals = [k.strip() for k in (ko or []) if k and k.strip()]
         if not vals:
             continue

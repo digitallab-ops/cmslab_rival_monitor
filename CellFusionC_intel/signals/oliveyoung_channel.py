@@ -23,7 +23,7 @@ from datetime import date
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import ALL_BRANDS, BRAND_KO_NAMES
+from config.brands import canonical_brand, ALL_BRANDS, BRAND_KO_NAMES
 from storage.models import get_session
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,29 @@ def _match_brand(goods_name: str) -> "str | None":
             elif _norm(k) in n:                   # 긴 영문: 정규화 부분일치
                 return brand
     return None
+
+
+def _extract_brand_name(goods_name: str) -> str:
+    """상품명 앞머리에서 브랜드 표기를 떼어낸다. 등록 여부와 무관하게.
+
+    올리브영 상품명은 브랜드를 늘 앞에 두 번 적는다 —
+    '파티온[9월 올영픽] 파티온 노스카나인...' 또는 '하이뮨하이뮨 프로틴...'.
+    지금껏 등록 브랜드만 이름을 남겨서 랭킹 5,351행 중 3,542행(66%)이 브랜드
+    미상이었고, 그래서 국내 채널의 커버리지 구멍은 볼 수가 없었다.
+
+    못 찾으면 빈 문자열.
+    """
+    t = (goods_name or "").strip()
+    if not t:
+        return ""
+    head = t.split("[", 1)[0].strip() if "[" in t[:20] else ""
+    if head and 1 < len(head) <= 12:
+        return head
+    # 대괄호가 없으면 앞머리가 그대로 반복된다 — 반복 구간이 브랜드다
+    for n in range(12, 1, -1):
+        if len(t) > n * 2 and t[:n] == t[n:n * 2]:
+            return t[:n].strip()
+    return ""
 
 
 def _is_ours(goods_name: str, flag) -> bool:
@@ -139,6 +162,7 @@ def _ensure_table(session) -> None:
             delta INTEGER,
             goods_no VARCHAR(40),
             goods_name VARCHAR(300),
+            brand_name VARCHAR(120),
             brand VARCHAR(100),
             is_monitored BOOLEAN DEFAULT FALSE,
             is_ours BOOLEAN DEFAULT FALSE,
@@ -147,6 +171,9 @@ def _ensure_table(session) -> None:
             UNIQUE(category, goods_no, capture_date)
         )
     """))
+    session.execute(text(
+        f"ALTER TABLE {DB_SCHEMA}.oliveyoung_rankings "
+        f"ADD COLUMN IF NOT EXISTS brand_name VARCHAR(120)"))
     session.execute(text(
         f"CREATE INDEX IF NOT EXISTS ix_oy_rank_date "
         f"ON {DB_SCHEMA}.oliveyoung_rankings (capture_date DESC, category)"))
@@ -197,7 +224,7 @@ def _save_review(session, r: dict, cap: date) -> dict:
         "week_start": r.get("week_start"), "category": r.get("category_name", ""),
         "goods_no": r.get("goods_no", ""), "goods_name": gname[:300],
         "brand_name": (r.get("brand_name") or "")[:120], "brand": brand,
-        "is_monitored": brand in _MONITORED, "is_ours": ours,
+        "is_monitored": canonical_brand(brand) is not None, "is_ours": ours,
         "rank_position": r.get("rank_position"), "review_count": r.get("review_count"),
         "avg_score": r.get("avg_score"),
         "positive_keywords": _kw_json(r.get("positive_keywords")),
@@ -231,18 +258,20 @@ def _save_ranking(session, category: str, e: dict, cap: date) -> dict:
         "category": category, "rank_position": e.get("rank_position"),
         "prev_rank": e.get("prev_rank"), "delta": e.get("delta"),
         "goods_no": e.get("goods_no", ""), "goods_name": gname[:300],
-        "brand": brand, "is_monitored": brand in _MONITORED,
+        "brand_name": _extract_brand_name(gname)[:120],
+        "brand": brand, "is_monitored": canonical_brand(brand) is not None,
         "is_ours": ours, "cap": cap,
     }
     session.execute(text(f"""
         INSERT INTO {DB_SCHEMA}.oliveyoung_rankings
             (category, rank_position, prev_rank, delta, goods_no, goods_name,
-             brand, is_monitored, is_ours, capture_date)
+             brand_name, brand, is_monitored, is_ours, capture_date)
         VALUES (:category, :rank_position, :prev_rank, :delta, :goods_no, :goods_name,
-                :brand, :is_monitored, :is_ours, :cap)
+                :brand_name, :brand, :is_monitored, :is_ours, :cap)
         ON CONFLICT (category, goods_no, capture_date) DO UPDATE SET
             rank_position = EXCLUDED.rank_position, prev_rank = EXCLUDED.prev_rank,
             delta = EXCLUDED.delta, goods_name = EXCLUDED.goods_name,
+            brand_name = EXCLUDED.brand_name,
             brand = EXCLUDED.brand, is_monitored = EXCLUDED.is_monitored,
             is_ours = EXCLUDED.is_ours, captured_at = NOW()
     """), row)
