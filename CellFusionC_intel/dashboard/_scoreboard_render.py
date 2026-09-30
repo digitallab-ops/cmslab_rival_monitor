@@ -29,6 +29,15 @@ _SB_STYLE = """<style>
 #sb .sb-note{color:#c6ccf2}
 #sb .sb-note.dim{color:#8490b0}
 #sb .sb-foot{font-size:12.5px;color:#6b769a;line-height:1.7;margin-top:12px}
+/* 곧 나올 것 — 짚은 것이 언제 판가름나는지. 적중표와 한 덩어리다. */
+#sb .up-strip{display:flex;flex-wrap:wrap;gap:0;margin:18px 0 0;border-top:1px solid #2f3a6b}
+#sb .up-i{flex:1 1 220px;padding:13px 18px 4px 0;border-right:1px solid rgba(47,58,107,.5)}
+#sb .up-i:last-child{border-right:none}
+#sb .up-d{font-size:11px;font-weight:700;letter-spacing:1px;color:#f0a256;
+  font-variant-numeric:tabular-nums}
+#sb .up-t{font-size:14px;font-weight:700;color:#e7eafc;margin:4px 0 3px}
+#sb .up-n{font-size:12px;color:#8490b0;line-height:1.5}
+@media (max-width:900px){#sb .up-i{border-right:none;border-bottom:1px solid rgba(47,58,107,.5)}}
 @media (max-width:900px){#sb .sb-row{grid-template-columns:1fr}}
 </style>"""
 
@@ -39,10 +48,11 @@ _STATUS = {
 }
 
 
-def render_scoreboard(sb: dict, esc) -> str:
-    """{rows, stat} → HTML. 데이터가 없으면 빈 문자열(섹션 자체를 안 그린다)."""
+def render_scoreboard(sb: dict, esc, upcoming: list = None) -> str:
+    """{rows, stat} + 곧 나올 것 → HTML. 다 비면 섹션 자체를 안 그린다."""
     rows = (sb or {}).get("rows") or []
-    if not rows:
+    up = upcoming or []
+    if not rows and not up:
         return ""
     st = (sb or {}).get("stat") or {}
     hit, miss = st.get("hit", 0), st.get("miss", 0)
@@ -80,13 +90,21 @@ def render_scoreboard(sb: dict, esc) -> str:
             f'<div class="sb-res">{tag}<div class="{note_cls}">{esc(note)}</div></div>'
             '</div>')
 
+    strip = ""
+    if up:
+        strip = ('<div class="up-strip">' + "".join(
+            f'<div class="up-i"><div class="up-d">D-{u.get("days", 0)} · {esc(u.get("when", ""))}</div>'
+            f'<div class="up-t">{esc(u.get("title", ""))}</div>'
+            f'<div class="up-n">{esc(u.get("note", ""))}</div></div>'
+            for u in up[:3]) + '</div>')
+
     return (_SB_STYLE + '''
     <div class="section" id="sb">
       <div class="section-title">지난 판단, 맞았나<span class="section-sub">
         브리핑이 "지켜볼 것"으로 짚은 항목에 그 뒤 실제 수치를 붙였습니다 ·
         기한 전에는 지금까지의 경과를 매일 갱신합니다</span>
         <button class="collapse-btn" data-sec="sb-body"
-                onclick="toggleSec('sb-body', this)">▼ 펼치기</button></div>
+                onclick="toggleSec('sb-body', this)">▲ 접기</button></div>
       <div id="sb-body">
       <div class="sb-head">''' + head + '''</div>
       <div class="sb-list">''' + "".join(out) + '''</div>
@@ -97,5 +115,6 @@ def render_scoreboard(sb: dict, esc) -> str:
         두 달가량 늦어 그만큼 결과가 늦게 나옵니다.<br>
         확인 방법을 적지 않은 옛 항목(23건)은 채점할 수 없어 적중률 계산에서 뺐습니다.
       </p>
+      {UPSTRIP}
       </div>
-    </div>''')
+    </div>''').replace("{UPSTRIP}", strip)

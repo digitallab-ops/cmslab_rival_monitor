@@ -4862,7 +4862,6 @@ def _build_full_html(
     all_companies: dict = None,
     quarterly_series: dict = None,
     scoreboard: dict = None,
-    daily_changes: dict = None,
     upcoming: list = None,
     dart_yoy: dict = None,
 ) -> str:
@@ -4906,9 +4905,7 @@ def _build_full_html(
     all_companies_html = _render_all_companies(all_companies or {}, dart_yoy or {},
                                                qseries=quarterly_series or {})
     from dashboard._scoreboard_render import render_scoreboard
-    scoreboard_html = render_scoreboard(scoreboard or {}, _esc)
-    from dashboard._changes_render import render_changes
-    changes_html = render_changes(daily_changes or {}, _esc, upcoming or [])
+    scoreboard_html = render_scoreboard(scoreboard or {}, _esc, upcoming or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
     self_position_html = _render_self_position(self_position or {})
@@ -5073,10 +5070,8 @@ def _build_full_html(
     <!-- 1) 오늘 핵심 지표 — 짧고 익숙한 것으로 먼저 방향을 잡는다 -->
     {metric_rail_html}
 
-    <!-- 2) 오늘 달라진 것 — KPI 다음. 맨 위에 두니 처음부터 무거웠다. -->
-    {changes_html}
-
-    <!-- 3) 지난 판단, 맞았나 — 기본은 접어 둔다(회고라 매번 볼 것은 아니다) -->
+    <!-- 2) 지난 판단, 맞았나 — 짚은 것이 어떻게 되고 있는지. 아래 띠가 '언제
+         판가름나는지'를 같이 보여준다. 순위 변동 피드는 걷어냈다(0799494 참고) -->
     {scoreboard_html}
 
     <!-- (이동) 우리 위치 → 경쟁사 탭으로 이동 -->
@@ -5911,10 +5906,8 @@ function applyFilter() {{
   }});
 }}
 document.addEventListener('DOMContentLoaded', function() {{
-  // 새 섹션 접힘 상태 — 오늘 달라진 것은 펼치고, 적중표는 접어 둔다.
-  // 둘 다 펼쳐 두면 첫 화면이 갑자기 무거워진다.
-  initSec('chg-body', true);
-  initSec('sb-body', false);
+  // 적중표 접힘 상태(브라우저에 기억된다)
+  initSec('sb-body', true);
   // 첫 화면 탭의 목차도 만들어 둔다(탭을 눌러야 생기면 처음엔 안 보인다)
   try {{
     var _active = document.querySelector('.tab-btn.active');
@@ -6112,15 +6105,6 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception as _e:
             logger.warning("전체 기업 재무 조회 실패: %s", _e)
             all_companies, dart_yoy = {"years": [], "rows": []}, {}
-        # 오늘 달라진 것 — 어제 대비 변화. 실패해도 나머지는 그대로.
-        try:
-            from analytics.daily_changes import get_daily_changes
-            # 2일 — 주말·수집 공백에 빈 화면이 되지 않게 하루치보다 넉넉히 본다
-            daily_changes = get_daily_changes(session, days=2, limit=9)
-        except Exception as _e:
-            logger.warning("오늘 달라진 것 조회 실패: %s", _e)
-            daily_changes = {}
-
         # 곧 나올 것 — 기다릴 거리. 근거 있는 날짜만 나온다.
         try:
             from analytics.upcoming import get_upcoming
@@ -6475,7 +6459,6 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         all_companies=all_companies,
         quarterly_series=quarterly_series,
         scoreboard=scoreboard,
-        daily_changes=daily_changes,
         upcoming=upcoming,
         dart_yoy=dart_yoy,
         stories=stories,
