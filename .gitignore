@@ -23,6 +23,8 @@ env/
 
 # 생성된 보고서 (소스가 아닌 산출물)
 CellFusionC_intel/rival_report*.html
+# 대시보드 생성물·목업 — 소스가 아니라 산출물이다(3.7MB짜리가 커밋된 적 있음)
+CellFusionC_intel/dashboard/output/
 
 # 업무 문서 / 개인 메모
 *.docx
