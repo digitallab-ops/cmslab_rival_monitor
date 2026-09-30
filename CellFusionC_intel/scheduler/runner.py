@@ -315,6 +315,28 @@ def job_dart_financials() -> None:
         logger.warning("NICE 매칭 재계산 스킵: %s", e)
 
 
+def job_watch_scoreboard() -> None:
+    """적중표 — 브리핑이 짚은 것을 추출하고, 기한이 된 것을 채점한다.
+
+    브리핑 직후에 돌려야 그날 짚은 항목이 바로 표에 들어간다. 기한 전 항목은
+    '지금까지 이렇다'를 매일 새로 계산하므로 매일 돌려야 한다.
+    """
+    logger.info("=== [일간] 적중표 추출·채점 시작 ===")
+    try:
+        from analytics.watch_scoreboard import extract, score
+        from storage.models import get_session
+        se = get_session()
+        try:
+            ex = extract(se)
+            sc = score(se)
+        finally:
+            se.close()
+        logger.info("적중표 완료: 신규 %d건 · 맞음 %d · 빗나감 %d · 잠정 %d",
+                    ex["saved"], sc["hit"], sc["miss"], sc["progress"])
+    except Exception as e:
+        logger.warning("적중표 스킵: %s", e)
+
+
 def job_naver_consensus() -> None:
     """상장 경쟁사 확정·추정 실적(네이버 증권). 주1회 — 컨센서스는 자주 안 바뀐다.
 
@@ -715,6 +737,16 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day=3, hour=6, minute=30),
         id="export_stats",
         name="[월간] 관세청 화장품 수출통계 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매일 08:30 KST — 적중표. 아침 브리핑(08:00) 직후라 그날 짚은 항목이 바로 들어간다.
+    scheduler.add_job(
+        job_watch_scoreboard,
+        trigger=CronTrigger(hour=8, minute=30),
+        id="watch_scoreboard",
+        name="[일간] 적중표 추출·채점",
         max_instances=1,
         coalesce=True,
     )

@@ -354,12 +354,28 @@ def score(session) -> dict:
 def get_scoreboard(session, limit: int = 12) -> dict:
     """화면용 — {rows:[...], stat:{hit,miss,unknown,pending,rate}}."""
     try:
+        # 브리핑이 하루에 여러 번 돌면 같은 사건이 조금씩 다른 문장으로 쌓인다
+        # ('리쥬란 중국 CCM과 MOU' / '리쥬란 중국 CCM MOU 체결' / '파마리서치 중국 MOU').
+        # 문장 앞머리로 묶으려니 표현 차이를 못 넘어서, **브랜드 + 지표 + 주차**로 묶고
+        # 그 주에 가장 먼저 짚은 것만 남긴다. 같은 주에 같은 지표로 같은 브랜드를
+        # 두 번 짚으면 사실상 같은 사건이다.
         rows = session.execute(text(f"""
-            SELECT said_on, due_on, brand, claim, method, metric, status,
-                   result_note, progress_note
-            FROM {DB_SCHEMA}.watch_items
-            WHERE status <> 'unverifiable'
-            ORDER BY (status = 'pending') DESC, due_on DESC
+            WITH dedup AS (
+              SELECT DISTINCT ON (COALESCE(brand, claim), metric,
+                                  date_trunc('week', said_on))
+                     said_on, due_on, brand, claim, method, metric, status,
+                     result_note, progress_note
+              FROM {DB_SCHEMA}.watch_items
+              WHERE status <> 'unverifiable'
+              ORDER BY COALESCE(brand, claim), metric,
+                       date_trunc('week', said_on), said_on ASC
+            )
+            SELECT * FROM dedup
+            -- 결과가 난 것부터(최근 순), 그다음 결론이 임박한 것부터.
+            -- 기한이 먼 D-88을 위에 두면 제일 안 궁금한 게 먼저 보인다.
+            ORDER BY (status = 'pending') ASC,
+                     CASE WHEN status = 'pending' THEN due_on END ASC,
+                     said_on DESC
             LIMIT :n
         """), {"n": limit}).fetchall()
         st = dict(session.execute(text(

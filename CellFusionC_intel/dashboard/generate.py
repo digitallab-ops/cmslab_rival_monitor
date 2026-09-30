@@ -4861,6 +4861,7 @@ def _build_full_html(
     brief_feed_html: str = "",
     all_companies: dict = None,
     quarterly_series: dict = None,
+    scoreboard: dict = None,
     dart_yoy: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
@@ -4902,6 +4903,8 @@ def _build_full_html(
     export_growth_html = _render_export_growth(export_growth or [], export_period or {}, export_stacked or {})
     all_companies_html = _render_all_companies(all_companies or {}, dart_yoy or {},
                                                qseries=quarterly_series or {})
+    from dashboard._scoreboard_render import render_scoreboard
+    scoreboard_html = render_scoreboard(scoreboard or {}, _esc)
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
     self_position_html = _render_self_position(self_position or {})
@@ -5062,6 +5065,10 @@ def _build_full_html(
   <div class="tab-panel active" id="tab-overview">
     <!-- (제거) 이번 주 주목 관점 — 주간 총평이 대체. action_banner는 숨김 보존 -->
     <div style="display:none">{action_banner_html}</div>
+
+    <!-- 1) 지난 판단, 맞았나 — 누적 KPI보다 먼저. '저번에 짚은 건 어떻게 됐나'가
+         '수집 1,785건'보다 다시 볼 이유가 된다. -->
+    {scoreboard_html}
 
     <!-- 2) 오늘 핵심 지표 -->
     {metric_rail_html}
@@ -6074,6 +6081,14 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception as _e:
             logger.warning("전체 기업 재무 조회 실패: %s", _e)
             all_companies, dart_yoy = {"years": [], "rows": []}, {}
+        # 적중표 — 브리핑이 짚은 것과 그 뒤 실제 결과. 실패해도 나머지는 그대로.
+        try:
+            from analytics.watch_scoreboard import get_scoreboard
+            scoreboard = get_scoreboard(session, limit=12)
+        except Exception as _e:
+            logger.warning("적중표 조회 실패: %s", _e)
+            scoreboard = {}
+
         # 분기 시계열(과거 DART 확정 + 앞으로 증권사 추정). 실패해도 표는 그대로 뜬다.
         try:
             from analytics.queries import get_quarterly_series
@@ -6411,6 +6426,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         brief_feed_html=brief_feed_html,
         all_companies=all_companies,
         quarterly_series=quarterly_series,
+        scoreboard=scoreboard,
         dart_yoy=dart_yoy,
         stories=stories,
         category_battle=category_battle,
