@@ -4944,20 +4944,23 @@ def _build_full_html(
     worldmap_section = _render_worldmap_section(high_articles)
     worldmap_script  = _build_worldmap_script(country_stats or {})
 
-    # Pre-compute JSON outside f-string to avoid {{...}} dict-in-set TypeError
-    high_data_json = json.dumps(
-        [_fmt_art_for_js(a) for a in high_articles], ensure_ascii=False
-    )
+    # HIGH_DATA는 PERIOD_DATA[기본기간].articles와 **완전히 같은 배열**이었다
+    # (실측 833건 · 364KB). 두 번 싣느라 페이지가 그만큼 무거웠다. 이제 JS에서
+    # 기본 기간 것을 가리키게 하고 여기서는 만들지 않는다.
 
     # Period data for client-side switching (30/60/90일 presets)
     def _esc_s(s: str) -> str:
         return html_lib.escape(str(s or ""), quote=True)
 
     _pd = period_data or {}
-    period_data_for_js = {
-        str(p): _period_entry(v, _esc_s, growth_story, composite)
-        for p, v in _pd.items()
-    }
+    # 기본 기간만 기사를 싣는다. 30·60·90을 다 박으면 1.8MB인데 95%가 이 배열이고,
+    # 대부분의 사람은 기간을 바꾸지 않는다. 나머지는 /api/articles로 받는다.
+    period_data_for_js = {}
+    for p, v in _pd.items():
+        entry = _period_entry(v, _esc_s, growth_story, composite)
+        if str(p) != str(days):
+            entry["articles"] = None      # null = 아직 안 받음(빈 배열과 구분)
+        period_data_for_js[str(p)] = entry
     period_data_json = json.dumps(period_data_for_js, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
@@ -5343,8 +5346,9 @@ def _build_full_html(
 var PERIOD_DATA = {period_data_json};
 var _currentPeriod = {days};
 
-// HIGH articles for current period (drilldown)
-var HIGH_DATA = {high_data_json};
+// HIGH articles for current period (drilldown) — 기본 기간 배열을 가리킨다.
+// 따로 싣던 시절엔 같은 833건이 두 번 들어가 364KB를 더 먹었다.
+var HIGH_DATA = (PERIOD_DATA[String(_currentPeriod)] || {{}}).articles || [];
 
 function escH(s) {{
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -5421,10 +5425,35 @@ function _sparkSvg(series) {{
          '<path class="fill" d="' + area + '"/><path d="' + line + '"/>' +
          '<circle class="end" cx="' + last[0] + '" cy="' + last[1] + '" r="1.7"/></svg>';
 }}
+// 기사 배열은 기본 기간만 실려 있다(페이지 3.8MB의 95%였다). 다른 기간을 처음
+// 누르면 여기서 받아온 뒤 캐시한다.
+function _ensureArticles(days, done) {{
+  var key = String(days), d = PERIOD_DATA[key];
+  if (!d) {{ done(false); return; }}
+  if (d.articles) {{ done(true); return; }}          // null이면 아직 안 받음
+  var msgEl = document.getElementById('period-msg');
+  if (msgEl) {{ msgEl.style.display=''; msgEl.textContent = days + '일 기사를 불러오는 중…'; }}
+  fetch('/api/articles?days=' + encodeURIComponent(days))
+    .then(function(r) {{ return r.json(); }})
+    .then(function(j) {{
+      if (j && j.articles) {{ d.articles = j.articles; done(true); }}
+      else {{ done(false); }}
+    }})
+    .catch(function() {{ done(false); }});
+}}
+
 function setPeriod(days) {{
   var key = String(days);
   var d = PERIOD_DATA[key];
   var msgEl = document.getElementById('period-msg');
+  if (d && !d.articles) {{                  // 기사만 아직 없는 경우 — 받아서 다시 부른다
+    _ensureArticles(days, function(ok) {{
+      if (ok) setPeriod(days);
+      else if (msgEl) {{ msgEl.style.display='';
+        msgEl.textContent = days + '일 기사를 불러오지 못했습니다. 잠시 후 다시 시도하세요.'; }}
+    }});
+    return;
+  }}
   if (!d) {{
     if (msgEl) {{
       msgEl.style.display = '';
@@ -5497,7 +5526,19 @@ function _initDatePicker(days) {{
   if (fEl) fEl.value = _isoDate(from);
   if (tEl) tEl.value = _isoDate(today);
 }}
+// 검색 탭은 90일 전체를 기준으로 쓴다. 이제 90일 기사는 기본으로 안 실리므로
+// 없으면 현재 기간 것으로 시작하고, 검색 탭을 처음 열 때 90일을 받아 교체한다.
 var BASE_ARTICLES = (PERIOD_DATA['90'] && PERIOD_DATA['90'].articles) ? PERIOD_DATA['90'].articles : HIGH_DATA;
+var _BASE_FULL = !!(PERIOD_DATA['90'] && PERIOD_DATA['90'].articles);
+window.ensureSearchBase = ensureSearchBase;
+function ensureSearchBase(cb) {{
+  if (_BASE_FULL) {{ if (cb) cb(); return; }}
+  _ensureArticles(90, function(ok) {{
+    if (ok) {{ BASE_ARTICLES = PERIOD_DATA['90'].articles; _BASE_FULL = true; }}
+    var m = document.getElementById('period-msg'); if (m) m.style.display = 'none';
+    if (cb) cb();
+  }});
+}}
 
 function applyDateRange() {{
   var fEl   = document.getElementById('from-date');
@@ -5580,6 +5621,8 @@ function switchTab(name) {{
   if (name === 'brands' && window._drawStacked) {{ window._drawStacked(); }}
   // 데이터 탐색은 첫 진입 때 적재 현황을 불러온다(첫 로딩 부담을 피하려고 지연 초기화)
   if (name === 'data' && window.dxInit) {{ window.dxInit(); }}
+  // 검색은 90일 전체를 훑는다 — 기사 배열이 기본으로 안 실리므로 첫 진입 때 받는다
+  if (name === 'search' && window.ensureSearchBase) {{ window.ensureSearchBase(); }}
   try {{ window.dispatchEvent(new Event('resize')); }} catch (e) {{}}
   window.scrollTo({{ top: 0, behavior: 'smooth' }});
 }}
@@ -5798,6 +5841,22 @@ document.addEventListener('DOMContentLoaded', function() {{
 # ---------------------------------------------------------------------------
 # 공개 API
 # ---------------------------------------------------------------------------
+
+def build_period_articles(days: int) -> list:
+    """기간별 기사 목록만 — /api/articles용.
+
+    30·60·90일 기사를 전부 HTML에 박아두니 페이지가 3.8MB였고, 그중 95%가
+    이 배열이었다. 기본 기간만 싣고 나머지는 눌렀을 때 여기서 받는다.
+    """
+    from analytics.queries import get_high_articles
+    from storage.models import get_session
+    session = get_session()
+    try:
+        arts = get_high_articles(session, days=int(days))
+    finally:
+        session.close()
+    return [_fmt_art_for_js(a) for a in arts]
+
 
 def build_period_payload(from_date: str, to_date: str) -> dict:
     """임의 구간(from~to, 과거 포함) 브리핑 데이터 서버 조회 — /api/period용.

@@ -319,6 +319,24 @@ async def api_period(from_date: str = Query(..., alias="from"),
         return JSONResponse({"error": "구간 조회 중 오류가 발생했습니다."}, status_code=500)
 
 
+@app.get("/api/articles")
+async def api_articles(days: int = Query(30)):
+    """기간별 기사 목록 — 대시보드가 기간을 바꿀 때 받아간다.
+
+    30·60·90일 기사를 전부 HTML에 박아두니 3.8MB였고 95%가 이 배열이었다.
+    기본 기간만 싣고 나머지는 여기서 준다.
+    """
+    if days not in (30, 60, 90):
+        return JSONResponse({"error": "지원하지 않는 기간"}, status_code=400)
+    try:
+        from dashboard.generate import build_period_articles
+        arts = await asyncio.to_thread(build_period_articles, days)
+        return JSONResponse({"days": days, "articles": arts})
+    except Exception as e:
+        logger.warning("기간 기사 조회 실패(%s일): %s", days, e)
+        return JSONResponse({"error": "기사를 불러오지 못했습니다."}, status_code=500)
+
+
 @app.get("/api/insights")
 async def api_insights(
     from_date: str = Query(..., description="시작일 YYYY-MM-DD"),
