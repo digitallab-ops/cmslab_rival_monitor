@@ -1423,6 +1423,17 @@ _NE_LAND_POLYS = [
 ]
 
 _DASHBOARD_CSS = """
+/* 탭 안 목차 — 본문 오른쪽 여백에 고정. 화면이 좁으면 숨긴다(본문을 가리느니 없는 게 낫다). */
+.toc{position:fixed;right:24px;top:50%;transform:translateY(-50%);z-index:40;
+  width:172px;max-height:70vh;overflow-y:auto;display:none;
+  background:rgba(15,23,38,.92);border:1px solid #26314e;border-radius:10px;padding:12px 6px 12px 0}
+.toc.on{display:block}
+.toc-h{font-size:11px;color:#6b769a;font-weight:700;letter-spacing:.3px;padding:0 12px 8px 14px}
+.toc-i{display:block;font-size:12.5px;color:#93a0bd;text-decoration:none;line-height:1.35;
+  padding:6px 10px 6px 14px;border-left:2px solid transparent;transition:color .12s,border-color .12s}
+.toc-i:hover{color:#cfe0ff}
+.toc-i.on{color:#8fb4ff;border-left-color:#4a8fd4;background:rgba(74,143,212,.09)}
+@media (max-width:1700px){.toc{display:none !important}}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   /* ── 목업 v2: 딥네이비/코발트 테마 ── 변수명 유지 → 전 렌더러 자동 리테마 */
@@ -5038,6 +5049,9 @@ def _build_full_html(
 
 <div class="page-body">
 
+  <!-- 탭 안 목차(섹션 3개 이상인 탭에만 뜬다). 내용 폭을 뺏지 않게 화면 밖 여백에 띄운다. -->
+  <nav class="toc" id="toc" aria-label="이 탭의 섹션"></nav>
+
   <!-- ===== 탭: 브리핑 (심플 종합 — 지금 대응→오늘→이번주→스토리) ===== -->
   <div class="tab-panel active" id="tab-overview">
     <!-- (제거) 이번 주 주목 관점 — 주간 총평이 대체. action_banner는 숨김 보존 -->
@@ -5625,6 +5639,54 @@ function switchTab(name) {{
   if (name === 'search' && window.ensureSearchBase) {{ window.ensureSearchBase(); }}
   try {{ window.dispatchEvent(new Event('resize')); }} catch (e) {{}}
   window.scrollTo({{ top: 0, behavior: 'smooth' }});
+  buildToc(name);
+}}
+
+// ── 탭 안 목차 ────────────────────────────────────────────────────────────
+// 경쟁사 탭은 섹션이 8개인데 한 줄로 쌓여 있어 한참 스크롤해야 하고 지금 어디쯤인지
+// 알 수가 없었다. 섹션이 3개 이상인 탭에만 목차를 띄우고 현재 섹션을 표시한다.
+var _tocObs = null;
+function buildToc(tab) {{
+  var box = document.getElementById('toc');
+  if (!box) return;
+  if (_tocObs) {{ _tocObs.disconnect(); _tocObs = null; }}
+  var panel = document.getElementById('tab-' + tab);
+  var secs = panel ? panel.querySelectorAll(':scope > .section') : [];
+  if (!secs || secs.length < 3) {{ box.classList.remove('on'); box.innerHTML = ''; return; }}
+  var items = [];
+  Array.prototype.forEach.call(secs, function(sec, i) {{
+    var t = sec.querySelector('.section-title');
+    if (!t) return;
+    if (!sec.id) sec.id = 'sec-' + tab + '-' + i;       // 대부분 id가 없어 여기서 붙인다
+    // 제목에서 이모지·부제를 떼어 목차는 짧게
+    var label = (t.childNodes[0] && t.childNodes[0].nodeValue || t.textContent || '').trim();
+    label = label.replace(/^[^가-힣A-Za-z0-9]+/, '').trim();
+    items.push({{ id: sec.id, label: label || ('섹션 ' + (i + 1)), el: sec }});
+  }});
+  if (items.length < 3) {{ box.classList.remove('on'); box.innerHTML = ''; return; }}
+  box.innerHTML = '<div class="toc-h">이 탭의 내용</div>' + items.map(function(it) {{
+    return '<a class="toc-i" href="#' + it.id + '" data-id="' + it.id + '">'
+         + escH(it.label) + '</a>';
+  }}).join('');
+  box.classList.add('on');
+  box.querySelectorAll('.toc-i').forEach(function(a2) {{
+    a2.addEventListener('click', function(e) {{
+      e.preventDefault();
+      var el = document.getElementById(a2.dataset.id);
+      if (el) el.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+    }});
+  }});
+  // 화면에 보이는 섹션을 표시 — 스크롤 위치를 눈으로 알 수 있게
+  if (!('IntersectionObserver' in window)) return;
+  _tocObs = new IntersectionObserver(function(ents) {{
+    ents.forEach(function(en) {{
+      if (!en.isIntersecting) return;
+      box.querySelectorAll('.toc-i').forEach(function(a3) {{
+        a3.classList.toggle('on', a3.dataset.id === en.target.id);
+      }});
+    }});
+  }}, {{ rootMargin: '-80px 0px -70% 0px', threshold: 0 }});
+  items.forEach(function(it) {{ _tocObs.observe(it.el); }});
 }}
 
 function toggleRow(i) {{
@@ -5798,6 +5860,11 @@ function applyFilter() {{
   }});
 }}
 document.addEventListener('DOMContentLoaded', function() {{
+  // 첫 화면 탭의 목차도 만들어 둔다(탭을 눌러야 생기면 처음엔 안 보인다)
+  try {{
+    var _active = document.querySelector('.tab-btn.active');
+    buildToc(_active ? _active.dataset.tab : 'overview');
+  }} catch (e) {{}}
   // Init collapsed state
   _applyCollapseAndFilter();
   // Init date pickers
