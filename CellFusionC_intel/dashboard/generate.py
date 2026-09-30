@@ -1423,17 +1423,22 @@ _NE_LAND_POLYS = [
 ]
 
 _DASHBOARD_CSS = """
-/* 탭 안 목차 — 본문 오른쪽 여백에 고정. 화면이 좁으면 숨긴다(본문을 가리느니 없는 게 낫다). */
-.toc{position:fixed;right:24px;top:50%;transform:translateY(-50%);z-index:40;
-  width:172px;max-height:70vh;overflow-y:auto;display:none;
-  background:rgba(15,23,38,.92);border:1px solid #26314e;border-radius:10px;padding:12px 6px 12px 0}
-.toc.on{display:block}
-.toc-h{font-size:11px;color:#6b769a;font-weight:700;letter-spacing:.3px;padding:0 12px 8px 14px}
-.toc-i{display:block;font-size:12.5px;color:#93a0bd;text-decoration:none;line-height:1.35;
-  padding:6px 10px 6px 14px;border-left:2px solid transparent;transition:color .12s,border-color .12s}
-.toc-i:hover{color:#cfe0ff}
-.toc-i.on{color:#8fb4ff;border-left-color:#4a8fd4;background:rgba(74,143,212,.09)}
-@media (max-width:1700px){.toc{display:none !important}}
+/* 탭 안 목차 — 본문 맨 위 가로 띠. 스크롤해도 따라붙어 현재 섹션을 알려준다.
+   오른쪽 고정 패널로 만들었더니 본문이 넓어 1700px 미만에서 겹쳤고, 그래서 숨기다 보니
+   정작 대부분의 화면에서 안 보였다. 가로 띠는 폭을 전혀 안 뺏는다. */
+.toc{position:sticky;top:0;z-index:40;display:none;align-items:center;gap:6px;
+  flex-wrap:wrap;padding:9px 0 11px;margin:0 0 4px;
+  background:linear-gradient(180deg,var(--bg) 76%,transparent)}
+/* 목차를 눌러 점프했을 때 제목이 목차 띠 밑으로 숨지 않게 */
+.section{scroll-margin-top:62px}
+.toc.on{display:flex}
+.toc-h{font-size:11px;color:#6b769a;font-weight:700;letter-spacing:.3px;margin-right:4px;
+  white-space:nowrap}
+.toc-i{font-size:12.5px;color:#93a0bd;text-decoration:none;white-space:nowrap;
+  padding:5px 11px;border:1px solid #26314e;border-radius:999px;
+  transition:color .12s,border-color .12s,background .12s}
+.toc-i:hover{color:#cfe0ff;border-color:#3d5266}
+.toc-i.on{color:#8fb4ff;border-color:rgba(74,143,212,.6);background:rgba(74,143,212,.13)}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   /* ── 목업 v2: 딥네이비/코발트 테마 ── 변수명 유지 → 전 렌더러 자동 리테마 */
@@ -5049,7 +5054,8 @@ def _build_full_html(
 
 <div class="page-body">
 
-  <!-- 탭 안 목차(섹션 3개 이상인 탭에만 뜬다). 내용 폭을 뺏지 않게 화면 밖 여백에 띄운다. -->
+  <!-- 탭 안 목차(섹션 3개 이상인 탭에만 뜬다). 가로 띠라 본문 폭을 전혀 뺏지 않는다.
+       오른쪽 고정 패널로 뒀더니 1700px 미만에서 본문과 겹쳐 아예 숨겨야 했다. -->
   <nav class="toc" id="toc" aria-label="이 탭의 섹션"></nav>
 
   <!-- ===== 탭: 브리핑 (심플 종합 — 지금 대응→오늘→이번주→스토리) ===== -->
@@ -5664,7 +5670,7 @@ function buildToc(tab) {{
     items.push({{ id: sec.id, label: label || ('섹션 ' + (i + 1)), el: sec }});
   }});
   if (items.length < 3) {{ box.classList.remove('on'); box.innerHTML = ''; return; }}
-  box.innerHTML = '<div class="toc-h">이 탭의 내용</div>' + items.map(function(it) {{
+  box.innerHTML = '<span class="toc-h">바로가기</span>' + items.map(function(it) {{
     return '<a class="toc-i" href="#' + it.id + '" data-id="' + it.id + '">'
          + escH(it.label) + '</a>';
   }}).join('');
@@ -5685,7 +5691,7 @@ function buildToc(tab) {{
         a3.classList.toggle('on', a3.dataset.id === en.target.id);
       }});
     }});
-  }}, {{ rootMargin: '-80px 0px -70% 0px', threshold: 0 }});
+  }}, {{ rootMargin: '-96px 0px -68% 0px', threshold: 0 }});
   items.forEach(function(it) {{ _tocObs.observe(it.el); }});
 }}
 
