@@ -5657,7 +5657,18 @@ function buildToc(tab) {{
   if (!box) return;
   if (_tocObs) {{ _tocObs.disconnect(); _tocObs = null; }}
   var panel = document.getElementById('tab-' + tab);
-  var secs = panel ? panel.querySelectorAll(':scope > .section') : [];
+  // 깊이를 가리지 않고 찾는다. ':scope > .section'으로 두면 한 단계 안쪽에 있는
+  // 섹션을 놓친다 — 경쟁사 탭은 8개 중 6개가 그래서 2개만 잡혔고, 문턱(3개)에
+  // 못 미쳐 목차가 통째로 안 떴다. 섹션 안의 섹션은 중복되니 제외한다.
+  var all = panel ? panel.querySelectorAll('.section') : [];
+  var secs = Array.prototype.filter.call(all, function(el) {{
+    var pa = el.parentElement;
+    while (pa && pa !== panel) {{
+      if (pa.classList && pa.classList.contains('section')) return false;
+      pa = pa.parentElement;
+    }}
+    return true;
+  }});
   if (!secs || secs.length < 3) {{ box.classList.remove('on'); box.innerHTML = ''; return; }}
   var items = [];
   Array.prototype.forEach.call(secs, function(sec, i) {{
