@@ -4862,6 +4862,7 @@ def _build_full_html(
     all_companies: dict = None,
     quarterly_series: dict = None,
     scoreboard: dict = None,
+    daily_changes: dict = None,
     dart_yoy: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
@@ -4905,6 +4906,8 @@ def _build_full_html(
                                                qseries=quarterly_series or {})
     from dashboard._scoreboard_render import render_scoreboard
     scoreboard_html = render_scoreboard(scoreboard or {}, _esc)
+    from dashboard._changes_render import render_changes
+    changes_html = render_changes(daily_changes or {}, _esc)
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
     self_position_html = _render_self_position(self_position or {})
@@ -5066,8 +5069,12 @@ def _build_full_html(
     <!-- (제거) 이번 주 주목 관점 — 주간 총평이 대체. action_banner는 숨김 보존 -->
     <div style="display:none">{action_banner_html}</div>
 
-    <!-- 1) 지난 판단, 맞았나 — 누적 KPI보다 먼저. '저번에 짚은 건 어떻게 됐나'가
-         '수집 1,785건'보다 다시 볼 이유가 된다. -->
+    <!-- 1) 오늘 달라진 것 — 맨 처음. 누적 합계는 어제와 거의 같아 다시 볼 이유가
+         못 된다. 변화가 먼저 와야 매일 열어볼 거리가 생긴다. -->
+    {changes_html}
+
+    <!-- 2) 지난 판단, 맞았나 — '저번에 짚은 건 어떻게 됐나'가 '수집 1,785건'보다
+         다시 볼 이유가 된다. -->
     {scoreboard_html}
 
     <!-- 2) 오늘 핵심 지표 -->
@@ -6081,6 +6088,15 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         except Exception as _e:
             logger.warning("전체 기업 재무 조회 실패: %s", _e)
             all_companies, dart_yoy = {"years": [], "rows": []}, {}
+        # 오늘 달라진 것 — 어제 대비 변화. 실패해도 나머지는 그대로.
+        try:
+            from analytics.daily_changes import get_daily_changes
+            # 2일 — 주말·수집 공백에 빈 화면이 되지 않게 하루치보다 넉넉히 본다
+            daily_changes = get_daily_changes(session, days=2, limit=9)
+        except Exception as _e:
+            logger.warning("오늘 달라진 것 조회 실패: %s", _e)
+            daily_changes = {}
+
         # 적중표 — 브리핑이 짚은 것과 그 뒤 실제 결과. 실패해도 나머지는 그대로.
         try:
             from analytics.watch_scoreboard import get_scoreboard
@@ -6427,6 +6443,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         all_companies=all_companies,
         quarterly_series=quarterly_series,
         scoreboard=scoreboard,
+        daily_changes=daily_changes,
         dart_yoy=dart_yoy,
         stories=stories,
         category_battle=category_battle,
