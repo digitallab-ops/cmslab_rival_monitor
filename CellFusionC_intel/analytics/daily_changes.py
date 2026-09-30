@@ -24,6 +24,46 @@ _OUR_CATS = ("선케어", "더모", "스킨케어", "클렌징", "마스크팩")
 _MIN_JUMP = 5          # 몇 계단부터 '달라졌다'고 볼 것인가
 
 
+def _clean_product(name: str, brand: str = "") -> str:
+    """상품명에서 앞머리 브랜드·행사 대괄호를 뗀다.
+
+    올리브영 상품명은 '센텔리안24[진정흔적] 센텔리안24 마데카 크림…'처럼 브랜드를
+    두 번 적고 대괄호로 행사 문구를 끼운다. 띄어쓰기 없이 붙는 경우도 있어
+    ('에스트라에스트라 아토베리어365') 반복 구간을 따로 잡아야 한다.
+    """
+    import re as _re
+
+    t = _re.sub(r"\[[^\]]*\]", " ", name or "")
+    t = _re.sub(r"\s{2,}", " ", t).strip()
+
+    # 등록 한글명까지 후보에 넣는다 — 상품명은 한글, brand는 영문일 때가 많다
+    cands = [brand] if brand else []
+    try:
+        from config.brands import BRAND_KO_NAMES
+        cands += list(BRAND_KO_NAMES.get(brand) or [])
+    except Exception:
+        pass
+
+    for _ in range(2):
+        for pre in cands:
+            if pre and t.lower().startswith(pre.lower()):
+                t = t[len(pre):].strip(" -·,")
+        # 띄어쓰기 없이 곧바로 반복되는 앞머리('에스트라에스트라')
+        for n in range(12, 1, -1):
+            if len(t) > n * 2 and t[:n] == t[n:n * 2]:
+                t = t[n:]
+                break
+        # 공백을 사이에 두고 반복되는 앞머리('센텔리안24 센텔리안24 마데카')
+        m = _re.match(r"^([가-힣A-Za-z0-9.&]{2,12})\s+(.*)$", t)
+        if m and m.group(2).startswith(m.group(1)):
+            t = m.group(2)
+
+    t = t.strip(" -·,|")
+    if len(t) > 52:
+        t = t[:52].rstrip(" -·,|") + "…"
+    return t
+
+
 def _is_ours(cat: str) -> bool:
     return any(k in (cat or "") for k in _OUR_CATS)
 
@@ -32,7 +72,8 @@ def _oliveyoung(session, days: int) -> list:
     """올영 순위 급변. prev_rank·delta가 이미 저장돼 있어 그대로 쓴다."""
     try:
         rows = session.execute(text(f"""
-            SELECT capture_date, brand, category, rank_position, prev_rank, delta
+            SELECT capture_date, brand, category, rank_position, prev_rank, delta,
+                   goods_name
             FROM {DB_SCHEMA}.oliveyoung_rankings
             WHERE is_monitored AND is_ours IS NOT TRUE
               AND delta IS NOT NULL AND abs(delta) >= :j
@@ -45,11 +86,12 @@ def _oliveyoung(session, days: int) -> list:
         logger.warning("올영 변동 조회 실패: %s", e)
         return []
     out = []
-    for d, brand, cat, now, prev, delta in rows:
+    for d, brand, cat, now, prev, delta, goods in rows:
         up = delta > 0
         out.append({
-            "when": str(d), "brand": brand, "where": f"올리브영 {cat}",
+            "when": str(d), "brand": brand, "where": f"올리브영 {cat} 20위권",
             "cat": cat, "ours": _is_ours(cat), "up": up, "size": abs(delta),
+            "product": _clean_product(goods, brand),
             "text": f"{prev}위 → {now}위",
             "why": f"{abs(delta)}계단 {'올라섰다' if up else '내려갔다'}",
         })
@@ -61,20 +103,21 @@ def _retail(session, days: int) -> list:
     try:
         rows = session.execute(text(f"""
             WITH snap AS (
-              SELECT capture_date, retailer, country, category, brand,
-                     min(rank) AS rk
+              SELECT DISTINCT ON (capture_date, retailer, country, category, brand)
+                     capture_date, retailer, country, category, brand,
+                     rank AS rk, product_name
               FROM {DB_SCHEMA}.retail_rankings
               WHERE is_monitored AND rank IS NOT NULL
                 AND capture_date >= (SELECT max(capture_date)
                                      FROM {DB_SCHEMA}.retail_rankings) - :d - 3
-              GROUP BY 1,2,3,4,5
+              ORDER BY capture_date, retailer, country, category, brand, rank
             ), paired AS (
               SELECT s.*, lag(rk) OVER (
                        PARTITION BY retailer, country, category, brand
                        ORDER BY capture_date) AS prev
               FROM snap s
             )
-            SELECT capture_date, brand, country, category, rk, prev
+            SELECT capture_date, brand, country, category, rk, prev, product_name
             FROM paired
             WHERE prev IS NOT NULL AND abs(prev - rk) >= :j
               AND capture_date >= (SELECT max(capture_date)
@@ -86,12 +129,13 @@ def _retail(session, days: int) -> list:
         logger.warning("해외 순위 변동 조회 실패: %s", e)
         return []
     out = []
-    for d, brand, cc, cat, now, prev in rows:
+    for d, brand, cc, cat, now, prev, pname in rows:
         delta = prev - now                     # 순위는 작을수록 좋다
         up = delta > 0
         out.append({
             "when": str(d), "brand": brand, "where": f"{cc} 아마존 {cat}",
             "cat": cat, "ours": _is_ours(cat), "up": up, "size": abs(delta),
+            "product": _clean_product(pname, brand),
             "text": f"{prev}위 → {now}위",
             "why": f"{abs(delta)}계단 {'올라섰다' if up else '내려갔다'}",
         })
@@ -110,15 +154,17 @@ def _entries(session, days: int) -> list:
               SELECT category, min(capture_date) AS c0
               FROM {DB_SCHEMA}.oliveyoung_rankings GROUP BY category
             ), first_seen AS (
-              SELECT brand, category, min(capture_date) AS d, min(rank_position) AS rk
+              SELECT DISTINCT ON (brand, category)
+                     brand, category, capture_date AS d, rank_position AS rk,
+                     goods_name
               FROM {DB_SCHEMA}.oliveyoung_rankings
               WHERE is_monitored AND is_ours IS NOT TRUE
-              GROUP BY brand, category
+              ORDER BY brand, category, capture_date, rank_position
             ), brand_start AS (
               SELECT brand, min(capture_date) AS b0
               FROM {DB_SCHEMA}.oliveyoung_rankings GROUP BY brand
             )
-            SELECT f.d, f.brand, f.category, f.rk
+            SELECT f.d, f.brand, f.category, f.rk, f.goods_name
             FROM first_seen f
             JOIN cat_start c ON c.category = f.category
             JOIN brand_start b ON b.brand = f.brand
@@ -133,10 +179,11 @@ def _entries(session, days: int) -> list:
         logger.warning("신규 진입 조회 실패: %s", e)
         return []
     return [{
-        "when": str(d), "brand": brand, "where": f"올리브영 {cat}",
+        "when": str(d), "brand": brand, "where": f"올리브영 {cat} 20위권",
         "cat": cat, "ours": _is_ours(cat), "up": True, "size": 99,
+        "product": _clean_product(goods, brand),
         "text": f"{rk}위로 진입", "why": "수집 이후 이 판에서 처음 잡혔다",
-    } for d, brand, cat, rk in rows]
+    } for d, brand, cat, rk, goods in rows]
 
 
 def _news(session, days: int, limit: int) -> list:

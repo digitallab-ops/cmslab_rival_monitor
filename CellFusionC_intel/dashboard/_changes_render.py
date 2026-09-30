@@ -7,9 +7,10 @@ _CH_STYLE = """<style>
 #chg .ch-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:30px}
 #chg .ch-col h4{margin:0 0 10px;font-size:12px;font-weight:700;letter-spacing:1.4px;
   color:#8189cc;padding-bottom:8px;border-bottom:1px solid #2f3a6b}
-#chg .ch-row{display:flex;align-items:baseline;gap:11px;padding:10px 2px;
-  border-bottom:1px solid rgba(47,58,107,.45)}
-#chg .ch-row:last-child{border-bottom:none}
+#chg .ch-row2{padding:10px 2px;border-bottom:1px solid rgba(47,58,107,.45)}
+#chg .ch-row2:last-child{border-bottom:none}
+#chg .ch-top{display:flex;align-items:baseline;gap:11px}
+#chg .ch-p{font-size:12.5px;color:#8490b0;margin:3px 0 0 14px;line-height:1.45}
 #chg .ch-b{font-size:14px;font-weight:700;color:#e7eafc;white-space:nowrap}
 #chg .ch-w{font-size:12px;color:#6b769a;white-space:nowrap}
 #chg .ch-m{font-size:13.5px;font-variant-numeric:tabular-nums;white-space:nowrap;
@@ -54,12 +55,18 @@ def render_changes(data: dict, esc, upcoming: list = None) -> str:
         else:
             cls, mark = ("up", "▲") if m.get("up") else ("dn", "▼")
         star = '<span class="ch-star">★</span>' if m.get("ours") else ""
-        return ('<div class="ch-row">'
+        # 순위가 붙는 대상은 브랜드가 아니라 **제품**이다. 제품명을 빼면
+        # '센텔리안24라는 브랜드가 3위'로 읽힌다.
+        prod = m.get("product") or ""
+        return ('<div class="ch-row2">'
+                '<div class="ch-top">'
                 f'{star}<span class="ch-b">{esc(m.get("brand") or "")}</span>'
                 f'<span class="ch-w">{esc(m.get("where") or "")}</span>'
                 f'<span class="ch-why">{esc(m.get("why") or "")}</span>'
                 f'<span class="ch-m {cls}">{mark} {esc(m.get("text") or "")}</span>'
-                '</div>')
+                '</div>'
+                + (f'<div class="ch-p">{esc(prod)}</div>' if prod else "")
+                + '</div>')
 
     def _news(n):
         url = n.get("url") or ""
@@ -91,14 +98,17 @@ def render_changes(data: dict, esc, upcoming: list = None) -> str:
                 onclick="toggleSec('chg-body', this)">▲ 접기</button></div>
       <div id="chg-body">
       <div class="ch-grid">
-        <div class="ch-col"><h4>순위가 움직였다</h4>''' + left + '''</div>
+        <div class="ch-col"><h4>판매 순위가 움직인 제품</h4>''' + left + '''</div>
         <div class="ch-col"><h4>새로 들어온 소식</h4>''' + right + '''</div>
       </div>
       {UPSTRIP}
       <p class="ch-foot">
-        순위는 <b>5계단 이상</b> 움직인 것만 올립니다. 올리브영은 저장된 전일 대비,
-        아마존은 직전 수집분과 비교합니다. 소식은 브랜드당 하루 한 건으로 —
-        같은 사건을 여러 매체가 쓰면 점수가 가장 높은 하나만 남깁니다.
+        여기 순위는 <b>브랜드 순위가 아니라 그 브랜드 제품의 판매 랭킹</b>입니다 —
+        올리브영은 카테고리별 <b>상위 20개</b>, 아마존은 카테고리별 베스트셀러 순위입니다.
+        <b>5계단 이상</b> 움직인 것만 올리고, 올리브영은 저장된 전일 대비,
+        아마존은 직전 수집분과 비교합니다.<br>
+        소식은 브랜드당 하루 한 건 — 같은 사건을 여러 매체가 쓰면 점수가 가장 높은
+        하나만 남깁니다.
       </p>
       </div>
     </div>''').replace("{UPSTRIP}", strip)
