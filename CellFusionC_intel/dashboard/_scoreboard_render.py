@@ -84,7 +84,10 @@ def render_scoreboard(sb: dict, esc) -> str:
     <div class="section" id="sb">
       <div class="section-title">지난 판단, 맞았나<span class="section-sub">
         브리핑이 "지켜볼 것"으로 짚은 항목에 그 뒤 실제 수치를 붙였습니다 ·
-        기한 전에는 지금까지의 경과를 매일 갱신합니다</span></div>
+        기한 전에는 지금까지의 경과를 매일 갱신합니다</span>
+        <button class="collapse-btn" data-sec="sb-body"
+                onclick="toggleSec('sb-body', this)">▼ 펼치기</button></div>
+      <div id="sb-body">
       <div class="sb-head">''' + head + '''</div>
       <div class="sb-list">''' + "".join(out) + '''</div>
       <p class="sb-foot">
@@ -94,4 +97,5 @@ def render_scoreboard(sb: dict, esc) -> str:
         두 달가량 늦어 그만큼 결과가 늦게 나옵니다.<br>
         확인 방법을 적지 않은 옛 항목(23건)은 채점할 수 없어 적중률 계산에서 뺐습니다.
       </p>
+      </div>
     </div>''')

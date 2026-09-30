@@ -5070,16 +5070,14 @@ def _build_full_html(
     <!-- (제거) 이번 주 주목 관점 — 주간 총평이 대체. action_banner는 숨김 보존 -->
     <div style="display:none">{action_banner_html}</div>
 
-    <!-- 1) 오늘 달라진 것 — 맨 처음. 누적 합계는 어제와 거의 같아 다시 볼 이유가
-         못 된다. 변화가 먼저 와야 매일 열어볼 거리가 생긴다. -->
+    <!-- 1) 오늘 핵심 지표 — 짧고 익숙한 것으로 먼저 방향을 잡는다 -->
+    {metric_rail_html}
+
+    <!-- 2) 오늘 달라진 것 — KPI 다음. 맨 위에 두니 처음부터 무거웠다. -->
     {changes_html}
 
-    <!-- 2) 지난 판단, 맞았나 — '저번에 짚은 건 어떻게 됐나'가 '수집 1,785건'보다
-         다시 볼 이유가 된다. -->
+    <!-- 3) 지난 판단, 맞았나 — 기본은 접어 둔다(회고라 매번 볼 것은 아니다) -->
     {scoreboard_html}
-
-    <!-- 2) 오늘 핵심 지표 -->
-    {metric_rail_html}
 
     <!-- (이동) 우리 위치 → 경쟁사 탭으로 이동 -->
 
@@ -5632,6 +5630,27 @@ function _fetchInsights(fromStr, toStr) {{
 
 var COLLAPSE_LIMIT = 10;
 var _articlesCollapsed = true;
+// 섹션 하나를 접었다 폈다. 기존 collapse-btn 모양을 그대로 쓴다.
+// 접힘 상태는 이 브라우저에만 기억한다(사람마다 보고 싶은 게 다르다).
+function toggleSec(id, btn) {{
+  var el = document.getElementById(id);
+  if (!el) return;
+  var hide = el.style.display !== 'none';
+  el.style.display = hide ? 'none' : '';
+  if (btn) btn.textContent = hide ? '▼ 펼치기' : '▲ 접기';
+  try {{ localStorage.setItem('sec:' + id, hide ? '0' : '1'); }} catch (e) {{}}
+}}
+function initSec(id, openByDefault) {{
+  var el = document.getElementById(id);
+  if (!el) return;
+  var v = null;
+  try {{ v = localStorage.getItem('sec:' + id); }} catch (e) {{}}
+  var open = (v === null) ? openByDefault : (v === '1');
+  el.style.display = open ? '' : 'none';
+  var btn = document.querySelector('[data-sec="' + id + '"]');
+  if (btn) btn.textContent = open ? '▲ 접기' : '▼ 펼치기';
+}}
+
 function toggleArticlesSection() {{
   _articlesCollapsed = !_articlesCollapsed;
   _applyCollapseAndFilter();
@@ -5892,6 +5911,10 @@ function applyFilter() {{
   }});
 }}
 document.addEventListener('DOMContentLoaded', function() {{
+  // 새 섹션 접힘 상태 — 오늘 달라진 것은 펼치고, 적중표는 접어 둔다.
+  // 둘 다 펼쳐 두면 첫 화면이 갑자기 무거워진다.
+  initSec('chg-body', true);
+  initSec('sb-body', false);
   // 첫 화면 탭의 목차도 만들어 둔다(탭을 눌러야 생기면 처음엔 안 보인다)
   try {{
     var _active = document.querySelector('.tab-btn.active');

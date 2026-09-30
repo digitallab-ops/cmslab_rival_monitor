@@ -86,7 +86,10 @@ def render_changes(data: dict, esc, upcoming: list = None) -> str:
     return (_CH_STYLE + '''
     <div class="section" id="chg">
       <div class="section-title">오늘 달라진 것<span class="section-sub">
-        어제 대비 새로 생긴 것만 · <span style="color:#8b95ff">★</span>는 우리 판(더마·선케어·스킨케어)</span></div>
+        어제 대비 새로 생긴 것만 · <span style="color:#8b95ff">★</span>는 우리 판(더마·선케어·스킨케어)</span>
+        <button class="collapse-btn" data-sec="chg-body"
+                onclick="toggleSec('chg-body', this)">▲ 접기</button></div>
+      <div id="chg-body">
       <div class="ch-grid">
         <div class="ch-col"><h4>순위가 움직였다</h4>''' + left + '''</div>
         <div class="ch-col"><h4>새로 들어온 소식</h4>''' + right + '''</div>
@@ -97,4 +100,5 @@ def render_changes(data: dict, esc, upcoming: list = None) -> str:
         아마존은 직전 수집분과 비교합니다. 소식은 브랜드당 하루 한 건으로 —
         같은 사건을 여러 매체가 쓰면 점수가 가장 높은 하나만 남깁니다.
       </p>
+      </div>
     </div>''').replace("{UPSTRIP}", strip)
