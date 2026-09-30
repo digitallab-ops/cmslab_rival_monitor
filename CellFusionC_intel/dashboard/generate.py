@@ -5070,10 +5070,6 @@ def _build_full_html(
     <!-- 1) 오늘 핵심 지표 — 짧고 익숙한 것으로 먼저 방향을 잡는다 -->
     {metric_rail_html}
 
-    <!-- 2) 지난 판단, 맞았나 — 짚은 것이 어떻게 되고 있는지. 아래 띠가 '언제
-         판가름나는지'를 같이 보여준다. 순위 변동 피드는 걷어냈다(0799494 참고) -->
-    {scoreboard_html}
-
     <!-- (이동) 우리 위치 → 경쟁사 탭으로 이동 -->
 
     <!-- 3) 주간 브리핑 — 종합 총평 → 급성장 시장 → 브랜드별 국가 공략(접힘/펼침) -->
@@ -5081,6 +5077,10 @@ def _build_full_html(
     {brief_feed_html}
 
     <!-- (숨김) 이전 섹션 대체: 동향→시장탭, 브랜드신호→경쟁사탭, 스토리→접힘 근거 -->
+    <!-- 마지막) 지난 판단, 맞았나 — 회고라 브리핑을 다 읽은 뒤에 본다.
+         아래 띠가 '언제 판가름나는지'를 같이 보여준다. -->
+    {scoreboard_html}
+
     <div style="display:none">{synth_html}{market_list_html}{move_stream_html}{brand_signals_html}{stories_html}{legend_html}</div>
   </div>
 
