@@ -28,14 +28,24 @@ _CH_STYLE = """<style>
 #chg .ch-empty{font-size:13.5px;color:#8490b0;padding:14px 2px}
 #chg .ch-foot{font-size:12px;color:#6b769a;margin-top:14px;line-height:1.7}
 @media (max-width:900px){#chg .ch-grid{grid-template-columns:1fr}}
+/* 곧 나올 것 — 화면이 답으로만 끝나면 다시 올 이유가 없다 */
+#chg .up-strip{display:flex;flex-wrap:wrap;gap:0;margin:16px 0 0;border-top:1px solid #2f3a6b}
+#chg .up-i{flex:1 1 220px;padding:12px 18px 12px 0;border-right:1px solid rgba(47,58,107,.5)}
+#chg .up-i:last-child{border-right:none}
+#chg .up-d{font-size:11px;font-weight:700;letter-spacing:1px;color:#f0a256;
+  font-variant-numeric:tabular-nums}
+#chg .up-t{font-size:14px;font-weight:700;color:#e7eafc;margin:4px 0 3px}
+#chg .up-n{font-size:12px;color:#8490b0;line-height:1.5}
+@media (max-width:900px){#chg .up-i{border-right:none;border-bottom:1px solid rgba(47,58,107,.5)}}
 </style>"""
 
 
-def render_changes(data: dict, esc) -> str:
-    """{rank, news, since} → HTML. 둘 다 비면 섹션을 그리지 않는다."""
+def render_changes(data: dict, esc, upcoming: list = None) -> str:
+    """{rank, news, since} + 곧 나올 것 → HTML. 다 비면 섹션을 그리지 않는다."""
     rank = (data or {}).get("rank") or []
     news = (data or {}).get("news") or []
-    if not rank and not news:
+    up = upcoming or []
+    if not rank and not news and not up:
         return ""
 
     def _move(m):
@@ -65,6 +75,14 @@ def render_changes(data: dict, esc) -> str:
     right = ("".join(_news(n) for n in news) if news
              else '<div class="ch-empty">새로 들어온 주요 소식이 없습니다.</div>')
 
+    strip = ""
+    if up:
+        strip = ('<div class="up-strip">' + "".join(
+            f'<div class="up-i"><div class="up-d">D-{u.get("days", 0)} · {esc(u.get("when", ""))}</div>'
+            f'<div class="up-t">{esc(u.get("title", ""))}</div>'
+            f'<div class="up-n">{esc(u.get("note", ""))}</div></div>'
+            for u in up[:3]) + '</div>')
+
     return (_CH_STYLE + '''
     <div class="section" id="chg">
       <div class="section-title">오늘 달라진 것<span class="section-sub">
@@ -73,9 +91,10 @@ def render_changes(data: dict, esc) -> str:
         <div class="ch-col"><h4>순위가 움직였다</h4>''' + left + '''</div>
         <div class="ch-col"><h4>새로 들어온 소식</h4>''' + right + '''</div>
       </div>
+      {UPSTRIP}
       <p class="ch-foot">
         순위는 <b>5계단 이상</b> 움직인 것만 올립니다. 올리브영은 저장된 전일 대비,
         아마존은 직전 수집분과 비교합니다. 소식은 브랜드당 하루 한 건으로 —
         같은 사건을 여러 매체가 쓰면 점수가 가장 높은 하나만 남깁니다.
       </p>
-    </div>''')
+    </div>''').replace("{UPSTRIP}", strip)

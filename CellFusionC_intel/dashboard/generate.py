@@ -4863,6 +4863,7 @@ def _build_full_html(
     quarterly_series: dict = None,
     scoreboard: dict = None,
     daily_changes: dict = None,
+    upcoming: list = None,
     dart_yoy: dict = None,
 ) -> str:
     has_chartjs = bool(chartjs_src)
@@ -4907,7 +4908,7 @@ def _build_full_html(
     from dashboard._scoreboard_render import render_scoreboard
     scoreboard_html = render_scoreboard(scoreboard or {}, _esc)
     from dashboard._changes_render import render_changes
-    changes_html = render_changes(daily_changes or {}, _esc)
+    changes_html = render_changes(daily_changes or {}, _esc, upcoming or [])
     ingredient_trends_html = _render_ingredient_trends(ingredient_trends or [])
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
     self_position_html = _render_self_position(self_position or {})
@@ -6097,6 +6098,14 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             logger.warning("오늘 달라진 것 조회 실패: %s", _e)
             daily_changes = {}
 
+        # 곧 나올 것 — 기다릴 거리. 근거 있는 날짜만 나온다.
+        try:
+            from analytics.upcoming import get_upcoming
+            upcoming = get_upcoming(session)
+        except Exception as _e:
+            logger.warning("곧 나올 것 조회 실패: %s", _e)
+            upcoming = []
+
         # 적중표 — 브리핑이 짚은 것과 그 뒤 실제 결과. 실패해도 나머지는 그대로.
         try:
             from analytics.watch_scoreboard import get_scoreboard
@@ -6444,6 +6453,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         quarterly_series=quarterly_series,
         scoreboard=scoreboard,
         daily_changes=daily_changes,
+        upcoming=upcoming,
         dart_yoy=dart_yoy,
         stories=stories,
         category_battle=category_battle,
