@@ -54,8 +54,13 @@ def _record_buzz(brand: str, video_ids: list, titles: dict) -> None:
                 continue
             title = sn.get("title", "") or ""
             channel = sn.get("channelTitle", "") or ""
+            # 언어는 API가 알려준다(defaultAudioLanguage). 이미 part=snippet으로
+            # 받아오고 있어서 추가 유닛이 들지 않는다. 없으면 제목으로 추정.
+            lang = (sn.get("defaultAudioLanguage") or sn.get("defaultLanguage") or "")
+            lang = lang.split("-")[0].lower() or _guess_lang(title)
             vids.append({
                 "id": it.get("id", ""), "views": vw, "title": title, "channel": channel,
+                "lang": lang,
                 "likes": int(st.get("likeCount", 0) or 0),
                 "comments": int(st.get("commentCount", 0) or 0),
                 # 제목에 브랜드 = 그 영상의 주제가 이 브랜드(스침 아님)
@@ -87,12 +92,62 @@ def _record_buzz(brand: str, video_ids: list, titles: dict) -> None:
             up("engagement_pct", round(eng, 2))
             up("top_video_views", top["views"],
                meta=f"[{tag}·{top['channel'][:24]}] {top['title']}"[:200])
+            # 언어권별 — YouTube API는 국가별 조회수를 주지 않는다(그건 자기 채널
+            # Analytics 전용). regionCode도 '그 나라에서 볼 수 있는가'라 사실상
+            # 무필터였다(US·JP·GB 결과가 글자까지 같았다). 영상 언어가 시장에
+            # 가장 가까운 대리지표다.
+            _save_lang_buzz(s, brand, vids)
         finally:
             s.close()
         logger.info("YouTube 버즈: %s → 영상 %d · 전체 %s(전용 %s·공식 %s) · 참여 %.2f%%",
                     brand, len(vids), f"{total:,}", f"{focus:,}", f"{official:,}", eng)
     except Exception as e:
         logger.warning("YouTube 버즈 지표 스킵 (%s): %s", brand, e)
+
+
+def _save_lang_buzz(session, brand: str, vids: list) -> None:
+    """언어권별 영상 수·조회수·대표 영상. 브랜드가 어느 말을 쓰는 시장에서
+    실제로 회자되는지 보려는 것이다."""
+    from collections import defaultdict
+
+    from sqlalchemy import text as _text
+
+    from config.settings import DB_SCHEMA
+    try:
+        session.execute(_text(f"""
+            CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.youtube_lang (
+                id BIGSERIAL PRIMARY KEY,
+                captured_date DATE NOT NULL,
+                brand VARCHAR(100) NOT NULL,
+                lang VARCHAR(8) NOT NULL,
+                videos INTEGER, views BIGINT,
+                top_title VARCHAR(220), top_views BIGINT, top_url VARCHAR(120),
+                fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                UNIQUE(captured_date, brand, lang)
+            )
+        """))
+        agg = defaultdict(list)
+        for v in vids:
+            agg[v.get("lang") or "und"].append(v)
+        for lang, group in agg.items():
+            top = max(group, key=lambda x: x["views"])
+            session.execute(_text(f"""
+                INSERT INTO {DB_SCHEMA}.youtube_lang
+                    (captured_date, brand, lang, videos, views,
+                     top_title, top_views, top_url)
+                VALUES (CURRENT_DATE, :b, :l, :n, :v, :t, :tv, :u)
+                ON CONFLICT (captured_date, brand, lang) DO UPDATE SET
+                    videos = EXCLUDED.videos, views = EXCLUDED.views,
+                    top_title = EXCLUDED.top_title, top_views = EXCLUDED.top_views,
+                    top_url = EXCLUDED.top_url, fetched_at = NOW()
+            """), {"b": brand, "l": lang[:8], "n": len(group),
+                   "v": sum(x["views"] for x in group), "t": top["title"][:220],
+                   "tv": top["views"],
+                   "u": f"https://www.youtube.com/watch?v={top['id']}"[:120]})
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.warning("언어권 버즈 저장 스킵 (%s): %s", brand, str(e)[:90])
 
 
 def _guess_lang(text: str) -> str:
