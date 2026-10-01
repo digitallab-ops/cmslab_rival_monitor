@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>경쟁 인텔리전스 데모</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* 레이아웃: 단일 세로 흐름. 각 패널은 '어떤 신호인가 → 무엇이 보이는가' 두 층으로 읽힌다. */
+:root {
+  color-scheme: light;
+  --bg:      #F2F3F4;
+  --panel:   #FFFFFF;
+  --line:    #DCE0E4;
+  --line-2:  #EBEEF0;
+  --t1:      #17191C;
+  --t2:      #5C646E;
+  --t3:      #868E98;
+  --acc:     #8A5D12;   /* 오커 — 강조는 여기 한 곳 */
+  --acc-bg:  #F6EEDF;
+  --up:      #2E6C97;   /* 상승은 청, 하락은 점토색 — 적록 대비를 피한다 */
+  --dn:      #A3462F;
+  --sans: "IBM Plex Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+:root:not([data-theme="light"]) {
+  @media (prefers-color-scheme: dark) {
+    color-scheme: dark;
+    --bg: #131518; --panel: #1A1D21; --line: #2A2E36; --line-2: #22262C;
+    --t1: #ECEEF0; --t2: #9BA3AE; --t3: #6B727C;
+    --acc: #D4A24C; --acc-bg: #2A2318;
+    --up: #7BA7C7; --dn: #C4705A;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #131518; --panel: #1A1D21; --line: #2A2E36; --line-2: #22262C;
+  --t1: #ECEEF0; --t2: #9BA3AE; --t3: #6B727C;
+  --acc: #D4A24C; --acc-bg: #2A2318;
+  --up: #7BA7C7; --dn: #C4705A;
+}
+
+body { margin: 0; background: var(--bg); color: var(--t1); font-family: var(--sans); }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+a { color: var(--acc); }
+
+.badge { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
+  letter-spacing: .3px; color: var(--acc); background: var(--acc-bg);
+  border: 1px solid color-mix(in srgb, var(--acc) 35%, transparent);
+  border-radius: 3px; padding: 5px 11px; }
+.hero h1 { font-size: 30px; font-weight: 700; letter-spacing: -.6px; margin: 16px 0 10px; }
+.hero p { font-size: 16px; line-height: 1.65; color: var(--t2); margin: 0; max-width: 62ch; }
+.hero .meta { margin-top: 18px; font-family: var(--mono); font-size: 12.5px; color: var(--t3); }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px; background: var(--line); border: 1px solid var(--line);
+  margin: 30px 0 46px; }
+.stat { background: var(--panel); padding: 16px 18px; }
+.stat .k { font-size: 11.5px; color: var(--t3); letter-spacing: .4px; }
+.stat .v { font-family: var(--mono); font-size: 23px; font-weight: 500; letter-spacing: -.8px;
+  margin-top: 6px; font-variant-numeric: tabular-nums; }
+.stat .n { font-size: 11.5px; color: var(--t2); margin-top: 4px; }
+
+section { margin-bottom: 46px; }
+.shead { display: flex; align-items: baseline; gap: 13px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 18px; }
+.shead h2 { font-size: 19px; font-weight: 600; letter-spacing: -.3px; }
+.shead .why { font-size: 13px; color: var(--t2); }
+
+.cross { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.cbox { background: var(--panel); border: 1px solid var(--line); padding: 16px 18px; }
+.cbox h3 { font-size: 13px; font-weight: 600; color: var(--acc); letter-spacing: .6px; }
+.cbox ul { margin: 10px 0 0; padding-left: 17px; }
+.cbox li { font-size: 13.5px; color: var(--t2); line-height: 1.7; }
+.cnote { margin-top: 14px; font-size: 13.5px; color: var(--t2); line-height: 1.7; max-width: 76ch; }
+.cnote b { color: var(--t1); font-weight: 600; }
+
+table { width: 100%; border-collapse: collapse; }
+th { font-size: 11.5px; font-weight: 600; letter-spacing: .6px; color: var(--t3);
+  text-align: left; padding: 0 10px 9px 0; border-bottom: 1px solid var(--line); }
+th.r, td.r { text-align: right; padding-right: 0; }
+td { padding: 11px 10px 11px 0; border-bottom: 1px solid var(--line-2);
+  font-size: 13.5px; vertical-align: top; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.brand { font-weight: 600; }
+.sub { display: block; font-size: 12px; color: var(--t3); margin-top: 3px; }
+.tw { overflow-x: auto; }
+
+.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px;
+  border: 1px solid currentColor; border-radius: 2px; white-space: nowrap; }
+.hit  { color: var(--up); }
+.miss { color: var(--dn); }
+.unk  { color: var(--t3); }
+.wait { color: var(--acc); }
+.up { color: var(--up); } .dn { color: var(--dn); }
+
+.bars { display: flex; flex-direction: column; gap: 9px; }
+.bar { display: grid; grid-template-columns: 92px 1fr 74px; gap: 12px; align-items: center; }
+.bar .lbl { font-size: 13px; color: var(--t2); }
+.bar .track { height: 9px; background: var(--line-2); }
+.bar .fill { height: 100%; background: var(--acc); }
+.bar .val { font-family: var(--mono); font-size: 12.5px; text-align: right;
+  font-variant-numeric: tabular-nums; }
+
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); }
+.step { background: var(--panel); padding: 15px 17px; }
+.step .n { font-family: var(--mono); font-size: 11px; color: var(--acc); }
+.step h3 { font-size: 14px; font-weight: 600; margin: 6px 0 6px; }
+.step p { margin: 0; font-size: 12.5px; color: var(--t2); line-height: 1.6; }
+
+.foot { border-top: 1px solid var(--line); padding-top: 20px; font-size: 13px;
+  color: var(--t2); line-height: 1.8; }
+@media (max-width: 560px) {
+  .bar { grid-template-columns: 76px 1fr 62px; }
+  .hero h1 { font-size: 25px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="badge">데모 · 모든 브랜드명과 수치는 가상</span>
+    <h1>K-뷰티 경쟁 인텔리전스</h1>
+    <p>
+      경쟁 브랜드의 글로벌·국내 동향을 자동 수집하고, AI로 분류한 뒤,
+      성격이 다른 신호를 겹쳐 교차검증하는 파이프라인입니다.
+      실제 운영 중인 시스템의 구조를 가상 데이터로 재현했습니다.
+    </p>
+    <p class="meta">Python · FastAPI · PostgreSQL · OpenAI · APScheduler</p>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="k">수집 기사</div><div class="v">11,406</div>
+      <div class="n">81개국 · 본문 확보 89%</div></div>
+    <div class="stat"><div class="k">리테일 실판매</div><div class="v">14,124</div>
+      <div class="n">아마존 9개국 + 올리브영</div></div>
+    <div class="stat"><div class="k">재무 레코드</div><div class="v">46,719</div>
+      <div class="n">7,222개사 · 비상장 포함</div></div>
+    <div class="stat"><div class="k">자동화 잡</div><div class="v">24</div>
+      <div class="n">일·주·월 단위 스케줄</div></div>
+  </div>
+
+  <section>
+    <div class="shead">
+      <h2>교차검증</h2>
+      <span class="why">뉴스만 보면 발표(PR)에 속는다는 문제에서 출발했습니다</span>
+    </div>
+    <div class="cross">
+      <div class="cbox">
+        <h3>발표 · 의도</h3>
+        <ul><li>뉴스 (8종 수집기)</li><li>검색 수요 (네이버·구글)</li><li>유튜브 버즈</li></ul>
+      </div>
+      <div class="cbox">
+        <h3>실제 성과</h3>
+        <ul><li>관세청 수출액</li><li>재무 (비상장 포함·추정 실적)</li><li>아마존·올리브영 실판매 순위</li></ul>
+      </div>
+      <div class="cbox">
+        <h3>선행 신호</h3>
+        <ul><li>해외 상표 출원</li><li>신제품 성분 지형</li><li>신흥 브랜드 자동발견</li></ul>
+      </div>
+    </div>
+    <p class="cnote">
+      경쟁사가 "브라질 진출"이라고 보도자료를 내도 그게 진짜 무브인지 알 수 없습니다.
+      <b>뉴스가 뜨고 수출액과 판매 순위가 같이 움직이면 실질 무브</b>,
+      뉴스만 뜨고 수요가 따라오지 않으면 PR 노이즈로 봅니다.
+    </p>
+  </section>
+
+  <section>
+    <div class="shead">
+      <h2>지난 판단, 맞았나</h2>
+      <span class="why">브리핑이 짚은 것에 그 뒤 실제 수치를 붙여 스스로 채점합니다</span>
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th style="width:30%">짚은 것</th><th style="width:24%">확인 방법</th>
+          <th>결과</th><th class="r">판정</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="brand">셀비앙</span> 미국 세포라 입점
+              <span class="sub">2026-08-21</span></td>
+            <td>다음 달 아마존 순위<span class="sub">기한 09-20</span></td>
+            <td class="num up">선케어 24위 → 9위</td>
+            <td class="r"><span class="pill hit">맞음</span></td>
+          </tr>
+          <tr>
+            <td><span class="brand">하루온</span> 올리브영 단독 기획전
+              <span class="sub">2026-08-28</span></td>
+            <td>다음 달 올영 랭킹<span class="sub">기한 09-27</span></td>
+            <td class="num dn">최고 12위 → 14위</td>
+            <td class="r"><span class="pill miss">빗나감</span></td>
+          </tr>
+          <tr>
+            <td><span class="brand">루미아크</span> 중국 유통사 MOU
+              <span class="sub">2026-09-18</span></td>
+            <td>다음 분기 중국 수출액<span class="sub">기한 12-17</span></td>
+            <td class="num">관세청 확정분이 7월까지</td>
+            <td class="r"><span class="pill wait">D-42</span></td>
+          </tr>
+          <tr>
+            <td><span class="brand">노바덤</span> 틱톡 크리에이터 캠페인
+              <span class="sub">2026-09-02</span></td>
+            <td>틱톡샵 매출<span class="sub">기한 10-02</span></td>
+            <td class="num">수집하지 않는 지표</td>
+            <td class="r"><span class="pill unk">판단불가</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cnote">
+      못 맞히는 건 맞힌 척하지 않습니다. 수집하지 않는 지표는
+      <b>판단불가로 남기고 적중률 계산에서 뺍니다</b>.
+      여기서 얼버무리면 채점표 자체를 믿을 수 없게 됩니다.
+    </p>
+  </section>
+
+  <section>
+    <div class="shead">
+      <h2>실판매 순위 변화</h2>
+      <span class="why">발표가 아니라 실제로 팔리는지를 봅니다</span>
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th style="width:22%">브랜드</th><th style="width:30%">채널</th>
+          <th>제품</th><th class="r">순위</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="brand">노바덤</td><td>올리브영 선케어 20위권</td>
+            <td>마일드 업 선 플러스 50ml</td>
+            <td class="r num dn">6위 → 17위</td></tr>
+          <tr><td class="brand">셀비앙</td><td>US 아마존 스킨케어</td>
+            <td>Barrier Repair Serum 30ml</td>
+            <td class="r num up">26위 → 9위</td></tr>
+          <tr><td class="brand">미엘라</td><td>올리브영 더모 코스메틱</td>
+            <td>시카 카밍 크림 60ml</td>
+            <td class="r num up">18위 → 8위</td></tr>
+          <tr><td class="brand">아르보</td><td>DE 아마존 스킨케어</td>
+            <td>Retinal Night Booster 15ml</td>
+            <td class="r num dn">7위 → 21위</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="shead">
+      <h2>시장 성장</h2>
+      <span class="why">관세청 HS330499 국가별 수출액 · 전년 동기 대비</span>
+    </div>
+    <div class="bars">
+      <div class="bar"><span class="lbl">폴란드</span>
+        <span class="track"><span class="fill" style="width:100%"></span></span>
+        <span class="val up">+142%</span></div>
+      <div class="bar"><span class="lbl">브라질</span>
+        <span class="track"><span class="fill" style="width:68%"></span></span>
+        <span class="val up">+97%</span></div>
+      <div class="bar"><span class="lbl">아랍에미리트</span>
+        <span class="track"><span class="fill" style="width:44%"></span></span>
+        <span class="val up">+63%</span></div>
+      <div class="bar"><span class="lbl">베트남</span>
+        <span class="track"><span class="fill" style="width:21%"></span></span>
+        <span class="val up">+30%</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="shead">
+      <h2>재무 — 확정과 추정</h2>
+      <span class="why">공시된 실적에 증권사 추정치를 이어 붙입니다</span>
+    </div>
+    <div class="tw">
+      <table>
+        <thead><tr>
+          <th style="width:26%">회사 · 브랜드</th>
+          <th class="r">2024 매출</th><th class="r">2025 매출</th>
+          <th class="r">2026 추정</th><th class="r">추정 이익률</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><span class="brand">셀비앙</span><span class="sub">상장</span></td>
+            <td class="r num">1,240</td><td class="r num">1,890</td>
+            <td class="r num up">2,610 (+38%)</td><td class="r num">16.0%</td></tr>
+          <tr><td><span class="brand">미엘라</span><span class="sub">상장</span></td>
+            <td class="r num">3,480</td><td class="r num">3,910</td>
+            <td class="r num up">4,350 (+11%)</td><td class="r num">10.2%</td></tr>
+          <tr><td><span class="brand">하루온</span><span class="sub">비상장</span></td>
+            <td class="r num">820</td><td class="r num">1,105</td>
+            <td class="r num"><span class="sub" style="margin:0">비상장</span></td>
+            <td class="r num">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cnote">
+      단위는 억원. 비상장사는 추정치가 없는 게 아니라 <b>애초에 존재하지 않습니다</b>.
+      빈칸으로 두면 수집 누락으로 읽히므로 그렇게 적습니다.
+      확정 실적은 비상장까지 커버합니다.
+    </p>
+  </section>
+
+  <section>
+    <div class="shead">
+      <h2>파이프라인</h2>
+      <span class="why">수집부터 발신까지</span>
+    </div>
+    <div class="flow">
+      <div class="step"><span class="n">01</span><h3>수집</h3>
+        <p>공개 RSS·API 8종. 구글뉴스는 리디렉션을 풀어 발행사 본문까지 가져옵니다.</p></div>
+      <div class="step"><span class="n">02</span><h3>분류</h3>
+        <p>2단계. 싼 모델로 관련성을 거르고, 통과분만 18개 필드로 구조화·번역합니다.</p></div>
+      <div class="step"><span class="n">03</span><h3>중복 병합</h3>
+        <p>같은 사건을 여러 매체가 쓰면 의미 임베딩으로 하나로 묶습니다.</p></div>
+      <div class="step"><span class="n">04</span><h3>신호 결합</h3>
+        <p>검색·수출·재무·상표·실판매를 브랜드와 국가 축으로 겹칩니다.</p></div>
+      <div class="step"><span class="n">05</span><h3>발신</h3>
+        <p>대시보드 7탭, Slack 브리핑, 자연어 Q&amp;A 봇.</p></div>
+      <div class="step"><span class="n">06</span><h3>자가진단</h3>
+        <p>수집 누락과 분류 드리프트를 스스로 점검해 이상할 때만 보고합니다.</p></div>
+    </div>
+  </section>
+
+  <p class="foot">
+    이 페이지의 <b>브랜드명과 수치는 전부 가상</b>입니다. 실제 시스템은 사내 전용으로
+    운영되며 경쟁사 데이터는 공개하지 않습니다. 상단 집계(기사 수, 레코드 수, 잡 수)만
+    실제 운영 규모입니다.<br>
+    구조·설계 판단·실패 기록은 저장소 README에 있습니다.
+  </p>
+
+</div>
+</body>
+</html>
