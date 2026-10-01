@@ -10,12 +10,9 @@ import asyncio
 import html as html_lib
 import logging
 import os
-import secrets
 import sys
 import threading
 import time
-from base64 import b64decode
-from urllib.parse import parse_qs, urlencode
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
@@ -26,7 +23,7 @@ load_dotenv(os.path.join(_HERE, ".env"))
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Query, BackgroundTasks, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -168,11 +165,6 @@ app = FastAPI(title="K-뷰티 경쟁사 인텔리전스", docs_url="/docs", life
 
 # MCP 엔드포인트 Bearer 인증 (MCP_API_KEY 설정 시에만). 공개 URL 보호.
 _MCP_API_KEY = os.getenv("MCP_API_KEY", "").strip()
-_PUBLIC_BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
-_OAUTH_CLIENT_ID = os.getenv("OAUTH_CLIENT_ID", "chatgpt").strip()
-_OAUTH_CLIENT_SECRET = os.getenv("OAUTH_CLIENT_SECRET", _MCP_API_KEY).strip()
-_OAUTH_ACCESS_TOKEN = os.getenv("OAUTH_ACCESS_TOKEN", _MCP_API_KEY).strip()
-_oauth_codes: dict[str, dict] = {}
 
 # 관리자 전용 게이팅(기간 조정·실시간 조회·재생성). ADMIN_KEY 미설정 시 통과(하위호환),
 # 설정 시 key 일치 필요. 프론트는 URL ?admin=<key>일 때만 컨트롤 노출.
@@ -181,126 +173,6 @@ _ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()
 
 def _admin_ok(key: str) -> bool:
     return (not _ADMIN_KEY) or ((key or "").strip() == _ADMIN_KEY)
-
-
-def _base_url(request: Request) -> str:
-    if _PUBLIC_BASE_URL:
-        return _PUBLIC_BASE_URL
-    return str(request.base_url).rstrip("/")
-
-
-def _get_basic_client_secret(request: Request) -> tuple[str, str]:
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("basic "):
-        return "", ""
-    try:
-        raw = b64decode(auth.split(" ", 1)[1]).decode("utf-8")
-        client_id, client_secret = raw.split(":", 1)
-        return client_id, client_secret
-    except Exception:
-        return "", ""
-
-
-def _clean_oauth_codes() -> None:
-    now = time.time()
-    expired = [
-        code for code, data in _oauth_codes.items()
-        if now - data.get("created_at", now) > 300
-    ]
-    for code in expired:
-        _oauth_codes.pop(code, None)
-
-
-def _oauth_error(error: str, description: str, status: int = 400) -> JSONResponse:
-    return JSONResponse(
-        {"error": error, "error_description": description},
-        status_code=status,
-    )
-
-
-@app.get("/.well-known/oauth-authorization-server")
-async def oauth_authorization_server_metadata(request: Request):
-    base = _base_url(request)
-    return {
-        "issuer": base,
-        "authorization_endpoint": f"{base}/oauth/authorize",
-        "token_endpoint": f"{base}/oauth/token",
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
-        "token_endpoint_auth_methods_supported": [
-            "client_secret_post",
-            "client_secret_basic",
-        ],
-        "scopes_supported": ["mcp"],
-    }
-
-
-@app.get("/oauth/authorize")
-async def oauth_authorize(
-    request: Request,
-    response_type: str = Query(""),
-    client_id: str = Query(""),
-    redirect_uri: str = Query(""),
-    state: str = Query(""),
-    scope: str = Query(""),
-):
-    if response_type != "code":
-        return _oauth_error("unsupported_response_type", "Only response_type=code is supported.")
-    if client_id != _OAUTH_CLIENT_ID:
-        return _oauth_error("invalid_client", "Unknown OAuth client.", status=401)
-    if not redirect_uri:
-        return _oauth_error("invalid_request", "redirect_uri is required.")
-
-    _clean_oauth_codes()
-    code = secrets.token_urlsafe(32)
-    _oauth_codes[code] = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "scope": scope or "mcp",
-        "created_at": time.time(),
-    }
-    params = {"code": code}
-    if state:
-        params["state"] = state
-    return RedirectResponse(f"{redirect_uri}?{urlencode(params)}")
-
-
-@app.post("/oauth/token")
-async def oauth_token(request: Request):
-    body = (await request.body()).decode("utf-8")
-    form = {k: v[-1] for k, v in parse_qs(body, keep_blank_values=True).items()}
-
-    basic_client_id, basic_secret = _get_basic_client_secret(request)
-    client_id = basic_client_id or form.get("client_id", "")
-    client_secret = basic_secret or form.get("client_secret", "")
-
-    if client_id != _OAUTH_CLIENT_ID:
-        return _oauth_error("invalid_client", "Unknown OAuth client.", status=401)
-    if _OAUTH_CLIENT_SECRET and client_secret != _OAUTH_CLIENT_SECRET:
-        return _oauth_error("invalid_client", "Invalid OAuth client secret.", status=401)
-    if form.get("grant_type") != "authorization_code":
-        return _oauth_error("unsupported_grant_type", "Only authorization_code is supported.")
-
-    _clean_oauth_codes()
-    code = form.get("code", "")
-    data = _oauth_codes.pop(code, None)
-    if not data:
-        return _oauth_error("invalid_grant", "Authorization code is invalid or expired.")
-    if data["client_id"] != client_id:
-        return _oauth_error("invalid_grant", "Authorization code was issued to another client.")
-
-    redirect_uri = form.get("redirect_uri", "")
-    if redirect_uri and redirect_uri != data["redirect_uri"]:
-        return _oauth_error("invalid_grant", "redirect_uri does not match the authorization request.")
-    if not _OAUTH_ACCESS_TOKEN:
-        return _oauth_error("server_error", "OAuth access token is not configured.", status=500)
-
-    return {
-        "access_token": _OAUTH_ACCESS_TOKEN,
-        "token_type": "Bearer",
-        "expires_in": 31536000,
-        "scope": data.get("scope") or "mcp",
-    }
 
 
 class _MCPAuthASGI:
@@ -313,10 +185,7 @@ class _MCPAuthASGI:
         if scope["type"] == "http" and _MCP_API_KEY:
             headers = dict(scope.get("headers") or [])
             auth = headers.get(b"authorization", b"").decode()
-            allowed = {f"Bearer {_MCP_API_KEY}"}
-            if _OAUTH_ACCESS_TOKEN:
-                allowed.add(f"Bearer {_OAUTH_ACCESS_TOKEN}")
-            if auth not in allowed:
+            if auth != f"Bearer {_MCP_API_KEY}":
                 await send({"type": "http.response.start", "status": 401,
                             "headers": [(b"content-type", b"text/plain")]})
                 await send({"type": "http.response.body", "body": b"unauthorized"})
