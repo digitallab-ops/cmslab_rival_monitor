@@ -3437,7 +3437,12 @@ EXPLORE_DATASETS = {
         "label": "재무(NICE)", "table": "nice_financials", "date": None,
         "cols": [("year::text", "연도"), ("company", "회사"), ("industry_name", "업종"),
                  ("metric", "지표"), ("amount", "금액(천원)"), ("is_cosmetic", "화장품업")],
-        "brand": None, "country": None, "where": "",
+        "brand": None, "country": None,
+        # 우리가 등록한 브랜드의 회사만. 제한을 안 걸면 NICE 전체 7,209개사
+        # 46,719행이 그대로 내려받아진다 — 구매 데이터를 통째로 내보내는 셈이고,
+        # 받는 사람 입장에서도 무관한 회사가 99%다.
+        "where": ("company IN (SELECT company FROM " + DB_SCHEMA +
+                  ".nice_company_brands WHERE COALESCE(matched_brands, '') <> '')"),
     },
     "social": {
         "label": "소셜(유튜브)", "table": "social_metrics", "date": "captured_date",
