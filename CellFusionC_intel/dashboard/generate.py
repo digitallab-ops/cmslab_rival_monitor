@@ -7174,8 +7174,11 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
     // NICE 구매 데이터가 통째로 노출되는 경로이기도 했다. 모니터링/화장품업 둘만 둔다.
     var AC_CACHE={{mon:AC_DATA}}, AC_SCOPE_MAP={{cos:'cosmetic'}};
     function acSetScope(v){{
-      ['mon','cos','all'].forEach(function(k){{
-        document.getElementById('ac-'+k).className=(k===v)?'on':''; }});
+      // 'all' 버튼은 제거됐다. 없는 id에 .className을 대입하면 여기서 터져
+      // 아래 fetch가 아예 실행되지 않는다(화장품업을 눌러도 아무것도 안 떴다).
+      ['mon','cos'].forEach(function(k){{
+        var b=document.getElementById('ac-'+k);
+        if(b) b.className=(k===v)?'on':''; }});
       AC_SCOPE=v; AC_LIMIT=(v==='mon')?999:60;
       if(AC_CACHE[v]){{ AC_DATA=AC_CACHE[v]; acRender(); return; }}
       var meta=document.getElementById('ac-meta');
@@ -7188,8 +7191,8 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         .catch(function(){{
           // 실패하면 눌렀던 버튼을 되돌려 빈 표를 보여주지 않는다
           meta.textContent='불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
-          document.getElementById('ac-'+v).className='';
-          document.getElementById('ac-mon').className='on';
+          var bv=document.getElementById('ac-'+v); if(bv) bv.className='';
+          var bm=document.getElementById('ac-mon'); if(bm) bm.className='on';
           AC_SCOPE='mon'; AC_DATA=AC_CACHE.mon; }});
     }}
     function acMore(){{ AC_LIMIT+=100; acRender(); }}

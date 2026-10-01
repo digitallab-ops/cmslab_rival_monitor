@@ -2077,16 +2077,23 @@ def get_quarterly_series(session: Session, brands: "list | None" = None) -> dict
 
 
 def get_financial_export(session: Session) -> dict:
-    """재무 내려받기용 전체 표 — 화면에 안 보이는 금액·분기까지 전부.
+    """재무 내려받기 — 기획팀 엑셀 구조 그대로.
 
-    기획팀이 준 엑셀(2026-09-29) 구성을 그대로 따른다. 화면에는 노란칸(매출·
-    영업이익률·광고비율)만 두고, 영업이익 금액·광고비 금액·분기별 수치는
-    여기서 본다. 반환 {cols:[...], rows:[[...]]}.
+    `요청사항/재무실적 정리 2026 09 29.xlsx` Sheet2의 열 구성을 따른다(31열):
+      회사명 · 브랜드명
+      24년 매출 · 25년 매출 · 25년 1~4분기 · 26년 매출 · 26년 1~4분기
+      24년 영업이익 · 25년 영업이익 · 25년 1~4분기 · 26년 영업이익 · 26년 1~4분기
+      24·25·26년 영업이익률 · 24·25년 광고비 · 24·25년 광고비율
+
+    분기 칸은 **연도별 1~4분기 고정**이다. 최근 8개를 순서대로 흘려 담으면
+    '분기5·6·7' 같은 칸이 생겨 어느 해 몇 분기인지 알 수 없다(실제로 그렇게
+    나갔다). 연·분기를 키로 꽂는다.
     """
     data = get_all_company_financials(session)
     qs = get_quarterly_series(session)
-    years = [y for y in (data.get("years") or []) if int(y) >= 2024]
-    est_y = datetime.utcnow().year
+    est_y = datetime.utcnow().year          # 26
+    prev_y = est_y - 1                      # 25
+    base_y = est_y - 2                      # 24
 
     import re as _re
 
@@ -2099,52 +2106,76 @@ def get_financial_export(session: Session) -> dict:
         if v.get("corp"):
             qs_by_corp.setdefault(_norm_co(v["corp"]), v)
 
-    cols = ["회사명", "브랜드명"]
-    for y in years:
-        cols.append(f"{y}년 매출(억원)")
-    cols.append(f"{est_y}년 매출(억원·추정)")
-    for y in years:
-        cols += [f"{y}년 영업이익(억원)", f"{y}년 영업이익률(%)"]
-    cols.append(f"{est_y}년 영업이익률(%·추정)")
-    for y in years:
-        cols += [f"{y}년 광고비(억원)", f"{y}년 광고비율(%)"]
-    # 분기는 최근 것부터 고정 8칸 — 행마다 열 수가 달라지면 CSV가 깨진다
-    for n in range(1, 9):
-        cols += [f"분기{n} 기간", f"분기{n} 매출(억원)", f"분기{n} 영업이익률(%)",
-                 f"분기{n} 구분"]
-
-    def _eok(v):
-        return round(v / 100000, 1) if v is not None else None      # NICE 천원 → 억원
+    def _eok(v):                            # NICE는 천원 → 억원
+        return round(v / 100000, 1) if v is not None else None
 
     def _rate(n, d):
         return round(n / d * 100, 1) if (n is not None and d) else None
 
+    cols = ["회사명", "브랜드명",
+            f"{base_y}년 매출", f"{prev_y}년 매출"]
+    cols += [f"{prev_y}년 매출 {q}분기" for q in (1, 2, 3, 4)]
+    cols += [f"{est_y}년 매출"]
+    cols += [f"{est_y}년 매출 {q}분기" for q in (1, 2, 3, 4)]
+    cols += [f"{base_y}년 영업이익", f"{prev_y}년 영업이익"]
+    cols += [f"{prev_y}년 영업이익 {q}분기" for q in (1, 2, 3, 4)]
+    cols += [f"{est_y}년 영업이익"]
+    cols += [f"{est_y}년 영업이익 {q}분기" for q in (1, 2, 3, 4)]
+    cols += [f"{base_y}년 영업이익률", f"{prev_y}년 영업이익률", f"{est_y}년 영업이익률"]
+    cols += [f"{base_y}년 광고비", f"{prev_y}년 광고비"]
+    cols += [f"{base_y}년 광고비율", f"{prev_y}년 광고비율"]
+
     rows = []
     for r in (data.get("rows") or []):
         if not r.get("matched"):
-            continue                      # 내려받기도 유관 기업만
-        rev = {y: r["rev"].get(y) for y in years}
-        row = [r["company"], r.get("matched") or ""]
-        row += [_eok(rev[y]) for y in years]
+            continue                        # 내려받기도 등록 브랜드만
+        rev, op, ad = r["rev"], r["op"], r["ad"]
         v = qs_by_corp.get(_norm_co(r["company"]))
         ser = (v or {}).get("series") or []
-        cur = [x for x in ser if x["label"].startswith(str(est_y))]
-        row.append(round(sum(x["revenue"] for x in cur)) if cur else None)
-        for y in years:
-            row += [_eok(r["op"].get(y)), _rate(r["op"].get(y), rev[y])]
-        ops = [x for x in cur if x.get("op_income") is not None]
-        row.append(round(sum(x["op_income"] for x in ops)
-                         / sum(x["revenue"] for x in ops) * 100, 1)
-                   if ops and sum(x["revenue"] for x in ops) else None)
-        for y in years:
-            row += [_eok(r["ad"].get(y)), _rate(r["ad"].get(y), rev[y])]
-        for n in range(8):
-            x = ser[-8:][n] if n < len(ser[-8:]) else None
-            row += ([x["label"], round(x["revenue"]),
-                     (round(x["op_margin"], 1) if x.get("op_margin") is not None else None),
-                     "추정" if x["est"] else "확정"] if x else [None, None, None, None])
+
+        # 연·분기를 키로 꽂는다. label은 '2026.03' 형태 = 그 분기의 마지막 달.
+        qmap = {}
+        for x in ser:
+            try:
+                y, mm = x["label"].split(".")
+                qmap[(int(y), (int(mm) + 2) // 3)] = x
+            except (ValueError, KeyError):
+                continue
+
+        def qrev(y, q):
+            x = qmap.get((y, q))
+            return round(x["revenue"]) if x and x.get("revenue") is not None else None
+
+        def qop(y, q):
+            x = qmap.get((y, q))
+            return round(x["op_income"]) if x and x.get("op_income") is not None else None
+
+        def ysum(y, f):
+            vals = [f(y, q) for q in (1, 2, 3, 4)]
+            return round(sum(x for x in vals if x is not None)) if any(
+                x is not None for x in vals) else None
+
+        row = [r["company"], r.get("matched") or ""]
+        row += [_eok(rev.get(base_y)), _eok(rev.get(prev_y))]
+        row += [qrev(prev_y, q) for q in (1, 2, 3, 4)]
+        row += [ysum(est_y, qrev)]
+        row += [qrev(est_y, q) for q in (1, 2, 3, 4)]
+        row += [_eok(op.get(base_y)), _eok(op.get(prev_y))]
+        row += [qop(prev_y, q) for q in (1, 2, 3, 4)]
+        row += [ysum(est_y, qop)]
+        row += [qop(est_y, q) for q in (1, 2, 3, 4)]
+        est_margin = None
+        er, eo = ysum(est_y, qrev), ysum(est_y, qop)
+        if er and eo is not None:
+            est_margin = round(eo / er * 100, 1)
+        row += [_rate(op.get(base_y), rev.get(base_y)),
+                _rate(op.get(prev_y), rev.get(prev_y)), est_margin]
+        row += [_eok(ad.get(base_y)), _eok(ad.get(prev_y))]
+        row += [_rate(ad.get(base_y), rev.get(base_y)),
+                _rate(ad.get(prev_y), rev.get(prev_y))]
         rows.append(row)
-    rows.sort(key=lambda x: -(x[2 + len(years) - 1] or 0))
+
+    rows.sort(key=lambda x: -(x[3] or 0))   # 25년 매출 순
     return {"cols": cols, "rows": rows}
 
 
