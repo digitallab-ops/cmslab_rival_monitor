@@ -7,8 +7,6 @@ K-뷰티 경쟁사 인텔리전스 — FastAPI 서버
 """
 
 import asyncio
-import base64
-import hashlib
 import html as html_lib
 import logging
 import os
@@ -220,11 +218,6 @@ def _oauth_error(error: str, description: str, status: int = 400) -> JSONRespons
     )
 
 
-def _pkce_s256(code_verifier: str) -> str:
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
-
-
 @app.get("/.well-known/oauth-authorization-server")
 async def oauth_authorization_server_metadata(request: Request):
     base = _base_url(request)
@@ -238,7 +231,6 @@ async def oauth_authorization_server_metadata(request: Request):
             "client_secret_post",
             "client_secret_basic",
         ],
-        "code_challenge_methods_supported": ["S256"],
         "scopes_supported": ["mcp"],
     }
 
@@ -251,8 +243,6 @@ async def oauth_authorize(
     redirect_uri: str = Query(""),
     state: str = Query(""),
     scope: str = Query(""),
-    code_challenge: str = Query(""),
-    code_challenge_method: str = Query(""),
 ):
     if response_type != "code":
         return _oauth_error("unsupported_response_type", "Only response_type=code is supported.")
@@ -260,10 +250,6 @@ async def oauth_authorize(
         return _oauth_error("invalid_client", "Unknown OAuth client.", status=401)
     if not redirect_uri:
         return _oauth_error("invalid_request", "redirect_uri is required.")
-    if not code_challenge:
-        return _oauth_error("invalid_request", "code_challenge is required.")
-    if code_challenge_method != "S256":
-        return _oauth_error("invalid_request", "Only code_challenge_method=S256 is supported.")
 
     _clean_oauth_codes()
     code = secrets.token_urlsafe(32)
@@ -271,8 +257,6 @@ async def oauth_authorize(
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": scope or "mcp",
-        "code_challenge": code_challenge,
-        "code_challenge_method": code_challenge_method,
         "created_at": time.time(),
     }
     params = {"code": code}
@@ -308,19 +292,6 @@ async def oauth_token(request: Request):
     redirect_uri = form.get("redirect_uri", "")
     if redirect_uri and redirect_uri != data["redirect_uri"]:
         return _oauth_error("invalid_grant", "redirect_uri does not match the authorization request.")
-    code_verifier = form.get("code_verifier", "")
-    if data.get("code_challenge"):
-        if not code_verifier:
-            return _oauth_error("invalid_grant", "code_verifier is required.")
-        try:
-            verified = secrets.compare_digest(
-                _pkce_s256(code_verifier),
-                data["code_challenge"],
-            )
-        except UnicodeEncodeError:
-            verified = False
-        if not verified:
-            return _oauth_error("invalid_grant", "code_verifier does not match code_challenge.")
     if not _OAUTH_ACCESS_TOKEN:
         return _oauth_error("server_error", "OAuth access token is not configured.", status=500)
 
