@@ -191,6 +191,15 @@ def _base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
+def _oauth_resource_metadata(base: str) -> dict:
+    return {
+        "resource": f"{base}/mcp",
+        "authorization_servers": [base],
+        "scopes_supported": ["mcp"],
+        "resource_documentation": base,
+    }
+
+
 def _get_basic_client_secret(request: Request) -> tuple[str, str]:
     auth = request.headers.get("authorization", "")
     if not auth.lower().startswith("basic "):
@@ -243,6 +252,21 @@ async def oauth_authorization_server_metadata(request: Request):
     }
 
 
+@app.get("/.well-known/openid-configuration")
+async def openid_configuration(request: Request):
+    return await oauth_authorization_server_metadata(request)
+
+
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource_metadata(request: Request):
+    return _oauth_resource_metadata(_base_url(request))
+
+
+@app.get("/.well-known/oauth-protected-resource/mcp")
+async def oauth_protected_resource_metadata_for_mcp(request: Request):
+    return _oauth_resource_metadata(_base_url(request))
+
+
 @app.get("/oauth/authorize")
 async def oauth_authorize(
     request: Request,
@@ -253,6 +277,7 @@ async def oauth_authorize(
     scope: str = Query(""),
     code_challenge: str = Query(""),
     code_challenge_method: str = Query(""),
+    resource: str = Query(""),
 ):
     if response_type != "code":
         return _oauth_error("unsupported_response_type", "Only response_type=code is supported.")
@@ -273,6 +298,7 @@ async def oauth_authorize(
         "scope": scope or "mcp",
         "code_challenge": code_challenge,
         "code_challenge_method": code_challenge_method,
+        "resource": resource,
         "created_at": time.time(),
     }
     params = {"code": code}
@@ -308,6 +334,9 @@ async def oauth_token(request: Request):
     redirect_uri = form.get("redirect_uri", "")
     if redirect_uri and redirect_uri != data["redirect_uri"]:
         return _oauth_error("invalid_grant", "redirect_uri does not match the authorization request.")
+    resource = form.get("resource", "")
+    if resource and data.get("resource") and resource != data["resource"]:
+        return _oauth_error("invalid_grant", "resource does not match the authorization request.")
     code_verifier = form.get("code_verifier", "")
     if data.get("code_challenge"):
         if not code_verifier:
@@ -346,8 +375,16 @@ class _MCPAuthASGI:
             if _OAUTH_ACCESS_TOKEN:
                 allowed.add(f"Bearer {_OAUTH_ACCESS_TOKEN}")
             if auth not in allowed:
+                headers = [(b"content-type", b"text/plain")]
+                if _PUBLIC_BASE_URL:
+                    challenge = (
+                        'Bearer resource_metadata="'
+                        f'{_PUBLIC_BASE_URL}/.well-known/oauth-protected-resource'
+                        '", scope="mcp"'
+                    )
+                    headers.append((b"www-authenticate", challenge.encode()))
                 await send({"type": "http.response.start", "status": 401,
-                            "headers": [(b"content-type", b"text/plain")]})
+                            "headers": headers})
                 await send({"type": "http.response.body", "body": b"unauthorized"})
                 return
         await self.app(scope, receive, send)
