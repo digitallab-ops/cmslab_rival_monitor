@@ -2127,8 +2127,10 @@ def get_financial_export(session: Session) -> dict:
 
     rows = []
     for r in (data.get("rows") or []):
-        if not r.get("matched"):
-            continue                        # 내려받기도 등록 브랜드만
+        # 화장품업 전체를 담는다. 등록 브랜드 26개만 내보내면 업계 안에서 어디쯤인지
+        # 비교가 안 된다. 등록 브랜드는 '브랜드명' 칸이 채워져 구분된다.
+        if not r.get("cosmetic") and not r.get("matched"):
+            continue
         rev, op, ad = r["rev"], r["op"], r["ad"]
         v = qs_by_corp.get(_norm_co(r["company"]))
         ser = (v or {}).get("series") or []
@@ -2155,7 +2157,7 @@ def get_financial_export(session: Session) -> dict:
             return round(sum(x for x in vals if x is not None)) if any(
                 x is not None for x in vals) else None
 
-        row = [r["company"], r.get("matched") or ""]
+        row = [r["company"], r.get("matched") or (r.get("brands") or "")[:40]]
         row += [_eok(rev.get(base_y)), _eok(rev.get(prev_y))]
         row += [qrev(prev_y, q) for q in (1, 2, 3, 4)]
         row += [ysum(est_y, qrev)]
@@ -2175,8 +2177,9 @@ def get_financial_export(session: Session) -> dict:
                 _rate(ad.get(prev_y), rev.get(prev_y))]
         rows.append(row)
 
-    rows.sort(key=lambda x: -(x[3] or 0))   # 25년 매출 순
-    return {"cols": cols, "rows": rows}
+    rows.sort(key=lambda x: -(x[3] or 0))   # 전년 매출 순
+    return {"cols": cols, "rows": rows,
+            "years": {"base": base_y, "prev": prev_y, "est": est_y}}
 
 
 def get_competitor_financials(session: Session) -> list[dict]:

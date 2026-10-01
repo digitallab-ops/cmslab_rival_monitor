@@ -7116,7 +7116,7 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
         </div>
         <input class="ac-q" id="ac-q" placeholder="회사명·브랜드명 검색 (예: 아모레, 설화수, 아누아)" oninput="acSearch()">
         <span class="ac-meta" id="ac-meta"></span>
-        <button class="ac-csv" onclick="acCsv()">🔒 전체 내려받기</button>
+        <button class="ac-csv" onclick="acCsv()">🔒 엑셀 내려받기</button>
       </div>
       <div class="ac-unit">모든 금액 단위 <b>억원</b> — 억원 미만은 반올림.
         예를 들어 <b>26,537</b>은 2조 6,537억원(≈ 2,653,700,000,000원)이다.</div>
@@ -7198,7 +7198,8 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
     function acMore(){{ AC_LIMIT+=100; acRender(); }}
 
     // 화면엔 매출·영업이익률·광고비율만 둔다(기획팀 요청). 영업이익 금액·광고비
-    // 금액·분기별 수치는 여기서 받는다. 대량 추출이라 관리자 비밀번호가 필요하다.
+    // 금액·분기별 수치는 여기서 받는다. 범위는 화장품업 전체(화면 토글과 무관).
+    // 대량 추출이라 관리자 비밀번호가 필요하다.
     function acCsv(){{
       var go=function(){{ window.location.href='/api/finance/csv?key='
         +encodeURIComponent(window.ADMIN_KEY||''); }};

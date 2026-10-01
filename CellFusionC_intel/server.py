@@ -639,53 +639,44 @@ _COMPANY_SCOPES = {"monitored", "cosmetic"}
 
 @app.get("/api/finance/csv")
 async def api_finance_csv(key: str = Query("")):
-    """재무 전체 내려받기 — 화면에 없는 금액·분기까지. 관리자 전용.
+    """재무 전체 내려받기 — 엑셀 파일(.xlsx).
 
     화면엔 기획팀 요청대로 매출·영업이익률·광고비율만 둔다. 영업이익 금액·
-    광고비 금액·분기별 수치는 여기서 본다.
-    """
-    import csv
-    import io as _io
+    광고비 금액·분기별 수치는 여기서 본다. 범위는 **화장품업 전체**다.
 
-    from fastapi.responses import StreamingResponse
+    CSV로 주면 열이 31개라 엑셀에서 폭이 다 좁고 숫자가 raw로 찍혀 읽기 어렵다.
+    두 줄 머리글·천단위·퍼센트·틀고정을 넣은 xlsx로 만든다.
+    """
+    from fastapi.responses import Response
 
     if not _admin_ok(key):
         return JSONResponse({"error": "unauthorized"}, status_code=403)
 
-    def _fetch():
+    def _build():
+        from analytics.finance_xlsx import build_workbook
         from analytics.queries import get_financial_export
         from storage.models import get_session
         se = get_session()
         try:
-            return get_financial_export(se)
+            d = get_financial_export(se)
         finally:
             se.close()
+        y = d.get("years") or {}
+        return build_workbook(d.get("rows") or [],
+                              y.get("base", 2024), y.get("prev", 2025),
+                              y.get("est", 2026)), len(d.get("rows") or [])
 
     try:
-        data = await asyncio.to_thread(_fetch)
+        blob, n = await asyncio.to_thread(_build)
     except Exception as e:
-        logger.warning("재무 CSV 실패: %s", e)
+        logger.warning("재무 엑셀 생성 실패: %s", e)
         return JSONResponse({"error": "내려받기 중 오류가 발생했습니다."}, status_code=500)
 
-    def _stream():
-        buf = _io.StringIO()
-        w = csv.writer(buf)
-
-        def _flush():
-            out = buf.getvalue()
-            buf.seek(0); buf.truncate(0)
-            return out
-
-        yield "﻿".encode("utf-8")      # 엑셀이 UTF-8로 읽게 하는 BOM
-        w.writerow(data.get("cols") or [])
-        yield _flush().encode("utf-8")
-        for row in (data.get("rows") or []):
-            w.writerow(["" if v is None else v for v in row])
-            yield _flush().encode("utf-8")
-
-    headers = {"Content-Disposition": 'attachment; filename="financials.csv"'}
-    return StreamingResponse(_stream(), media_type="text/csv; charset=utf-8",
-                             headers=headers)
+    logger.info("재무 엑셀 내려받기 — %d개사 · %d바이트", n, len(blob))
+    return Response(
+        content=blob,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="financials.xlsx"'})
 
 
 @app.get("/api/companies")

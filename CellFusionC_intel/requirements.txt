@@ -20,3 +20,6 @@ slack-bolt>=1.18
 aiohttp>=3.9
 # 구글 트렌드(글로벌 검색 수요) 수집 — signals/google_trends.py, 로컬 스케줄러 전용(비공식)
 pytrends>=4.9
+# 엑셀 — NICE 적재(로컬)와 재무 내려받기(Render) 양쪽에서 쓴다.
+# 빠뜨렸다가 재무 내려받기가 배포본에서만 500이 난 적 있다.
+openpyxl>=3.1
