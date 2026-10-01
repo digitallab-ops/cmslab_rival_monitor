@@ -193,7 +193,7 @@ def _base_url(request: Request) -> str:
 
 def _oauth_resource_metadata(base: str) -> dict:
     return {
-        "resource": f"{base}/mcp/",
+        "resource": f"{base}/mcp",
         "authorization_servers": [base],
         "scopes_supported": ["mcp"],
         "resource_documentation": base,
