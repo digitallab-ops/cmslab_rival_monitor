@@ -2083,8 +2083,6 @@ def get_financial_export(session: Session) -> dict:
     영업이익률·광고비율)만 두고, 영업이익 금액·광고비 금액·분기별 수치는
     여기서 본다. 반환 {cols:[...], rows:[[...]]}.
     """
-    from signals.nice_financials import _brand_aliases  # noqa: F401  (임포트 순환 방지용 지연)
-
     data = get_all_company_financials(session)
     qs = get_quarterly_series(session)
     years = [y for y in (data.get("years") or []) if int(y) >= 2024]
