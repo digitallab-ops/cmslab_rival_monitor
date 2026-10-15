@@ -119,10 +119,13 @@ def ping_dashboard_refresh() -> None:
     import os
     import requests
     url = os.getenv("RENDER_EXTERNAL_URL") or "https://cmslab-rival-monitor.onrender.com"
-    # ADMIN_KEY 설정 시 refresh가 게이팅되므로 로컬 핑에도 동봉(미설정이면 빈값=통과)
-    _params = {"key": os.getenv("ADMIN_KEY", "").strip()}
+    # refresh는 관리자 게이팅이라 키를 동봉한다. 헤더로 보내는 게 맞다 —
+    # 쿼리로 보내면 Render 접근 로그에 비밀번호가 평문으로 쌓인다.
+    # Render에 구버전이 떠 있는 동안을 대비해 당분간 쿼리도 같이 보낸다.
+    _key = os.getenv("ADMIN_KEY", "").strip()
     try:
-        requests.post(url.rstrip("/") + "/api/refresh", params=_params, timeout=10)
+        requests.post(url.rstrip("/") + "/api/refresh",
+                      headers={"X-Admin-Key": _key}, params={"key": _key}, timeout=10)
         logger.info("대시보드 refresh 핑 전송: %s", url)
     except Exception as e:
         logger.warning("대시보드 refresh 핑 실패(무시): %s", e)

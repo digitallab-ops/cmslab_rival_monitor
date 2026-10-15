@@ -5030,25 +5030,36 @@ def _build_full_html(
     <span id="period-msg" class="period-msg" style="display:none"></span>
   </div>
   <script>
-  window.ADMIN_KEY = '';
-  function adminUnlock(){{
+  // 비밀번호는 더 이상 브라우저에 들고 있지 않는다. 로그인 한 번으로 서버가
+  // HttpOnly 쿠키를 내리고, 이후 호출은 그 쿠키로 인증된다. 예전처럼 URL에
+  // ?key=를 붙이면 주소창·브라우저 기록·서버 로그에 평문으로 남는다.
+  window.ADMIN_OK = false;
+  function adminLogin(onOk){{
+    if (window.ADMIN_OK) {{ onOk && onOk(); return; }}
     var k = prompt('관리자 비밀번호를 입력하세요');
     if (k === null) return;
-    fetch('/api/admin-check?key=' + encodeURIComponent(k))
-      .then(function(r){{ return r.json(); }})
+    fetch('/api/admin-check', {{
+        method: 'POST', credentials: 'same-origin',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{key: k}})
+      }})
+      .then(function(r){{ return r.json().catch(function(){{ return {{}}; }}); }})
       .then(function(d){{
-        if (d && d.ok) {{
-          window.ADMIN_KEY = k;
-          var bar=document.getElementById('admin-bar'); if(bar) bar.style.display='';
-          var btn=document.getElementById('admin-unlock'); if(btn) btn.style.display='none';
-        }} else {{ alert('비밀번호가 틀렸습니다.'); }}
+        if (d && d.ok) {{ window.ADMIN_OK = true; onOk && onOk(); }}
+        else alert('비밀번호가 틀렸습니다.');
       }})
       .catch(function(){{ alert('확인 실패 — 잠시 후 다시 시도하세요.'); }});
+  }}
+  function adminUnlock(){{
+    adminLogin(function(){{
+      var bar=document.getElementById('admin-bar'); if(bar) bar.style.display='';
+      var btn=document.getElementById('admin-unlock'); if(btn) btn.style.display='none';
+    }});
   }}
   function adminRefresh(){{
     var msg=document.getElementById('period-msg');
     if(msg){{ msg.style.display=''; msg.textContent='재생성 요청 중…'; }}
-    fetch('/api/refresh?key='+encodeURIComponent(window.ADMIN_KEY||''), {{method:'POST'}})
+    fetch('/api/refresh', {{method:'POST', credentials:'same-origin'}})
       .then(function(r){{return r.json();}})
       .then(function(d){{ if(msg){{ msg.style.display=''; msg.textContent=(d.message||d.error||'요청됨')+' (30~60초 후 새로고침)'; }} }})
       .catch(function(e){{ if(msg){{ msg.style.display=''; msg.textContent='실패: '+e; }} }});
@@ -5584,7 +5595,8 @@ function applyDateRange() {{
   var lbl = document.getElementById('period-label'); if (lbl) lbl.textContent = fromStr + ' ~ ' + toStr;
 
   // 서버 조회 — 임의 구간(과거 포함, 90일 제한 없음). DB에서 KPI·기사·synth 계산.
-  fetch('/api/period?from=' + encodeURIComponent(fromStr) + '&to=' + encodeURIComponent(toStr) + (window.ADMIN_KEY ? '&key=' + encodeURIComponent(window.ADMIN_KEY) : ''))
+  fetch('/api/period?from=' + encodeURIComponent(fromStr) + '&to=' + encodeURIComponent(toStr),
+        {{credentials: 'same-origin'}})
     .then(function(r) {{ return r.json(); }})
     .then(function(d) {{
       if (d.error) {{ if (msgEl) {{ msgEl.style.display=''; msgEl.textContent=d.error; }} return; }}
@@ -5614,7 +5626,8 @@ function _fetchInsights(fromStr, toStr) {{
   var grid = document.getElementById('insight-grid');
   if (!grid) return;
   grid.innerHTML = '<div style="padding:32px;text-align:center;color:#9ca3af;font-size: 14.5px;">인사이트 생성 중...</div>';
-  fetch('/api/insights?from_date=' + encodeURIComponent(fromStr) + '&to_date=' + encodeURIComponent(toStr) + (window.ADMIN_KEY ? '&key=' + encodeURIComponent(window.ADMIN_KEY) : ''))
+  fetch('/api/insights?from_date=' + encodeURIComponent(fromStr) + '&to_date=' + encodeURIComponent(toStr),
+        {{credentials: 'same-origin'}})
     .then(function(r) {{ return r.json(); }})
     .then(function(data) {{
       if (window._renderInsights) window._renderInsights(data);
@@ -6800,18 +6813,8 @@ function dxCsvLabel(){
 function dxCsv(){
   var cb=document.getElementById('dx-withbody');
   var wb=(cb && !cb.disabled && cb.checked && !document.getElementById('dx-bodychk').hidden) ? '&body=1' : '';
-  var go=function(){ window.location.href='/api/explore/csv?'+dxParams().toString()
-    +wb+'&key='+encodeURIComponent(window.ADMIN_KEY||''); };
-  if(window.ADMIN_KEY){ go(); return; }
-  var k=prompt('CSV 내려받기는 관리자 전용입니다. 관리자 비밀번호를 입력하세요');
-  if(k===null) return;
-  fetch('/api/admin-check?key='+encodeURIComponent(k))
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(d && d.ok){ window.ADMIN_KEY=k; go(); }
-      else alert('비밀번호가 틀렸습니다.');
-    })
-    .catch(function(){ alert('확인 실패 — 잠시 후 다시 시도하세요.'); });
+  var go=function(){ window.location.href='/api/explore/csv?'+dxParams().toString()+wb; };
+  adminLogin(go);   // 쿠키가 이미 있으면 바로 내려받고, 없으면 비밀번호를 묻는다
 }
 
 // 탭을 처음 열 때만 불러온다 — 대시보드 첫 로딩을 무겁게 만들지 않으려고
@@ -7201,16 +7204,7 @@ def _render_all_companies(data: dict, dart: dict = None, _payload_only: bool = F
     // 금액·분기별 수치는 여기서 받는다. 범위는 화장품업 전체(화면 토글과 무관).
     // 대량 추출이라 관리자 비밀번호가 필요하다.
     function acCsv(){{
-      var go=function(){{ window.location.href='/api/finance/csv?key='
-        +encodeURIComponent(window.ADMIN_KEY||''); }};
-      if(window.ADMIN_KEY){{ go(); return; }}
-      var k=prompt('전체 내려받기는 관리자 전용입니다. 관리자 비밀번호를 입력하세요');
-      if(k===null) return;
-      fetch('/api/admin-check?key='+encodeURIComponent(k))
-        .then(function(r){{ return r.json(); }})
-        .then(function(d){{ if(d&&d.ok){{ window.ADMIN_KEY=k; go(); }}
-                          else alert('비밀번호가 틀렸습니다.'); }})
-        .catch(function(){{ alert('확인 실패 — 잠시 후 다시 시도하세요.'); }});
+      adminLogin(function(){{ window.location.href='/api/finance/csv'; }});
     }}
 
     // 분기 추이 — 숫자 하나로는 방향이 안 보인다. 확정과 추정을 한 줄에 이어 그린다.

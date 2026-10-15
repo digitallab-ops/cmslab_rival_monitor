@@ -42,3 +42,4 @@ CellFusionC_intel/dashboard/chartjs_cache.min.js
 # OS
 .DS_Store
 Thumbs.db
+CellFusionC_intel/_server_cache.html

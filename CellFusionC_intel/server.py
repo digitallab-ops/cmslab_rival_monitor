@@ -7,6 +7,8 @@ K-뷰티 경쟁사 인텔리전스 — FastAPI 서버
 """
 
 import asyncio
+import hashlib
+import hmac
 import html as html_lib
 import logging
 import os
@@ -166,13 +168,54 @@ app = FastAPI(title="K-뷰티 경쟁사 인텔리전스", docs_url="/docs", life
 # MCP 엔드포인트 Bearer 인증 (MCP_API_KEY 설정 시에만). 공개 URL 보호.
 _MCP_API_KEY = os.getenv("MCP_API_KEY", "").strip()
 
-# 관리자 전용 게이팅(기간 조정·실시간 조회·재생성). ADMIN_KEY 미설정 시 통과(하위호환),
-# 설정 시 key 일치 필요. 프론트는 URL ?admin=<key>일 때만 컨트롤 노출.
+# 관리자 전용 게이팅(기간 조정·실시간 조회·대량 내려받기).
+#
+# 예전엔 비밀번호를 GET ?key=... 로 받았다. 주소창·브라우저 기록·Render 접근
+# 로그에 평문으로 남아서(실제로 공유된 스크린샷 주소창에 찍혔다) 지금은
+# 로그인만 POST 본문으로 받고, 이후 호출은 HttpOnly 쿠키로 인증한다.
+# 쿠키에 비밀번호를 그대로 담지 않고 만료시각에 HMAC 서명한 토큰을 담는다.
 _ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()
+_ADMIN_COOKIE = "rv_admin"
+_ADMIN_TTL = 12 * 3600          # 쿠키 유효기간(초)
+
+if not _ADMIN_KEY:
+    logger.warning("ADMIN_KEY 미설정 — 관리자 기능을 전부 차단합니다(fail-closed). "
+                   "예전엔 통과시켰으나 환경변수 누락 시 조용히 열리는 문제가 있었습니다.")
 
 
-def _admin_ok(key: str) -> bool:
-    return (not _ADMIN_KEY) or ((key or "").strip() == _ADMIN_KEY)
+def _admin_token(exp: int) -> str:
+    """만료시각 + HMAC 서명. 키 자체를 쿠키에 싣지 않으려고."""
+    sig = hmac.new(_ADMIN_KEY.encode(), str(exp).encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{exp}.{sig}"
+
+
+def _token_ok(tok: str) -> bool:
+    try:
+        exp_s, sig = (tok or "").split(".", 1)
+        exp = int(exp_s)
+    except ValueError:
+        return False
+    if exp < int(time.time()):
+        return False
+    return hmac.compare_digest(sig, _admin_token(exp).split(".", 1)[1])
+
+
+def _admin_ok(key: str = "", request: Request = None) -> bool:
+    """쿠키 토큰 > X-Admin-Key 헤더 > ?key= 쿼리 순으로 확인.
+
+    쿼리 방식은 로컬 스케줄러 핑의 하위호환으로만 남겨 둔다 — 브라우저는
+    더 이상 쓰지 않는다. ADMIN_KEY가 없으면 전부 거절(fail-closed).
+    """
+    if not _ADMIN_KEY:
+        return False
+    if request is not None:
+        if _token_ok(request.cookies.get(_ADMIN_COOKIE, "")):
+            return True
+        hdr = (request.headers.get("x-admin-key") or "").strip()
+        if hdr and hmac.compare_digest(hdr, _ADMIN_KEY):
+            return True
+    key = (key or "").strip()
+    return bool(key) and hmac.compare_digest(key, _ADMIN_KEY)
 
 
 class _MCPAuthASGI:
@@ -217,17 +260,42 @@ async def dashboard():
     return HTMLResponse(_dashboard_html, headers=_NO_CACHE)
 
 
-@app.get("/api/admin-check")
-async def admin_check(key: str = Query("")):
-    """관리자 비밀번호 확인 — 프론트 잠금해제용. 일치 여부만 반환(값 노출 없음)."""
-    return {"ok": _admin_ok(key)}
+@app.post("/api/admin-check")
+async def admin_check(request: Request):
+    """관리자 로그인 — 성공 시 HttpOnly 쿠키를 내린다.
+
+    예전엔 GET ?key=... 였다. 비밀번호가 주소창·브라우저 기록·서버 접근 로그에
+    평문으로 남아서 POST 본문으로 옮겼다. 이후 관리자 호출은 쿠키로 인증한다.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    key = str((payload or {}).get("key") or "").strip()
+    if not _ADMIN_KEY or not key or not hmac.compare_digest(key, _ADMIN_KEY):
+        return JSONResponse({"ok": False}, status_code=401)
+    exp = int(time.time()) + _ADMIN_TTL
+    res = JSONResponse({"ok": True, "ttl": _ADMIN_TTL})
+    res.set_cookie(_ADMIN_COOKIE, _admin_token(exp), max_age=_ADMIN_TTL,
+                   httponly=True, samesite="lax",
+                   secure=request.url.scheme == "https", path="/")
+    return res
+
+
+@app.post("/api/admin-logout")
+async def admin_logout():
+    """공용 PC에서 쿠키를 즉시 버릴 수 있게."""
+    res = JSONResponse({"ok": True})
+    res.delete_cookie(_ADMIN_COOKIE, path="/")
+    return res
 
 
 @app.post("/api/refresh")
-async def refresh(background_tasks: BackgroundTasks, key: str = Query("")):
+async def refresh(request: Request, background_tasks: BackgroundTasks,
+                  key: str = Query("")):
     """대시보드 재생성 (백그라운드). 로컬 수집 직후 ping_dashboard_refresh가 호출.
     ADMIN_KEY 설정 시 관리자 키 필요(로컬 ping도 ADMIN_KEY 동봉)."""
-    if not _admin_ok(key):
+    if not _admin_ok(key, request):
         return JSONResponse({"error": "unauthorized"}, status_code=403)
     background_tasks.add_task(_regen_async)
     return {"status": "ok", "message": "재생성 중 — 잠시 후 새로고침하세요"}
@@ -297,12 +365,12 @@ async def api_ask(request: Request):
 # ── 인사이트 API ─────────────────────────────────────────────────────────────
 
 @app.get("/api/period")
-async def api_period(from_date: str = Query(..., alias="from"),
-                     to_date: str = Query(..., alias="to"),
-                     key: str = Query("")):
+async def api_period(request: Request,
+                     from_date: str = Query(..., alias="from"),
+                     to_date: str = Query(..., alias="to")):
     """임의 구간(과거 포함) 브리핑 데이터 — KPI·기사·synth를 DB에서 직접 조회.
     클라 90일 캐시로 못 보는 구간(예: 26년 1분기)을 서버가 계산해 반환. 관리자 전용."""
-    if not _admin_ok(key):
+    if not _admin_ok(request=request):
         return JSONResponse({"error": "unauthorized"}, status_code=403)
     import re as _re
     if not (_re.match(r"^\d{4}-\d{2}-\d{2}$", from_date or "") and _re.match(r"^\d{4}-\d{2}-\d{2}$", to_date or "")):
@@ -339,9 +407,9 @@ async def api_articles(days: int = Query(30)):
 
 @app.get("/api/insights")
 async def api_insights(
+    request: Request,
     from_date: str = Query(..., description="시작일 YYYY-MM-DD"),
     to_date: str   = Query(..., description="종료일 YYYY-MM-DD"),
-    key: str = Query(""),
 ):
     """날짜 범위 기반 브랜드 전략 인사이트. 관리자 전용.
 
@@ -349,7 +417,7 @@ async def api_insights(
     캐시 미스 → OpenAI 생성 → DB 저장 → 반환.
     동일 날짜 범위는 영구 캐시 (기사가 변하지 않으므로 결과도 동일).
     """
-    if not _admin_ok(key):
+    if not _admin_ok(request=request):
         return JSONResponse({"error": "unauthorized"}, status_code=403)
     from analytics.queries import (
         get_insights_cache,
@@ -542,11 +610,12 @@ async def api_explore_summary():
 
 
 @app.get("/api/explore/csv")
-async def api_explore_csv(dataset: str = Query("news"),
+async def api_explore_csv(request: Request,
+                          dataset: str = Query("news"),
                           from_date: str = Query("", alias="from"),
                           to_date: str = Query("", alias="to"),
                           brand: str = Query(""), country: str = Query(""),
-                          key: str = Query(""), body: int = Query(0)):
+                          body: int = Query(0)):
     """지금 보고 있는 조건 그대로 CSV로 내려받기(최대 5만 행). 관리자 전용.
 
     화면 조회는 열어두되 대량 추출만 막는다 — 무인증으로 6만여 행 원본을 반복해서
@@ -559,7 +628,7 @@ async def api_explore_csv(dataset: str = Query("news"),
 
     from analytics.queries import EXPLORE_DATASETS
 
-    if not _admin_ok(key):
+    if not _admin_ok(request=request):
         return JSONResponse({"error": "unauthorized"}, status_code=403)
     # 파일명에 쓰이므로 화이트리스트 검증을 여기서 먼저 한다. 검증 없이 보간하면
     # 비ASCII 데이터셋명이 Content-Disposition(latin-1)에 들어가 500이 되고,
@@ -638,7 +707,7 @@ _COMPANY_SCOPES = {"monitored", "cosmetic"}
 
 
 @app.get("/api/finance/csv")
-async def api_finance_csv(key: str = Query("")):
+async def api_finance_csv(request: Request):
     """재무 전체 내려받기 — 엑셀 파일(.xlsx).
 
     화면엔 기획팀 요청대로 매출·영업이익률·광고비율만 둔다. 영업이익 금액·
@@ -649,7 +718,7 @@ async def api_finance_csv(key: str = Query("")):
     """
     from fastapi.responses import Response
 
-    if not _admin_ok(key):
+    if not _admin_ok(request=request):
         return JSONResponse({"error": "unauthorized"}, status_code=403)
 
     def _build():
