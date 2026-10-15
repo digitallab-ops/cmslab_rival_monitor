@@ -218,6 +218,44 @@ def _admin_ok(key: str = "", request: Request = None) -> bool:
     return bool(key) and hmac.compare_digest(key, _ADMIN_KEY)
 
 
+def _client_ip(request: Request) -> str:
+    """Render는 프록시 뒤라 request.client.host가 전부 같은 값으로 찍힌다.
+    X-Forwarded-For 첫 홉을 쓴다(위조 가능하지만 IP별 구분엔 이게 최선)."""
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return xff or (request.client.host if request.client else "?")
+
+
+# 비밀번호를 사람이 고른 값으로 쓰면 사전 대입이 현실적인 위협이 된다.
+# 로그인만 조인다 — IP당 실패 5회/15분이면 잠그고, 실패마다 1초를 쉰다.
+# (XFF는 위조할 수 있으니 지연이 실질 방어다. 근본 방어는 긴 무작위 키.)
+_LOGIN_MAX_FAIL = 5
+_LOGIN_WINDOW = 15 * 60
+_LOGIN_FAIL_DELAY = 1.0
+_login_fails: dict = {}
+
+
+def _login_locked(ip: str) -> int:
+    """남은 잠금 시간(초). 0이면 통과."""
+    now = time.time()
+    fails = [t for t in _login_fails.get(ip, []) if now - t < _LOGIN_WINDOW]
+    _login_fails[ip] = fails
+    if len(fails) < _LOGIN_MAX_FAIL:
+        return 0
+    return int(_LOGIN_WINDOW - (now - fails[0])) + 1
+
+
+def _login_record(ip: str, ok: bool) -> None:
+    now = time.time()
+    if ok:
+        _login_fails.pop(ip, None)
+        return
+    _login_fails.setdefault(ip, []).append(now)
+    if len(_login_fails) > 2000:        # 메모리 상한(오래된 IP 정리)
+        for k in [k for k, v in _login_fails.items()
+                  if not any(now - t < _LOGIN_WINDOW for t in v)]:
+            _login_fails.pop(k, None)
+
+
 class _MCPAuthASGI:
     """마운트된 MCP 앱 앞단 Bearer 인증 래퍼 (키 미설정 시 통과)."""
 
@@ -267,12 +305,22 @@ async def admin_check(request: Request):
     예전엔 GET ?key=... 였다. 비밀번호가 주소창·브라우저 기록·서버 접근 로그에
     평문으로 남아서 POST 본문으로 옮겼다. 이후 관리자 호출은 쿠키로 인증한다.
     """
+    ip = _client_ip(request)
+    wait = _login_locked(ip)
+    if wait:
+        return JSONResponse(
+            {"ok": False, "error": f"시도가 너무 많습니다. {wait // 60 + 1}분 후 다시 시도하세요."},
+            status_code=429)
     try:
         payload = await request.json()
     except Exception:
         payload = {}
     key = str((payload or {}).get("key") or "").strip()
-    if not _ADMIN_KEY or not key or not hmac.compare_digest(key, _ADMIN_KEY):
+    ok = bool(_ADMIN_KEY) and bool(key) and hmac.compare_digest(key, _ADMIN_KEY)
+    _login_record(ip, ok)
+    if not ok:
+        await asyncio.sleep(_LOGIN_FAIL_DELAY)      # 자동 대입 속도를 떨어뜨린다
+        logger.warning("관리자 로그인 실패 — ip=%s", ip)
         return JSONResponse({"ok": False}, status_code=401)
     exp = int(time.time()) + _ADMIN_TTL
     res = JSONResponse({"ok": True, "ttl": _ADMIN_TTL})
