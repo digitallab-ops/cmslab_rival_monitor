@@ -276,6 +276,15 @@ class _MCPAuthASGI:
 
 app.mount("/mcp", _MCPAuthASGI(_mcp_asgi))
 
+# ChatGPT 커스텀 GPT의 '작업(Actions)'용 REST 계층. ChatGPT 커넥터는 MCP에
+# OAuth 2.1 + 동적 클라이언트 등록을 요구해서 고정 키로는 못 붙는다.
+# Actions는 OpenAPI + Bearer를 받으므로 같은 툴을 이쪽으로도 연다.
+try:
+    from gpt_actions import gpt_api
+    app.mount("/gpt", gpt_api)
+except Exception as e:                      # noqa: BLE001
+    logger.warning("GPT Actions 계층 마운트 실패(건너뜀): %s", e)
+
 
 # ── 대시보드 ────────────────────────────────────────────────────────────────
 
