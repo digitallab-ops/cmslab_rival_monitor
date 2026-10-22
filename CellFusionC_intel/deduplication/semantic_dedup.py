@@ -152,3 +152,33 @@ def dedup_recent(session, days: int = 10, threshold: float = None) -> dict:
     logger.info("의미 dedup: 임베딩 %d, 클러스터 %d, 중복표시 %d건",
                 embedded, clusters, marked)
     return {"embedded": embedded, "clusters": clusters, "marked": marked}
+
+
+# 임베딩 보존 — dedup_recent가 최근 10일만 보는데 임베딩은 영구 보관돼 왔다.
+# 그 결과 news_articles의 88MB가 임베딩이었고, 그중 74MB는 다시 읽히지 않는
+# 데이터였다(500MB 한도의 15%). 기사 건수는 평평한데 용량만 늘던 원인이다.
+# 지우는 게 아니라 비우는 것이라 기사·분류·본문은 그대로 남는다.
+EMBED_KEEP_DAYS = 30            # 판정 창(10일)의 3배. 창을 늘려도 안전하도록.
+
+
+def prune_embeddings(session, keep_days: int = EMBED_KEEP_DAYS) -> int:
+    """보존 기간이 지난 임베딩을 NULL로. 반환: 비운 행 수.
+
+    주의 — PostgreSQL은 비운 자리를 재사용할 뿐 파일을 줄이지 않는다.
+    용량 게이지를 실제로 내리려면 VACUUM FULL이 따로 필요하다. 다만 이것만으로도
+    증가가 멈춘다(새 임베딩이 비워진 자리에 들어간다).
+    """
+    try:
+        n = session.execute(text(f"""
+            UPDATE {DB_SCHEMA}.news_articles SET embedding = NULL
+            WHERE embedding IS NOT NULL
+              AND published_date < CURRENT_DATE - :d
+        """), {"d": keep_days}).rowcount
+        session.commit()
+        if n:
+            logger.info("임베딩 정리: %d건 비움(%d일 초과)", n, keep_days)
+        return n
+    except Exception as e:
+        session.rollback()
+        logger.warning("임베딩 정리 실패: %s", e)
+        return 0

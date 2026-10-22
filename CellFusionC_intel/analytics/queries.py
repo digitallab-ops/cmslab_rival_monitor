@@ -3308,6 +3308,15 @@ def get_launch_hits(session: Session, days: int = 90, min_reviews: int = 100) ->
     return [v for v in by_brand.values() if v["announced"] and v["retail"]]
 
 
+# NICE 전체 재무 집계 캐시. 이 쿼리 하나가 Supabase egress 1위였다 —
+# 46,719행 전수를 GROUP BY로 훑는데 WHERE가 없어 인덱스가 듣지 않고,
+# 대시보드 1회 생성에 2번씩 불려 누적 1,840만 행이 빠져나갔다.
+# 원본은 NICE 수집(월 1회)에만 바뀌므로 짧은 TTL로도 거의 다 걸린다.
+# 반환 객체는 호출부가 읽기만 한다(세 군데 모두 다른 구조를 새로 만든다).
+_ALLCO_CACHE: dict = {}
+_ALLCO_TTL = 1800           # 30분
+
+
 def get_all_company_financials(session: Session, cosmetic_only: bool = False) -> dict:
     """NICE BizLine 전체 기업 재무 — 기획팀 '전체 데이터 조회'용.
 
@@ -3322,6 +3331,11 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
     # 업종코드까지 키에 넣어 법인을 분리한 뒤, 회사당 '최신연도 매출이 가장 큰 법인' 하나만
     # 고른다. 화장품업 여부도 그 법인의 값을 그대로 쓴다(BOOL_OR로 뭉개면 비화장품 법인
     # 매출이 '화장품업만' 화면에 들어온다 — (주)바로 도매 424억이 화장품 매출로 잡히던 건).
+    import time as _t
+    _hit = _ALLCO_CACHE.get(bool(cosmetic_only))
+    if _hit and _t.time() - _hit[0] < _ALLCO_TTL:
+        return _hit[1]
+
     try:
         where = "WHERE is_cosmetic" if cosmetic_only else ""
         rows = session.execute(text(f"""
@@ -3388,7 +3402,9 @@ def get_all_company_financials(session: Session, cosmetic_only: bool = False) ->
     # 최신 연도 매출 내림차순(없으면 뒤로) — 기획팀이 규모 순으로 훑기 편하게.
     # 동률에서 순서가 흔들리지 않도록 회사명을 2차 기준으로 고정한다.
     out.sort(key=lambda r: (-(r["rev"].get(last) or 0), r["company"]))
-    return {"years": ys, "rows": out}
+    payload = {"years": ys, "rows": out}
+    _ALLCO_CACHE[bool(cosmetic_only)] = (_t.time(), payload)
+    return payload
 
 
 def get_dart_yoy(session: Session) -> dict:

@@ -568,6 +568,9 @@ def job_semantic_dedup() -> None:
         r = dedup_recent(session, days=10)
         logger.info("의미 중복 병합 완료: 임베딩 %d / 클러스터 %d / 중복 %d건",
                     r["embedded"], r["clusters"], r["marked"])
+        # 판정이 끝난 뒤 보존기간 지난 임베딩을 비운다(용량 증가 억제).
+        from deduplication.semantic_dedup import prune_embeddings
+        prune_embeddings(session)
     except Exception as e:
         logger.error("의미 중복 병합 오류: %s", e)
     finally:
@@ -590,11 +593,28 @@ def job_weekly_dedup() -> None:
                     save_dedup_candidate(session, id1, id2, score)
                     count += 1
         logger.info("중복 후보 %d쌍 기록 완료", count)
+        _prune_collection_runs(session)
     except Exception as e:
         logger.error("주간 중복 정리 오류: %s", e)
     finally:
         session.close()
     logger.info("=== 주간 중복 정리 완료 ===")
+
+
+def _prune_collection_runs(session, keep_days: int = 90) -> None:
+    """수집 실행 로그 정리. 5만 행까지 쌓여 있었다 — 진단은 최근 것만 본다."""
+    from sqlalchemy import text
+    from config.settings import DB_SCHEMA
+    try:
+        n = session.execute(text(
+            f"DELETE FROM {DB_SCHEMA}.collection_runs "
+            f"WHERE run_at < NOW() - INTERVAL '{int(keep_days)} days'")).rowcount
+        session.commit()
+        if n:
+            logger.info("수집 로그 정리: %d행 삭제(%d일 초과)", n, keep_days)
+    except Exception as e:
+        session.rollback()
+        logger.warning("수집 로그 정리 실패: %s", e)
 
 
 def _on_job_error(event) -> None:

@@ -38,17 +38,42 @@ def save_article(session: Session, article: NewsArticle) -> NewsArticle:
     session.add(article)
     session.commit()
     session.refresh(article)
+    _titles_cache_add(article)
     return article
 
 
+# 최근 제목 캐시 — 제목 유사도 중복판정용.
+#
+# run_pipeline이 (브랜드×국가)마다 이걸 부른다. 주간 풀스캔이면 31×27=837번,
+# 매번 최근 3일치 제목 전부를 끌어온다. 누적 47,204회 · 820만 행이 빠져나갔고
+# Supabase egress 2위였다. 수집은 로컬 단독 프로세스라 그동안 이 테이블에
+# 쓰는 건 우리뿐이다 — 한 번 읽고, 저장할 때마다 캐시에 붙이면 정확도가 같다.
+_TITLES_TTL = 900            # 15분. 수집 한 사이클보다 짧게 잡아 과도한 보존 방지.
+_titles_cache: dict = {}     # {days: [ts, [(id, title), ...]]}
+
+
+def _titles_cache_add(article: NewsArticle) -> None:
+    """새로 저장한 기사를 살아 있는 캐시에 반영(재조회 없이 최신 상태 유지)."""
+    if not getattr(article, "id", None) or not getattr(article, "title", None):
+        return
+    for entry in _titles_cache.values():
+        entry[1].append((article.id, article.title))
+
+
 def get_recent_titles(session: Session, days: int = 3) -> list[tuple[int, str]]:
+    import time as _t
+    hit = _titles_cache.get(days)
+    if hit and _t.time() - hit[0] < _TITLES_TTL:
+        return hit[1]
     cutoff = datetime.utcnow() - timedelta(days=days)
     rows = (
         session.query(NewsArticle.id, NewsArticle.title)
         .filter(NewsArticle.published_date >= cutoff)
         .all()
     )
-    return [(r.id, r.title) for r in rows]
+    out = [(r.id, r.title) for r in rows]
+    _titles_cache[days] = [_t.time(), out]
+    return out
 
 
 def save_dedup_candidate(session: Session, id1: int, id2: int, similarity: float):
