@@ -392,13 +392,40 @@ def check_classification_quality(session, sample: int = 10) -> list[dict]:
     def _expect(sc):
         return "high" if sc >= 75 else ("medium" if sc >= 55 else "low")
 
+    def _cands(brand):
+        return [c for c in ([brand, (brand or "").replace(" ", "")]
+                            + list(BRAND_KO_NAMES.get(brand, []))) if c]
+
     def _mentioned(r):
         blob = " ".join([r[4] or "", r[5] or "", r[6] or ""]).lower()
-        cands = [r[1], (r[1] or "").replace(" ", "")] + list(BRAND_KO_NAMES.get(r[1], []))
-        return any(n and n.lower() in blob for n in cands)
+        return any(c.lower() in blob for c in _cands(r[1]))
+
+    def _confirm_ghosts(suspects):
+        """1차(제목·요약)에서 안 걸린 것만 본문으로 재확인.
+
+        예전엔 title·title_ko·details만 보고 '본문에도 없다'고 단정했다. details는
+        분류가 만든 짧은 요약이라 브랜드명이 빠지는 일이 흔하다. 실측 24건 경고 중
+        22건이 본문에는 멀쩡히 있던 오탐이었다(Beauty of Joseon 다수).
+        본문을 162건 전수로 끌어오면 egress가 커지므로, 의심 건만 다시 읽는다.
+        """
+        if not suspects:
+            return []
+        ids = [r[0] for r in suspects]
+        try:
+            bodies = dict(session.execute(text(f"""
+                SELECT id, lower(COALESCE(article_body,'') || ' '
+                                 || COALESCE(article_body_ko,''))
+                FROM {DB_SCHEMA}.news_articles WHERE id = ANY(:ids)
+            """), {"ids": ids}).fetchall())
+        except Exception as e:
+            logger.warning("본문 재확인 실패(1차 결과 사용): %s", e)
+            return suspects
+        return [r for r in suspects
+                if not any(c.lower() in bodies.get(r[0], "") for c in _cands(r[1]))]
 
     mism = [r for r in rows if r[3] and _expect(r[3]) != r[2]]
-    ghost = [r for r in rows if r[7] not in ("incidental", "unrelated") and not _mentioned(r)]
+    ghost = _confirm_ghosts(
+        [r for r in rows if r[7] not in ("incidental", "unrelated") and not _mentioned(r)])
 
     findings = []
     n = len(rows)
@@ -416,8 +443,9 @@ def check_classification_quality(session, sample: int = 10) -> list[dict]:
         findings.append({
             "type": "classify_qa", "key": f"classify:ghost:{len(ghost)}",
             "title": f"브랜드가 기사에 없는데 무관 처리가 아님 — 최근 2일 {len(ghost)}/{n}건",
-            "detail": (f"제목·한글제목·본문 어디에도 브랜드명이 없는데 brand_focus가 "
-                       f"incidental/unrelated가 아니다. 지표와 브리핑에 그대로 섞인다. {ex}"),
+            "detail": (f"제목·요약·본문 어디에도 브랜드명(영문·한글 별칭 포함)이 없는데 "
+                       f"brand_focus가 incidental/unrelated가 아니다. "
+                       f"지표와 브리핑에 그대로 섞인다. {ex}"),
             "read": "brand_focus 'unrelated' 판정이 실제로 쓰이는지 분류 출력 확인",
         })
     return findings
