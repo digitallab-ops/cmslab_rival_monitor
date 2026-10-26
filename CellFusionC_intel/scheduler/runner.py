@@ -34,11 +34,13 @@ def _get_tier_brands(tier: int) -> list[str]:
     try:
         from sqlalchemy import text
         session = get_session()
-        rows = session.execute(text(
-            "SELECT name FROM rival_intel.monitored_brands "
-            "WHERE tier = :tier AND is_active = TRUE ORDER BY name"
-        ), {"tier": tier}).fetchall()
-        session.close()
+        try:
+            rows = session.execute(text(
+                "SELECT name FROM rival_intel.monitored_brands "
+                "WHERE tier = :tier AND is_active = TRUE ORDER BY name"
+            ), {"tier": tier}).fetchall()
+        finally:
+            session.close()
         brands = [r[0] for r in rows]
         if brands:
             return brands
@@ -146,10 +148,13 @@ def job_weekly_full() -> None:
     try:
         from sqlalchemy import text
         session = get_session()
-        rows = session.execute(text(
-            "SELECT name FROM rival_intel.monitored_brands WHERE is_active = TRUE ORDER BY tier, name"
-        )).fetchall()
-        session.close()
+        try:
+            rows = session.execute(text(
+                "SELECT name FROM rival_intel.monitored_brands "
+                "WHERE is_active = TRUE ORDER BY tier, name"
+            )).fetchall()
+        finally:
+            session.close()
         all_active = [r[0] for r in rows] or ALL_BRANDS
     except Exception:
         all_active = ALL_BRANDS

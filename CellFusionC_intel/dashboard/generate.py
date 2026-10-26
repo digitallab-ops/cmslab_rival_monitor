@@ -6434,9 +6434,16 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                     else "낮음" if "낮음" in _b else None)
             _resp_items.append({"brand": _detect_bullet_brand(_clean), "text": _clean,
                                 "urgency": _urg})
-        record_respond_items(session, _resp_items)
-        purge_respond_feed(session, keep_days=21)
-        respond_feed = get_respond_feed(session, days=7)
+        # 위쪽 session은 이미 닫혔다(6291줄 finally). 닫힌 세션에 쿼리하면
+        # SQLAlchemy가 조용히 새 트랜잭션을 여는데, 그걸 닫을 finally는 이미
+        # 지나간 뒤라 커넥션이 'idle in transaction'으로 남았다. 전용 세션을 쓴다.
+        _rf_session = get_session()
+        try:
+            record_respond_items(_rf_session, _resp_items)
+            purge_respond_feed(_rf_session, keep_days=21)
+            respond_feed = get_respond_feed(_rf_session, days=7)
+        finally:
+            _rf_session.close()
     except Exception as _e:
         logger.warning("대응 피드 처리 실패: %s", _e)
         respond_feed = []
