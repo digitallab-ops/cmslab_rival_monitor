@@ -27,7 +27,7 @@ from config.brands import SELF_BRANDS
 from deduplication.url_hasher import url_hash, deduplicate_batch
 from storage.models import NewsArticle, CollectionRun, get_session
 from storage.repository import (
-    article_exists, save_article, get_recent_titles, save_collection_run,
+    existing_url_hashes, save_article, get_recent_titles, save_collection_run,
     high_alert_is_duplicate, record_high_alert,
 )
 from config.settings import (CLASSIFIER_MODEL_DETAIL, HIGH_ALERT_MIN_SCORE,
@@ -110,13 +110,15 @@ def _run_single(
     if not raw_articles:
         return
 
-    # URL 해시 중복 제거
+    # URL 해시 중복 제거 — 해시를 모아 한 번에 조회한다(건당 쿼리 금지).
+    hashed = [(art, url_hash(art.url)) for art in raw_articles]
+    seen = existing_url_hashes(session, [h for _, h in hashed])
     url_passed = []
-    for art in raw_articles:
-        h = url_hash(art.url)
-        if article_exists(session, h):
+    for art, h in hashed:
+        if h in seen:
             stats.url_duped += 1
         else:
+            seen.add(h)          # 같은 배치 안의 중복도 걸러낸다
             url_passed.append(art)
 
     if not url_passed:

@@ -31,7 +31,31 @@ def get_active_brand_names(session: Optional[Session] = None) -> list[str]:
 
 
 def article_exists(session: Session, url_hash: str) -> bool:
-    return session.query(NewsArticle).filter_by(url_hash=url_hash).first() is not None
+    """단건 존재 확인. 여러 건이면 existing_url_hashes를 쓸 것.
+
+    예전엔 엔티티를 통째로 로드했다(.query(NewsArticle)) — 존재 여부만 필요한데
+    본문·임베딩까지 딸려 나왔다. id만 본다.
+    """
+    return session.query(NewsArticle.id).filter_by(url_hash=url_hash).first() is not None
+
+
+def existing_url_hashes(session: Session, hashes: list) -> set:
+    """이미 저장된 url_hash만 집합으로. 수집 중복 차단용.
+
+    예전엔 기사마다 article_exists()를 불러 한 건당 쿼리가 하나씩 나갔다 —
+    누적 69만 회·DB시간 690초로 전체 1위였다. 한 번에 묶어서 조회한다.
+    IN 목록이 과하게 길어지지 않도록 1,000개씩 끊는다.
+    """
+    uniq = [h for h in dict.fromkeys(hashes) if h]
+    if not uniq:
+        return set()
+    found = set()
+    for i in range(0, len(uniq), 1000):
+        chunk = uniq[i:i + 1000]
+        found.update(
+            r[0] for r in session.query(NewsArticle.url_hash)
+                             .filter(NewsArticle.url_hash.in_(chunk)).all())
+    return found
 
 
 _NUL = chr(0)
