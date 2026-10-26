@@ -34,9 +34,33 @@ def article_exists(session: Session, url_hash: str) -> bool:
     return session.query(NewsArticle).filter_by(url_hash=url_hash).first() is not None
 
 
+_NUL = chr(0)
+
+
+def _strip_nul(article: NewsArticle) -> None:
+    """문자열 컬럼에서 NUL(0x00) 제거.
+
+    일부 사이트 본문을 긁으면 NUL이 섞여 들어온다. PostgreSQL text는 NUL을
+    못 받아서 INSERT가 "A string literal cannot contain NUL (0x00) characters"로
+    터진다. 실측 413건 — 주로 일본 매체(Anua/JP, Rejuran/JP).
+    """
+    for col in article.__table__.columns:
+        v = getattr(article, col.name, None)
+        if isinstance(v, str) and _NUL in v:
+            setattr(article, col.name, v.replace(_NUL, ""))
+
+
 def save_article(session: Session, article: NewsArticle) -> NewsArticle:
-    session.add(article)
-    session.commit()
+    _strip_nul(article)
+    try:
+        session.add(article)
+        session.commit()
+    except Exception:
+        # 롤백하지 않으면 세션이 오염된 채로 남아, 같은 수집 실행의 **이후 저장이
+        # 전부** "transaction has been rolled back"으로 실패한다. 한 건 실패가
+        # 그 브랜드·국가의 남은 수집기(media_rss·jangup·reddit)까지 죽이던 원인.
+        session.rollback()
+        raise
     session.refresh(article)
     _titles_cache_add(article)
     return article
