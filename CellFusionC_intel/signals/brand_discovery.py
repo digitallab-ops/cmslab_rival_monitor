@@ -88,10 +88,22 @@ _BLOCK_K = {_cmp_key(b) for b in _BLOCK if _cmp_key(b)}
 _BLOCK_EXACT_K = {_cmp_key(b) for b in _BLOCK_EXACT if _cmp_key(b)}
 
 
+def _strip_ver(k: str) -> str:
+    """버전·회차 숫자를 뗀 형태. 'kbeauty20' → 'kbeauty'.
+
+    일반명사는 완전일치로만 막는데(Beauty of Joseon을 살리려고), 뒤에 숫자가
+    붙으면 그 그물을 빠져나간다. 실제로 신문 연재 제목 '[K-뷰티 2.0 시대]'에서
+    딴 'K-Beauty 2.0'이 브랜드 후보로 슬랙까지 나갔다.
+    숫자만 떼므로 Skin1004('skin')처럼 일반명사가 아닌 것은 영향이 없다.
+    """
+    return "".join(c for c in (k or "") if not c.isdigit())
+
+
 def _is_block(name: str, ko: str) -> bool:
     nk, kk = _cmp_key(name), _cmp_key(ko)
-    if nk in _BLOCK_EXACT_K or (kk and kk in _BLOCK_EXACT_K):
-        return True
+    for v in (nk, kk, _strip_ver(nk), _strip_ver(kk)):
+        if v and v in _BLOCK_EXACT_K:
+            return True
     return any(b in nk or (kk and b in kk) for b in _BLOCK_K)
 
 
