@@ -284,6 +284,29 @@ def _week_anchor():
     return last_mon.isoformat(), (this_mon - _td(days=1)).isoformat()
 
 
+# 같은 채널이 표기만 다르게 들어온다. 그대로 두면 'Amazon'→'아마존'으로 바뀐 주에
+# 아마존이 '새 채널'로 잡힌다. 하나로 모은다.
+_CH_CANON = {
+    "아마존": "Amazon", "amazon": "Amazon",
+    "세포라": "Sephora", "sephora": "Sephora",
+    "올리브영": "Olive Young", "oliveyoung": "Olive Young", "olive young": "Olive Young",
+    "울타": "Ulta", "ulta beauty": "Ulta", "ulta": "Ulta",
+    "코스트코": "Costco", "costco": "Costco",
+    "@cosme tokyo": "@cosme", "@cosme": "@cosme",
+    "틱톡샵": "TikTok Shop", "tiktok shop": "TikTok Shop", "틱톡숍": "TikTok Shop",
+    "쇼피파이": "Shopify", "shopify": "Shopify",
+    "네이버": "Naver", "네이버 쇼핑": "Naver", "네이버 공식 스토어": "Naver", "naver": "Naver",
+    "쿠팡": "Coupang", "coupang": "Coupang",
+    "큐텐": "Qoo10", "qoo10": "Qoo10",
+    "왓슨스": "Watsons", "watsons": "Watsons",
+}
+
+
+def _ch_norm(ch: str) -> str:
+    c = (ch or "").strip()
+    return _CH_CANON.get(c.lower(), c)
+
+
 def _week_delta(session, bko):
     """이번 주에 '새로 생긴 것'만 추린다 — 전주 대비 비교.
 
@@ -292,6 +315,7 @@ def _week_delta(session, bko):
     """
     from sqlalchemy import text as _t
     from datetime import date, timedelta as _td
+    from config.brands import canonical_brand
     # _week_anchor와 같은 구간(직전 완결 주)을 그 전 주와 비교한다.
     mon = date.today() - _td(days=date.today().weekday()) - _td(days=7)
     q = _t(f"""
@@ -308,14 +332,26 @@ def _week_delta(session, bko):
                                   "b": (mon + _td(days=7)).isoformat()}).fetchall()
         prv = session.execute(q, {"a": (mon - _td(days=7)).isoformat(),
                                   "b": mon.isoformat()}).fetchall()
+        # '처음'은 전체 이력 기준이어야 한다. 직전 주와만 비교하면 Sephora(2014년부터)
+        # Amazon(2021년부터)처럼 오래된 채널이 '이번 주 신규'로 둔갑한다.
+        hist = session.execute(_t(f"""
+            SELECT DISTINCT brand, COALESCE(channel,'') ch
+            FROM {DB_SCHEMA}.news_articles
+            WHERE published_date < :a AND brand IS NOT NULL
+              AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
+        """), {"a": mon.isoformat()}).fetchall()
     except Exception as e:
         logger.warning("주간 델타 조회 실패: %s", e)
         return ""
+    ever_b = {canonical_brand(b) or "" for b, _ in hist}
+    ever_ch = {_ch_norm(c) for _, c in hist if (c or "").strip()}
 
     def agg(rows):
         brands, pairs, chans, acts = {}, set(), set(), {}
         for b, c, a, ch, n in rows:
-            b = (b or "").strip()
+            # 분류가 유통사를 브랜드로 넣는 일이 있다(실측 '올리브영' 1건이 '그 주
+            # 처음 잡힌 브랜드'로 한 방에 실렸다). 등록 브랜드만 센다.
+            b = canonical_brand(b) or ""
             c = (c or "").strip()
             ch = (ch or "").strip()
             if not b:
@@ -323,6 +359,7 @@ def _week_delta(session, bko):
             brands[b] = brands.get(b, 0) + n
             if c and c.lower() not in ("null", "none", "global"):
                 pairs.add((b, c))
+            ch = _ch_norm(ch)
             if ch and ch.lower() not in ("null", "none"):
                 chans.add(ch)
             if a:
@@ -332,14 +369,14 @@ def _week_delta(session, bko):
     cb, cp, cc, ca = agg(cur)
     pb, pp, pc, pa = agg(prv)
     out = []
-    new_b = sorted(b for b in cb if b not in pb)
+    new_b = sorted(b for b in cb if b not in ever_b)       # 전체 이력상 첫 등장
     if new_b:
         out.append("그 주 처음 잡힌 브랜드: " + ", ".join(bko(b) for b in new_b[:6]))
     new_pair = sorted((b, c) for (b, c) in cp if (b, c) not in pp)
     if new_pair:
         out.append("새로 등장한 브랜드×국가: " +
                    ", ".join(f"{bko(b)}/{c}" for b, c in new_pair[:8]))
-    new_ch = sorted(c for c in cc if c not in pc)
+    new_ch = sorted(c for c in cc if c not in ever_ch)     # 전체 이력상 첫 등장
     if new_ch:
         out.append("그 주 새로 나온 판매채널: " + ", ".join(new_ch[:6]))
     surge = sorted(((b, n, pb.get(b, 0)) for b, n in cb.items() if n >= pb.get(b, 0) + 3),
