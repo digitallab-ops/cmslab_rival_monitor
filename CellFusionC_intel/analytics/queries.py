@@ -3631,3 +3631,62 @@ def explore_summary(session: Session) -> list:
             "countries": _explore_distinct(session, spec, "country"),
         })
     return out
+
+
+def get_shelf_position(session: Session, days: int = 30) -> dict:
+    """올리브영 선반에서 자사가 어디쯤인지 — 카테고리별 비교군 대비 순위.
+
+    '우리 위치'가 리뷰 점수 두 줄뿐이라는 지적에 대한 답. 경쟁사 34개는
+    상세히 추적하면서 정작 같은 선반의 글로벌 더마(라로슈포제·바이오더마)는
+    목록에 없었다. 수집은 이미 되고 있었고 매핑만 없었다.
+
+    반환: {categories: [{category, rows: [{brand, days, avg, best, is_self}],
+                         self_rank, total_brands}], suggestions: [...]}
+      suggestions = 코어 밖인데 기준을 넘은 브랜드(사람이 승인해 추가).
+    """
+    from config.shelf_peers import SHELF_PEERS, _PEER_MIN_DAYS, _PEER_MAX_AVG
+    out, sugg = [], []
+    try:
+        cats = [r[0] for r in session.execute(text(f"""
+            SELECT DISTINCT category FROM {DB_SCHEMA}.oliveyoung_rankings
+            WHERE brand = 'CellFusionC' AND category IS NOT NULL""")).fetchall()]
+    except Exception as e:
+        logger.warning("선반 위치 조회 실패: %s", e)
+        return {"categories": [], "suggestions": []}
+
+    for cat in cats:
+        try:
+            rows = session.execute(text(f"""
+                SELECT brand_name, COUNT(DISTINCT capture_date) d,
+                       ROUND(AVG(rank_position))::int a, MIN(rank_position) b
+                FROM {DB_SCHEMA}.oliveyoung_rankings
+                WHERE category = :c AND brand_name IS NOT NULL
+                  AND capture_date >= CURRENT_DATE - :d
+                GROUP BY 1"""), {"c": cat, "d": days}).fetchall()
+        except Exception as e:
+            logger.warning("선반 위치 조회 실패 [%s]: %s", cat, e)
+            continue
+        peers = set(SHELF_PEERS.get(cat, []))
+        by_name = {r[0]: r for r in rows}
+        shown = []
+        for name in list(peers) + ["셀퓨전씨"]:
+            r = by_name.get(name)
+            if not r:
+                continue
+            shown.append({"brand": name, "days": r[1], "avg": r[2], "best": r[3],
+                          "is_self": name == "셀퓨전씨"})
+        shown.sort(key=lambda x: (x["avg"], -x["days"]))
+        # 자사가 그 기간에 한 번도 순위에 없었다면 그 자체가 정보다.
+        # 조용히 빼면 '우리 위치' 섹션에서 우리만 사라진다.
+        if not any(x["is_self"] for x in shown):
+            shown.append({"brand": "셀퓨전씨", "days": 0, "avg": None, "best": None,
+                          "is_self": True, "absent": True})
+        self_rank = next((i + 1 for i, x in enumerate(shown) if x["is_self"]), None)
+        out.append({"category": cat, "rows": shown, "self_rank": self_rank,
+                    "total_brands": len(rows)})
+        # 코어 밖에서 기준을 넘은 브랜드 → 추가 제안(자동 편입 안 함)
+        for n, d, a, b in rows:
+            if n not in peers and n != "셀퓨전씨" and d >= _PEER_MIN_DAYS and a <= _PEER_MAX_AVG:
+                sugg.append({"category": cat, "brand": n, "days": d, "avg": a, "best": b})
+    sugg.sort(key=lambda x: (x["avg"], -x["days"]))
+    return {"categories": out, "suggestions": sugg}
