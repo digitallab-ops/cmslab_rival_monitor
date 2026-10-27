@@ -257,7 +257,7 @@ def run() -> dict:
     session = get_session()
     try:
         _ensure_table(session)
-        brands = get_active_brand_names(session)
+        brands = get_active_brand_names(session, include_self=True)
         for brand in brands:
             term = SEARCH_TERMS.get(brand, brand)
             n_b, n_own = 0, 0

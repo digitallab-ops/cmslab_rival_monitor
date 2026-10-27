@@ -115,7 +115,7 @@ def _save(session, term: str, brand: str, geo_label: str, rows: list) -> int:
 
 def run() -> dict:
     """브랜드 글로벌·US·JP 일별 검색 관심도 수집. 반환 {geos, rows, failed}."""
-    term_by_brand = {_term(b): b for b in get_active_brand_names()}
+    term_by_brand = {_term(b): b for b in get_active_brand_names(include_self=True)}
     terms = list(term_by_brand.keys())
     rows_total, failed = 0, 0
     session = get_session()

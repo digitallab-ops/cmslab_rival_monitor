@@ -19,7 +19,8 @@ from bs4 import BeautifulSoup
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import canonical_brand, is_monitored_brand, ALL_BRANDS
+from config.brands import (canonical_brand, is_monitored_brand,
+                           ALL_BRANDS, SELF_BRANDS)
 from storage.models import get_session
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,9 @@ def _norm(s: str) -> str:
 def _build_dict() -> dict:
     """브랜드 → [정규화 키워드 목록]. 모니터링 + 메이저."""
     d: dict = {}
-    for b in list(ALL_BRANDS) + KBEAUTY_MAJORS:
+    # 자사도 넣는다 — 경쟁사와 같은 기준(해외 판매 순위)으로 '우리 위치'를 재려면
+    # 같은 매칭 사전에 올라 있어야 한다. 아마존에 안 팔면 그냥 안 잡힐 뿐이다.
+    for b in list(ALL_BRANDS) + list(SELF_BRANDS) + KBEAUTY_MAJORS:
         keys = set(_BRAND_ALIASES.get(b, []))
         keys.add(_norm(b))
         d[b] = [k for k in keys if len(k) >= 4]

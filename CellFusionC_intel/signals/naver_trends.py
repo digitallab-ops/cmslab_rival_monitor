@@ -148,7 +148,7 @@ def run(days: int = 120) -> dict:
     """브랜드 + 성분 검색 트렌드 수집·저장. 반환: {groups, rows}."""
     end = datetime.utcnow().date()
     start = end - timedelta(days=days)
-    groups = _brand_keyword_groups(get_active_brand_names()) + _ingredient_keyword_groups()
+    groups = _brand_keyword_groups(get_active_brand_names(include_self=True)) + _ingredient_keyword_groups()
     results = _call_datalab(groups, start.isoformat(), end.isoformat(), "week")
     if not results:
         logger.warning("데이터랩 검색 트렌드: 결과 없음(스코프 미설정 가능)")

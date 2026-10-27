@@ -7,13 +7,18 @@ from storage.models import NewsArticle, CollectionRun, DedupCandidate, get_sessi
 from config.settings import DB_SCHEMA
 
 
-def get_active_brand_names(session: Optional[Session] = None) -> list[str]:
+def get_active_brand_names(session: Optional[Session] = None,
+                           include_self: bool = False) -> list[str]:
     """활성 모니터 브랜드명(monitored_brands DB, 티어 무관). 실패·빈 결과 시 config fallback.
 
     신호계층(검색·수출·재무·상표)과 뉴스 수집이 같은 브랜드 소스를 쓰도록 공용화.
     → monitored_brands에 브랜드 1회 추가하면 전 파이프라인에 자동 반영.
+
+    include_self: 자사(셀퓨전씨)를 함께 돌려준다. '우리 위치'를 경쟁사와 같은
+      기준으로 재려면 같은 수집기를 자사에도 돌려야 한다. 기본은 False —
+      경쟁사 집계에 자사가 섞이면 안 되는 곳(재무 등)이 있어서다.
     """
-    from config.brands import ALL_BRANDS
+    from config.brands import ALL_BRANDS, SELF_BRANDS
     own = session is None
     if own:
         session = get_session()
@@ -22,9 +27,13 @@ def get_active_brand_names(session: Optional[Session] = None) -> list[str]:
             f"SELECT name FROM {DB_SCHEMA}.monitored_brands "
             f"WHERE is_active = TRUE ORDER BY tier, name"
         )).fetchall()
-        return [r[0] for r in rows] or list(ALL_BRANDS)
+        names = [r[0] for r in rows] or list(ALL_BRANDS)
+        if include_self:
+            names = names + [b for b in SELF_BRANDS if b not in names]
+        return names
     except Exception:
-        return list(ALL_BRANDS)
+        base = list(ALL_BRANDS)
+        return base + list(SELF_BRANDS) if include_self else base
     finally:
         if own:
             session.close()
