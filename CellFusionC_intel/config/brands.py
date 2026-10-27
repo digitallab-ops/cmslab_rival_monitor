@@ -52,6 +52,14 @@ def canonical_brand(name: str) -> "str | None":
     아마존은 같은 브랜드를 'TirTir'로, 우리는 'Tirtir'로 적는다. 대소문자·공백·
     점·하이픈만 다른 표기를 단순 문자열 비교로 넘기면 등록된 브랜드가 '미등록'으로
     기록된다(실제로 TirTir 199행이 그렇게 샜다). 못 찾으면 None.
+
+    **한글 표기도 받는다** — 올리브영은 '아누아'·'메디큐브'처럼 한글로만 적는데
+    예전엔 영문 키만 들고 있어서 등록 브랜드의 한글명 40개가 전부 None으로
+    떨어졌다. 그 결과 올리브영 랭킹 96행(바이오던스 3위·루온셀 2위·메디큐브
+    6위 등)이 '미등록'으로 새고 있었다.
+
+    자사(셀퓨전씨)도 되돌려준다. 다만 경쟁사 집계에 섞으면 안 되므로
+    모니터링 여부는 is_monitored_brand()로 따로 판정할 것.
     """
     k = _brand_key(name)
     return _BRAND_BY_KEY.get(k) if k else None
@@ -66,6 +74,17 @@ _BRAND_BY_KEY = {_brand_key(b): b for b in ALL_BRANDS}
 # 자사(씨엠에스랩 대표 브랜드) — 경쟁사 집계와 분리하는 기준선(baseline).
 # 경쟁사 목록(ALL_BRANDS)엔 넣지 않고, 전용 수집 잡 + is_self 플래그로 분리한다.
 SELF_BRANDS = ["CellFusionC"]
+
+
+def is_monitored_brand(name: str) -> bool:
+    """경쟁사 모니터링 대상인가. 자사는 제외한다(집계가 섞이면 안 된다)."""
+    c = canonical_brand(name)
+    return bool(c) and c not in SELF_BRANDS
+
+
+def is_self_brand(name: str) -> bool:
+    """자사(셀퓨전씨) 표기인가 — 한글·영문 모두."""
+    return canonical_brand(name) in SELF_BRANDS
 
 # Tier 1 국가: 매일 수집 (K-뷰티 핵심 시장)
 # IN·PH 승격(2026-08): 영어권 대형 K-뷰티 시장인데 주간(1회)이라 수집량 과소 → 매일로.
@@ -278,4 +297,21 @@ def _merge_db_ko_names() -> None:
                 cur.append(v)
 
 
+def _register_aliases() -> None:
+    """한글 별칭과 자사명을 canonical_brand 키맵에 넣는다.
+
+    영문만 들고 있으면 국내 채널(올리브영·네이버·장업신문)이 쓰는 한글 표기를
+    하나도 못 되돌린다. 자사도 넣어야 우리 제품이 랭킹에서 식별된다.
+    """
+    for b in list(ALL_BRANDS) + list(SELF_BRANDS):
+        k = _brand_key(b)
+        if k:
+            _BRAND_BY_KEY.setdefault(k, b)
+        for ko in (BRAND_KO_NAMES.get(b) or []):
+            kk = _brand_key(ko)
+            if kk:
+                _BRAND_BY_KEY.setdefault(kk, b)
+
+
 _merge_db_ko_names()
+_register_aliases()

@@ -19,7 +19,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import canonical_brand, ALL_BRANDS
+from config.brands import canonical_brand, is_monitored_brand, ALL_BRANDS
 from storage.models import get_session
 
 logger = logging.getLogger(__name__)
@@ -172,7 +172,7 @@ def _fetch_node(node: str, country: str, category: str,
             out.append({
                 "retailer": "amazon", "country": country, "category": category,
                 "brand": canonical_brand(brand) or brand,
-                "is_monitored": canonical_brand(brand) is not None,
+                "is_monitored": is_monitored_brand(brand),
                 "is_core": category in CORE_CATEGORIES,
                 "product_name": title[:300], "rank": rank,
                 "rating": rating, "review_count": reviews, "product_url": href,

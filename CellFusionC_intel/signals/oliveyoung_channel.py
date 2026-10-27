@@ -23,7 +23,8 @@ from datetime import date
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import canonical_brand, ALL_BRANDS, BRAND_KO_NAMES
+from config.brands import (canonical_brand, is_monitored_brand,
+                           ALL_BRANDS, SELF_BRANDS, BRAND_KO_NAMES)
 from storage.models import get_session
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,9 @@ def _norm(s: str) -> str:
 def _build_dict() -> dict:
     """브랜드 → [매칭 키워드]. 한국어명 우선 + 영문/보강 별칭."""
     d: dict = {}
-    for b in ALL_BRANDS:
+    # 자사도 넣는다 — 안 넣으면 우리 제품이 랭킹에 올라도 brand=None으로 남아
+    # '우리 위치'에 아무것도 안 뜬다(실측 셀퓨전씨 13행, 최고 6위가 새고 있었다).
+    for b in list(ALL_BRANDS) + list(SELF_BRANDS):
         keys = set(BRAND_KO_NAMES.get(b, []))    # 한국어 별칭(메디힐·조선미녀 등)
         keys.add(b)                              # 영문명 원형
         keys.update(_OY_ALIASES.get(b, []))      # 올영 표기 보강
@@ -224,7 +227,7 @@ def _save_review(session, r: dict, cap: date) -> dict:
         "week_start": r.get("week_start"), "category": r.get("category_name", ""),
         "goods_no": r.get("goods_no", ""), "goods_name": gname[:300],
         "brand_name": (r.get("brand_name") or "")[:120], "brand": brand,
-        "is_monitored": canonical_brand(brand) is not None, "is_ours": ours,
+        "is_monitored": is_monitored_brand(brand), "is_ours": ours,
         "rank_position": r.get("rank_position"), "review_count": r.get("review_count"),
         "avg_score": r.get("avg_score"),
         "positive_keywords": _kw_json(r.get("positive_keywords")),
@@ -259,7 +262,7 @@ def _save_ranking(session, category: str, e: dict, cap: date) -> dict:
         "prev_rank": e.get("prev_rank"), "delta": e.get("delta"),
         "goods_no": e.get("goods_no", ""), "goods_name": gname[:300],
         "brand_name": _extract_brand_name(gname)[:120],
-        "brand": brand, "is_monitored": canonical_brand(brand) is not None,
+        "brand": brand, "is_monitored": is_monitored_brand(brand),
         "is_ours": ours, "cap": cap,
     }
     session.execute(text(f"""
