@@ -3173,7 +3173,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
       var g = ctx.createLinearGradient(krx, kry, tx, ty);
       g.addColorStop(0, cssv('color-mix(in srgb, var(--blue) 55%, transparent)'));
       g.addColorStop(0.6, cssv('color-mix(in srgb, var(--blue) 20%, transparent)'));
-      g.addColorStop(1,   st.high > 0 ? 'color-mix(in srgb, var(--critical) 40%, transparent)' : 'color-mix(in srgb, var(--warning) 30%, transparent)');
+      g.addColorStop(1,   cssv(st.high > 0 ? 'color-mix(in srgb, var(--critical) 40%, transparent)' : 'color-mix(in srgb, var(--warning) 30%, transparent)'));
       ctx.beginPath(); ctx.moveTo(krx, kry);
       ctx.quadraticCurveTo(mx, my, tx, ty);
       ctx.strokeStyle = g;
@@ -3206,7 +3206,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
         ctx.fillStyle = cssv('var(--baseline)'); ctx.fill(); return;
       }}
       var isH = st.high > 0, isM = st.medium > 0;
-      var col  = isH ? 'var(--critical)' : isM ? 'var(--warning)' : 'var(--aqua)';
+      var col  = cssv(isH ? 'var(--critical)' : isM ? 'var(--warning)' : 'var(--aqua)');
       var glC  = isH ? 'rgba(208,59,59,' : isM ? 'rgba(250,178,25,' : 'rgba(25,158,112,';
       var base = isH ? 5 + Math.min(Math.sqrt(st.high)*1.6, 7) : 4;
 
@@ -3240,7 +3240,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
       var eu = euCentroid();
       if (eu) {{
         var isH2 = eu.high > 0;
-        var col2 = isH2 ? 'var(--critical)' : 'var(--warning)';
+        var col2 = cssv(isH2 ? 'var(--critical)' : 'var(--warning)');
         var glC2 = isH2 ? 'rgba(208,59,59,' : 'rgba(250,178,25,';
         var cr   = 12;
         // halo
@@ -3260,7 +3260,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
         // label
         ctx.font = 'bold 10px monospace';
         ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillText('유럽', eu.x + 0.5, eu.y + cr + 12.5);
-        ctx.fillStyle = isH2 ? 'var(--critical)' : 'var(--warning)'; ctx.fillText('유럽', eu.x, eu.y + cr + 12);
+        ctx.fillStyle = cssv(isH2 ? 'var(--critical)' : 'var(--warning)'); ctx.fillText('유럽', eu.x, eu.y + cr + 12);
         clusterBox = {{ x: eu.x, y: eu.y, r: cr + 4 }};
       }}
     }}
@@ -3292,7 +3292,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
         }}
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillText(L.cc, L.x + 0.5, ly + 0.5);
-        ctx.fillStyle = L.isH ? 'var(--critical)' : L.isM ? 'var(--warning)' : 'var(--aqua)';
+        ctx.fillStyle = cssv(L.isH ? 'var(--critical)' : L.isM ? 'var(--warning)' : 'var(--aqua)');
         ctx.fillText(L.cc, L.x, ly);
       }});
     }}
