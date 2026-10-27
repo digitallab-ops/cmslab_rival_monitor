@@ -1232,7 +1232,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
     var acts = d.rows[ri];
     var total = acts.reduce(function(s, v) {{ return s + v; }}, 0);
     var y = PAD_T + ri * (BAR_H + GAP);
-    ctx.fillStyle = 'var(--text-muted)';
+    ctx.fillStyle = cssv('var(--text-muted)');
     ctx.font = '600 11px system-ui,-apple-system,sans-serif';
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillText(brand, LABEL_W - 8, y + BAR_H / 2);
@@ -1254,7 +1254,7 @@ def _build_stacked_bar_script(brand_act: list) -> str:
       }}
       x += segW;
     }});
-    ctx.fillStyle = 'var(--text-muted)';
+    ctx.fillStyle = cssv('var(--text-muted)');
     ctx.font = '11px system-ui';
     ctx.textAlign = 'left';
     ctx.fillText(total + '건', x + 5, y + BAR_H / 2);
@@ -3123,28 +3123,28 @@ def _build_worldmap_script(country_stats: dict) -> str:
 
     // Ocean (은은한 방사형 — 가운데가 살짝 밝은 딥네이비)
     var bg = off.createRadialGradient(W*0.5, H*0.42, H*0.1, W*0.5, H*0.5, W*0.65);
-    bg.addColorStop(0, 'var(--surface-1)'); bg.addColorStop(1, 'var(--page)');
+    bg.addColorStop(0, cssv('var(--surface-1)')); bg.addColorStop(1, cssv('var(--page)'));
     off.fillStyle = bg; off.fillRect(0, 0, W, H);
 
     // 대륙 = 매끄러운 곡선 채우기 + 소프트 글로우 (부드럽고 이쁘게)
     var lg = off.createLinearGradient(0, 0, 0, H);
-    lg.addColorStop(0, 'var(--baseline)'); lg.addColorStop(1, 'var(--surface-3)');
+    lg.addColorStop(0, cssv('var(--baseline)')); lg.addColorStop(1, cssv('var(--surface-3)'));
     off.save();
-    off.shadowColor = 'color-mix(in srgb, var(--blue) 45%, transparent)';
+    off.shadowColor = cssv('color-mix(in srgb, var(--blue) 45%, transparent)');
     off.shadowBlur = 18;
     off.fillStyle = lg;
     LAND.forEach(function(poly) {{ off.beginPath(); landPath(off, poly); off.fill(); }});
     off.restore();
     // 부드러운 해안선 하이라이트
-    off.strokeStyle = 'color-mix(in srgb, var(--blue) 30%, transparent)'; off.lineWidth = 0.9;
+    off.strokeStyle = cssv('color-mix(in srgb, var(--blue) 30%, transparent)'); off.lineWidth = 0.9;
     LAND.forEach(function(poly) {{ off.beginPath(); landPath(off, poly); off.stroke(); }});
 
     // 상·하단 페이드 — 북극권 해안선 '가로 이음새'와 크롭 경계를 어둠으로 부드럽게 녹임
     var topf = off.createLinearGradient(0, 0, 0, H * 0.22);
-    topf.addColorStop(0, 'var(--page)'); topf.addColorStop(1, 'color-mix(in srgb, var(--page) 0%, transparent)');
+    topf.addColorStop(0, cssv('var(--page)')); topf.addColorStop(1, cssv('color-mix(in srgb, var(--page) 0%, transparent)'));
     off.fillStyle = topf; off.fillRect(0, 0, W, H * 0.22);
     var botf = off.createLinearGradient(0, H * 0.80, 0, H);
-    botf.addColorStop(0, 'color-mix(in srgb, var(--page) 0%, transparent)'); botf.addColorStop(1, 'var(--page)');
+    botf.addColorStop(0, cssv('color-mix(in srgb, var(--page) 0%, transparent)')); botf.addColorStop(1, cssv('var(--page)'));
     off.fillStyle = botf; off.fillRect(0, H * 0.80, W, H * 0.20);
 
     // Country signal glows (radial blobs on land)
@@ -3171,8 +3171,8 @@ def _build_worldmap_script(country_stats: dict) -> str:
       var tx = pX(co[1]), ty = pY(co[0]);
       var mx = (krx + tx) / 2, my = (kry + ty) / 2 - Math.abs(tx - krx) * 0.28;
       var g = ctx.createLinearGradient(krx, kry, tx, ty);
-      g.addColorStop(0,   'color-mix(in srgb, var(--blue) 55%, transparent)');
-      g.addColorStop(0.6, 'color-mix(in srgb, var(--blue) 20%, transparent)');
+      g.addColorStop(0, cssv('color-mix(in srgb, var(--blue) 55%, transparent)'));
+      g.addColorStop(0.6, cssv('color-mix(in srgb, var(--blue) 20%, transparent)'));
       g.addColorStop(1,   st.high > 0 ? 'color-mix(in srgb, var(--critical) 40%, transparent)' : 'color-mix(in srgb, var(--warning) 30%, transparent)');
       ctx.beginPath(); ctx.moveTo(krx, kry);
       ctx.quadraticCurveTo(mx, my, tx, ty);
@@ -3186,9 +3186,9 @@ def _build_worldmap_script(country_stats: dict) -> str:
   function drawScan() {{
     var y = ((tick * 0.35) % (H + 100)) - 50;
     var sg = ctx.createLinearGradient(0, y-50, 0, y+50);
-    sg.addColorStop(0,   'color-mix(in srgb, var(--blue) 0%, transparent)');
-    sg.addColorStop(0.5, 'color-mix(in srgb, var(--blue) 4%, transparent)');
-    sg.addColorStop(1,   'color-mix(in srgb, var(--blue) 0%, transparent)');
+    sg.addColorStop(0, cssv('color-mix(in srgb, var(--blue) 0%, transparent)'));
+    sg.addColorStop(0.5, cssv('color-mix(in srgb, var(--blue) 4%, transparent)'));
+    sg.addColorStop(1, cssv('color-mix(in srgb, var(--blue) 0%, transparent)'));
     ctx.fillStyle = sg; ctx.fillRect(0, y-50, W, 100);
   }}
 
@@ -3203,7 +3203,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
       var x = pX(co[1]), y = pY(co[0]);
       if (!st.total) {{
         ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI*2);
-        ctx.fillStyle = 'var(--baseline)'; ctx.fill(); return;
+        ctx.fillStyle = cssv('var(--baseline)'); ctx.fill(); return;
       }}
       var isH = st.high > 0, isM = st.medium > 0;
       var col  = isH ? 'var(--critical)' : isM ? 'var(--warning)' : 'var(--aqua)';
@@ -3227,7 +3227,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
 
       // Core — bright highlight + color
       var cg = ctx.createRadialGradient(x-base*0.3, y-base*0.3, 0, x, y, base);
-      cg.addColorStop(0, 'var(--text-primary)'); cg.addColorStop(0.45, col); cg.addColorStop(1, glC+'0.7)');
+      cg.addColorStop(0, cssv('var(--text-primary)')); cg.addColorStop(0.45, col); cg.addColorStop(1, glC+'0.7)');
       ctx.beginPath(); ctx.arc(x, y, base, 0, Math.PI*2);
       ctx.fillStyle = cg; ctx.fill();
 
@@ -3249,7 +3249,7 @@ def _build_worldmap_script(country_stats: dict) -> str:
         ctx.beginPath(); ctx.arc(eu.x, eu.y, cr*2.6, 0, Math.PI*2); ctx.fillStyle = gg; ctx.fill();
         // ring
         ctx.beginPath(); ctx.arc(eu.x, eu.y, cr, 0, Math.PI*2);
-        ctx.fillStyle = 'color-mix(in srgb, var(--page) 92%, transparent)'; ctx.fill();
+        ctx.fillStyle = cssv('color-mix(in srgb, var(--page) 92%, transparent)'); ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = col2; ctx.stroke();
         // count badge (국가 수)
         var fs2 = 12;
@@ -3456,6 +3456,18 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
         })
         scripts.append(f"""
 (function() {{
+  // Chart.js는 <canvas>에 그린다. canvas 2D 컨텍스트는 CSS var()·color-mix()를
+  // 해석하지 못해 그대로 넘기면 선이 안 그려진다. 탐침 엘리먼트에 한 번 먹여
+  // getComputedStyle로 실제 rgb 값을 받아온다.
+  var _p = document.createElement('span');
+  _p.style.display = 'none';
+  document.body.appendChild(_p);
+  window.cssv = window.cssv || function(expr) {{
+    _p.style.color = '';
+    _p.style.color = expr;
+    var v = getComputedStyle(_p).color;
+    return v && v !== 'rgba(0, 0, 0, 0)' ? v : expr;
+  }};
   var d = {data_json};
   var ctx = document.getElementById('trendChart');
   if (!ctx || typeof Chart === 'undefined') return;
@@ -3464,17 +3476,17 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
     data: {{
       labels: d.labels,
       datasets: [
-        {{ label: 'HIGH',   data: d.high,   borderColor:'var(--critical)', backgroundColor:'color-mix(in srgb, var(--critical) 8%, transparent)',  tension:0.35, fill:true,  pointRadius:3, borderWidth:2 }},
-        {{ label: 'MEDIUM', data: d.medium, borderColor:'var(--serious)', backgroundColor:'color-mix(in srgb, var(--serious) 5%, transparent)', tension:0.35, fill:false, pointRadius:2, borderWidth:1.5 }},
-        {{ label: 'LOW',    data: d.low,    borderColor:'var(--text-secondary)', backgroundColor:'transparent',            tension:0.35, fill:false, pointRadius:2, borderWidth:1 }}
+        {{ label: 'HIGH',   data: d.high,   borderColor:cssv('var(--critical)'), backgroundColor:cssv('color-mix(in srgb, var(--critical) 8%, transparent)'), tension:0.35, fill:true,  pointRadius:3, borderWidth:2 }},
+        {{ label: 'MEDIUM', data: d.medium, borderColor:cssv('var(--serious)'),  backgroundColor:cssv('color-mix(in srgb, var(--serious) 5%, transparent)'),  tension:0.35, fill:false, pointRadius:2, borderWidth:1.5 }},
+        {{ label: 'LOW',    data: d.low,    borderColor:cssv('var(--text-secondary)'), backgroundColor:'transparent',      tension:0.35, fill:false, pointRadius:2, borderWidth:1 }}
       ]
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:'var(--text-muted)', boxWidth:12 }} }} }},
+      plugins: {{ legend: {{ position: 'top', labels: {{ font: {{ size: 11 }}, color:cssv('var(--text-muted)'), boxWidth:12 }} }} }},
       scales: {{
-        y: {{ beginAtZero: true, grid: {{ color:'rgba(255,255,255,0.06)' }}, ticks: {{ color:'var(--text-muted)', precision: 0, font: {{ size: 10 }} }} }},
-        x: {{ grid: {{ color:'rgba(255,255,255,0.06)' }}, ticks: {{ color:'var(--text-muted)', font: {{ size: 10 }}, maxRotation: 45 }} }}
+        y: {{ beginAtZero: true, grid: {{ color:cssv('var(--gridline)') }}, ticks: {{ color:cssv('var(--text-muted)'), precision: 0, font: {{ size: 10 }} }} }},
+        x: {{ grid: {{ color:cssv('var(--gridline)') }}, ticks: {{ color:cssv('var(--text-muted)'), font: {{ size: 10 }}, maxRotation: 45 }} }}
       }}
     }}
   }});
@@ -3498,17 +3510,18 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
 (function() {{
   var d = {data_json};
   var ctx = document.getElementById('actChart');
+  var cv = window.cssv || function(x) {{ return x; }};
   if (!ctx || typeof Chart === 'undefined') return;
   new Chart(ctx, {{
     type: 'doughnut',
     data: {{
       labels: d.labels,
-      datasets: [{{ data: d.data, backgroundColor: d.colors, borderWidth: 2, borderColor: 'var(--surface-1)' }}]
+      datasets: [{{ data: d.data, backgroundColor: d.colors.map(cv), borderWidth: 2, borderColor: cv('var(--surface-1)') }}]
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
       plugins: {{
-        legend: {{ position: 'right', labels: {{ font: {{ size: 10 }}, color:'var(--text-muted)', boxWidth: 12 }} }},
+        legend: {{ position: 'right', labels: {{ font: {{ size: 10 }}, color:cv('var(--text-muted)'), boxWidth: 12 }} }},
         tooltip: {{ callbacks: {{ label: function(c) {{ return c.label + ': ' + c.parsed + '건'; }} }} }}
       }}
     }}
@@ -5046,6 +5059,28 @@ def _build_full_html(
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<script>
+/* canvas 2D 컨텍스트는 CSS var()·color-mix()를 해석하지 못한다.
+   그대로 넘기면 선·면이 아예 안 그려진다(차트·세계지도가 그래서 빈 화면이 됐다).
+   탐침 엘리먼트에 한 번 먹여 브라우저가 계산한 rgb 값을 받아온다. */
+window.cssv = (function () {{
+  var p = null, cache = {{}};
+  return function (expr) {{
+    if (!expr || (expr.indexOf('var(') < 0 && expr.indexOf('color-mix(') < 0)) return expr;
+    if (expr in cache) return cache[expr];
+    if (!p) {{
+      p = document.createElement('span');
+      p.style.display = 'none';
+      (document.body || document.documentElement).appendChild(p);
+    }}
+    p.style.color = '';
+    p.style.color = expr;
+    var v = getComputedStyle(p).color;
+    cache[expr] = (v && v !== 'rgba(0, 0, 0, 0)') ? v : expr;
+    return cache[expr];
+  }};
+}})();
+</script>
 <title>K-뷰티 경쟁사 인텔리전스 — 최근 {days}일</title>
 {chartjs_tag}
 <style>{_DASHBOARD_CSS}{worldmap_css}</style>
