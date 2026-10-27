@@ -3459,15 +3459,6 @@ def _build_chart_scripts(trend: dict, distribution: list) -> str:
   // Chart.js는 <canvas>에 그린다. canvas 2D 컨텍스트는 CSS var()·color-mix()를
   // 해석하지 못해 그대로 넘기면 선이 안 그려진다. 탐침 엘리먼트에 한 번 먹여
   // getComputedStyle로 실제 rgb 값을 받아온다.
-  var _p = document.createElement('span');
-  _p.style.display = 'none';
-  document.body.appendChild(_p);
-  window.cssv = window.cssv || function(expr) {{
-    _p.style.color = '';
-    _p.style.color = expr;
-    var v = getComputedStyle(_p).color;
-    return v && v !== 'rgba(0, 0, 0, 0)' ? v : expr;
-  }};
   var d = {data_json};
   var ctx = document.getElementById('trendChart');
   if (!ctx || typeof Chart === 'undefined') return;
@@ -5073,10 +5064,19 @@ window.cssv = (function () {{
       p.style.display = 'none';
       (document.body || document.documentElement).appendChild(p);
     }}
-    p.style.color = '';
-    p.style.color = expr;
-    var v = getComputedStyle(p).color;
-    cache[expr] = (v && v !== 'rgba(0, 0, 0, 0)') ? v : expr;
+    /* 센티넬을 먼저 넣는다. 표현식이 거부되면 센티넬이 그대로 남아 실패를
+       구분할 수 있다. 투명색(rgba(0,0,0,0))은 정상 결과이지 실패가 아니다 —
+       예전엔 이걸 실패로 보고 원본 문자열을 canvas에 넘겼고, addColorStop이
+       잘못된 색에 예외를 던져 지도 그리기가 통째로 중단됐다. */
+    try {{
+      p.style.color = 'rgb(1, 2, 3)';
+      p.style.color = expr;
+      var v = getComputedStyle(p).color;
+      cache[expr] = (v === 'rgb(1, 2, 3)') ? 'transparent' : v;
+    }} catch (err) {{
+      /* 여기서 터지면 지도·차트 그리기가 통째로 멈춘다. 색 하나 틀리는 쪽이 낫다. */
+      cache[expr] = 'transparent';
+    }}
     return cache[expr];
   }};
 }})();
