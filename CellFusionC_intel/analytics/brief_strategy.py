@@ -17,6 +17,7 @@ import logging
 from collections import defaultdict
 
 from analytics.queries import get_insights_cache, upsert_insight_cache
+from config.settings import DB_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -141,27 +142,48 @@ def _p_sum(brand_ko, strat_snips, prods):
 리테일 상위: {', '.join(prods) or '(없음)'}"""
 
 
-def _p_tongp(n, topb, mktxt, strat_examples):
-    """'이번 주의 한 방' — 뾰족한 헤드라인 + 근거 한 줄. 슬랙·대시보드 공용(단일 출처)."""
+def _p_tongp(n, topb, mktxt, strat_examples, delta=""):
+    """'이번 주의 한 방' — 뾰족한 헤드라인 + 근거 한 줄. 슬랙·대시보드 공용(단일 출처).
+
+    입력의 핵심은 delta(전주 대비 달라진 것)다. 누적 현황만 주면 모델이 가장
+    인용하기 좋은 수치를 집는데, 그게 월 단위로만 갱신되는 수출 성장률이라
+    12주 내리 "캐나다 +396%, 영국 +234%"가 반복됐다.
+    """
     return f"""K뷰티 경쟁 인텔리전스 브리핑의 '이번 주의 한 방'을 딱 2문장(합쳐 90자 이내)으로 써라.
 
 **합격 기준: 지난주에 썼다면 틀렸을 문장이어야 한다.**
 아무 주에나 갖다 붙일 수 있으면 실패다. 실제로 이런 게 나갔다 —
   "틱톡과 아마존이 K뷰티의 주요 전장으로 부상했다" (작년에도 맞는 말)
-  "팝업과 협업이 K뷰티의 새로운 무기다" (언제나 맞는 말)
-이번 주 데이터에서만 말할 수 있는 것을 찾아라. 여러 브랜드에 공통으로 보이는
-방향이든, 유독 튀는 한 가지든, **이번 주에 실제로 일어난 것**에 근거해야 한다.
+  "캐나다 +396%, 영국 +234% 성장" (12주 연속 똑같이 나갔다 — 월 단위 수치라서)
+
+**아래 '이번 주 달라진 것'에서 소재를 골라라.** 이게 이번 주에만 있는 사실이다.
+── 이번 주 달라진 것 ──
+{delta or "(변화 정보 없음)"}
+──
 
 - 첫 문장 = 이번 주를 규정하는 헤드라인(35자 이내, 단정적).
-- 둘째 문장 = 그렇게 본 근거(55자 이내). **여기엔 수치를 넣어라**
-  (몇 개 브랜드가 같은 채널로 갔는지, 어느 시장이 몇 % 컸는지 등).
+- 둘째 문장 = 그렇게 본 근거(55자 이내).
+
+**우리 수집량을 말하지 마라.** '8개 브랜드가 새로 포착됐다', '신호 12건 증가'는
+우리 DB 얘기지 시장 얘기가 아니다. 읽는 사람은 시장에서 뭐가 일어났는지를 알고 싶다.
+  나쁜 예: "새 브랜드와 채널의 활발한 등장. 8개 브랜드와 6개 채널이 새로 포착됐다."
+  좋은 예: "진출선이 영국·일본·대만으로 갈라졌다. 한 주에 세 시장에서 동시에 첫 진입이 잡혔다."
+  좋은 예: "채널이 현지 플랫폼으로 내려갔다. @cosme·Myntra 같은 로컬 커머스가 처음 등장."
+**둘째 문장에는 실제 이름(국가·채널)을 넣어라.** 개수만 세지 마라.
+**단, 위 '달라진 것' 목록에 적힌 이름만 써라.** 거기 없는 채널·국가를 지어내지 마라
+(실제로 목록에 없는 'Boots', '메이시스'를 지어낸 적이 있다).
+**브랜드명은 쓰지 마라** — 국가·채널·활동유형으로만 말해라. 브랜드는 아래 목록에서 따로 보여준다.
 - **개별 브랜드명은 쓰지 마라** — 아래 목록에서 따로 보여주므로 겹친다.
   단 채널명(세포라·틱톡숍)·시장명(브라질·영국)은 써도 된다.
 - 금지어(상투어): '다변화', '모색', '전환점', '입지 강화', '시장 점유율 확대',
   '긍정적', '기대', '주요 전장으로 부상', '새로운 무기'.
 - 예측·당위 금지, 관찰형. 어느 쪽이 낫다는 우열 단정은 하지 마라.
-데이터: 신호 {n}건 / 주요 브랜드: {topb} / 급성장 시장: {mktxt}
-브랜드 움직임: {' | '.join(strat_examples[:8])}"""
+
+참고(헤드라인 소재로 쓰지 말 것):
+- 급성장 시장 {mktxt} ← **관세청 월 단위 집계라 지난주와 같은 수치다.**
+  이걸 헤드라인으로 쓰면 지난주와 똑같은 문장이 된다.
+- 이번 주 신호 {n}건 / 주요 브랜드: {topb}
+- 브랜드 움직임: {' | '.join(strat_examples[:8])}"""
 
 
 def _p_watch(strat_examples, mktxt):
@@ -242,6 +264,99 @@ def signal_line(sigs: dict, brand: str, cc: str) -> str:
               for x in ((sigs.get("global") or {}).get(brand) or [])]
     return " · ".join(parts[:3])
 
+def _week_anchor():
+    """'한 방'이 다루는 구간 — **직전 완결 주(월~일)**. 캐시 키도 여기 고정.
+
+    예전엔 today-7~today 롤링이라 창이 매일 하루씩 밀렸다. 연속한 두 창은
+    6일이 겹쳐(86% 동일) 입력이 사실상 같은데 LLM만 매일 다시 불렸고,
+    그래서 12주 내리 같은 문장이 나왔다. 주 1회 생성으로 바꾼다.
+
+    진행 중인 주를 쓰지 않는 이유 — 화요일엔 2일치를 지난주 7일치와 비교하게
+    돼 '멈춘 브랜드'가 매주 월·화에 쏟아진다. 완결된 주끼리 비교해야 증감이
+    말이 되고, 한 주 내내 문구도 안 흔들린다.
+    """
+    from datetime import date, timedelta as _td
+    today = date.today()
+    this_mon = today - _td(days=today.weekday())
+    last_mon = this_mon - _td(days=7)
+    return last_mon.isoformat(), (this_mon - _td(days=1)).isoformat()
+
+
+def _week_delta(session, bko):
+    """이번 주에 '새로 생긴 것'만 추린다 — 전주 대비 비교.
+
+    누적 현황을 통째로 주면 모델이 매번 같은 소재(월 단위 수출 수치)를 집는다.
+    달라진 것만 줘야 그 주에만 쓸 수 있는 문장이 나온다.
+    """
+    from sqlalchemy import text as _t
+    from datetime import date, timedelta as _td
+    # _week_anchor와 같은 구간(직전 완결 주)을 그 전 주와 비교한다.
+    mon = date.today() - _td(days=date.today().weekday()) - _td(days=7)
+    q = _t(f"""
+        SELECT brand, country, COALESCE(activity_type,'') act,
+               COALESCE(channel,'') ch, COUNT(*) c
+        FROM {DB_SCHEMA}.news_articles
+        WHERE published_date >= :a AND published_date < :b
+          AND brand IS NOT NULL AND is_duplicate IS NOT TRUE AND is_self IS NOT TRUE
+          AND (brand_focus NOT IN ('incidental','unrelated') OR brand_focus IS NULL)
+        GROUP BY 1,2,3,4
+    """)
+    try:
+        cur = session.execute(q, {"a": mon.isoformat(),
+                                  "b": (mon + _td(days=7)).isoformat()}).fetchall()
+        prv = session.execute(q, {"a": (mon - _td(days=7)).isoformat(),
+                                  "b": mon.isoformat()}).fetchall()
+    except Exception as e:
+        logger.warning("주간 델타 조회 실패: %s", e)
+        return ""
+
+    def agg(rows):
+        brands, pairs, chans, acts = {}, set(), set(), {}
+        for b, c, a, ch, n in rows:
+            b = (b or "").strip()
+            c = (c or "").strip()
+            ch = (ch or "").strip()
+            if not b:
+                continue
+            brands[b] = brands.get(b, 0) + n
+            if c and c.lower() not in ("null", "none", "global"):
+                pairs.add((b, c))
+            if ch and ch.lower() not in ("null", "none"):
+                chans.add(ch)
+            if a:
+                acts[a] = acts.get(a, 0) + n
+        return brands, pairs, chans, acts
+
+    cb, cp, cc, ca = agg(cur)
+    pb, pp, pc, pa = agg(prv)
+    out = []
+    new_b = sorted(b for b in cb if b not in pb)
+    if new_b:
+        out.append("그 주 처음 잡힌 브랜드: " + ", ".join(bko(b) for b in new_b[:6]))
+    new_pair = sorted((b, c) for (b, c) in cp if (b, c) not in pp)
+    if new_pair:
+        out.append("새로 등장한 브랜드×국가: " +
+                   ", ".join(f"{bko(b)}/{c}" for b, c in new_pair[:8]))
+    new_ch = sorted(c for c in cc if c not in pc)
+    if new_ch:
+        out.append("그 주 새로 나온 판매채널: " + ", ".join(new_ch[:6]))
+    surge = sorted(((b, n, pb.get(b, 0)) for b, n in cb.items() if n >= pb.get(b, 0) + 3),
+                   key=lambda x: -(x[1] - x[2]))[:5]
+    if surge:
+        out.append("활동 급증(그 전주→그 주): " +
+                   ", ".join(f"{bko(b)} {o}→{n}건" for b, n, o in surge))
+    quiet = sorted(b for b in pb if b not in cb and pb[b] >= 3)
+    if quiet:
+        out.append("그 전주 활발했다가 그 주 멈춘 브랜드: " +
+                   ", ".join(bko(b) for b in quiet[:5]))
+    act_up = sorted(((a, n, pa.get(a, 0)) for a, n in ca.items() if n >= pa.get(a, 0) + 3),
+                    key=lambda x: -(x[1] - x[2]))[:3]
+    if act_up:
+        out.append("늘어난 활동 유형: " +
+                   ", ".join(f"{a} {o}→{n}건" for a, n, o in act_up))
+    return chr(10).join(out) if out else "(전주 대비 눈에 띄는 변화 없음)"
+
+
 def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None):
     """브리핑 전략 콘텐츠 생성/캐시. 반환: {strat, why, bsum, tongp}.
     bko: 영문브랜드→한글 변환 함수(없으면 원문)."""
@@ -253,10 +368,19 @@ def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None
     cached = {k: v.get("summary", "") for k, v in cache.items()}
     dirty = False
 
-    def _get_or_gen(key, gen_fn, model, max_tokens, temp=0.4):
+    wk_from, wk_to = _week_anchor()
+    try:    # 주 단위 캐시는 창이 달라 따로 읽는다
+        wk_cache = {k: v.get("summary", "")
+                    for k, v in get_insights_cache(session, wk_from, wk_to).items()}
+    except Exception:
+        wk_cache = {}
+
+    def _get_or_gen(key, gen_fn, model, max_tokens, temp=0.4, weekly=False):
+        """weekly=True면 이번 주(월~일) 창에 캐시한다 — 주 1회만 생성."""
         nonlocal dirty
-        if key in cached:
-            return cached[key]
+        store, d_from, d_to = (wk_cache, wk_from, wk_to) if weekly else (cached, from_date, to_date)
+        if key in store:
+            return store[key]
         try:
             txt = _llm(model, gen_fn(), max_tokens, temp)
         except Exception as e:
@@ -264,12 +388,12 @@ def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None
             txt = ""
         if txt:
             try:
-                upsert_insight_cache(session, key, from_date, to_date,
+                upsert_insight_cache(session, key, d_from, d_to,
                                      {"summary": txt, "top_act": "brief", "top_pct": 0, "high_pct": 0.0})
                 dirty = True
             except Exception:
                 session.rollback()
-        cached[key] = txt
+        store[key] = txt
         return txt
 
     by_brand = defaultdict(list)
@@ -331,9 +455,12 @@ def build_brief_strategy(session, records, rp, mkt, from_date, to_date, bko=None
     mktxt = ", ".join(f"{m['country_name']} +{m['yoy_pct']:.0f}%" for m in mk_g)
     topb = ", ".join(bko(b) for b in sorted(active, key=lambda b: -sum(r.get("attn", 0) for r in by_brand[b]))[:5])
     examples = [v for v in strat.values() if is_meaningful_line(v)]
-    tongp = _get_or_gen("BTONGP", lambda: _p_tongp(len(records), topb, mktxt, examples),
-                        _MODEL_TONGP, 200)
-    watch_raw = _get_or_gen("BWATCH", lambda: _p_watch(examples, mktxt), _MODEL_TONGP, 200)
+    delta = _week_delta(session, bko)
+    tongp = _get_or_gen("BTONGP",
+                        lambda: _p_tongp(len(records), topb, mktxt, examples, delta),
+                        _MODEL_TONGP, 200, weekly=True)
+    watch_raw = _get_or_gen("BWATCH", lambda: _p_watch(examples, mktxt),
+                            _MODEL_TONGP, 200, weekly=True)
     watch = [w.strip(" -•\t") for w in (watch_raw or "").split("\n") if w.strip()][:2]
 
     return {"strat": strat, "why": why, "bsum": bsum, "tongp": tongp,
