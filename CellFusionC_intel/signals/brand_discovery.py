@@ -21,7 +21,7 @@ import feedparser
 from sqlalchemy import text
 
 from config.settings import DB_SCHEMA
-from config.brands import ALL_BRANDS, SELF_BRANDS, BRAND_KO_NAMES
+from config.brands import ALL_BRANDS, SELF_BRANDS, BRAND_KO_NAMES, canonical_brand
 from storage.models import get_session
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,8 @@ _BLOCK = {
     # 유통·플랫폼
     "olive young", "oliveyoung", "올리브영", "cj올리브영", "cj olive", "다이소", "daiso",
     "다이소몰", "쿠팡", "coupang", "무신사", "musinsa", "세포라", "sephora", "ulta", "아마존",
+    "myntra", "nykaa", "notino", "lookfantastic", "asos", "shopee", "lazada",
+    "rossmann", "watsons", "sociolla", "freemans", "macy", "boots",
     "amazon", "큐텐", "qoo10", "지그재그", "에이블리", "ably", "컬리", "kurly", "네이버", "naver",
     "카카오", "kakao", "gs샵", "홈쇼핑", "免税", "면세", "올영", "올리브", "더현대",
     "신세계", "롯데", "현대백화점", "이마트", "emart", "왓슨스", "watsons",
@@ -74,11 +76,23 @@ _BLOCK_EXACT = {
 }
 
 
+def _cmp_key(s: str) -> str:
+    """비교용 정규화 — 하이픈·공백·점을 뗀다.
+
+    'K-뷰티'가 차단어 'k뷰티'와 안 맞아 후보로 올라온 적이 있다.
+    """
+    return "".join(c for c in (s or "").lower() if c.isalnum())
+
+
+_BLOCK_K = {_cmp_key(b) for b in _BLOCK if _cmp_key(b)}
+_BLOCK_EXACT_K = {_cmp_key(b) for b in _BLOCK_EXACT if _cmp_key(b)}
+
+
 def _is_block(name: str, ko: str) -> bool:
-    nl, kl = (name or "").strip().lower(), (ko or "").strip().lower()
-    if nl in _BLOCK_EXACT or (kl and kl in _BLOCK_EXACT):
+    nk, kk = _cmp_key(name), _cmp_key(ko)
+    if nk in _BLOCK_EXACT_K or (kk and kk in _BLOCK_EXACT_K):
         return True
-    return any(b in nl or (kl and b in kl) for b in _BLOCK)
+    return any(b in nk or (kk and b in kk) for b in _BLOCK_K)
 
 
 def _ensure_tables(session) -> None:
@@ -95,6 +109,33 @@ def _ensure_tables(session) -> None:
         )
     """))
     session.commit()
+
+
+def _recent_article_titles(session, days: int = 10, limit: int = 160) -> list[str]:
+    """이미 수집한 기사 제목도 발견 재료로 쓴다.
+
+    예전엔 광역 RSS 5개 쿼리(최대 110건)만 봤다. 그런데 신규 브랜드는 보통
+    기존 브랜드 기사 안에서 먼저 언급된다 — 실제로 구다이글로벌의 신규 브랜드
+    '뎁티'가 우리 DB에 18건이나 들어와 있었는데, 조선미녀·티르티르 브랜드
+    쿼리로 수집된 것이라 발견 쪽 광역 쿼리에는 한 번도 안 걸렸다.
+    이미 긁어온 기사를 다시 쓰는 것이라 수집 비용은 0이다.
+    """
+    try:
+        rows = session.execute(text(f"""
+            SELECT t FROM (
+              SELECT COALESCE(NULLIF(title_ko,''), title) AS t,
+                     MAX(published_date) AS pd
+              FROM {DB_SCHEMA}.news_articles
+              WHERE published_date >= CURRENT_DATE - :d
+                AND is_duplicate IS NOT TRUE
+                AND COALESCE(NULLIF(title_ko,''), title) <> ''
+              GROUP BY 1
+            ) q ORDER BY pd DESC LIMIT :n
+        """), {"d": days, "n": limit}).fetchall()
+        return [r[0].strip() for r in rows if r[0]]
+    except Exception as e:
+        logger.warning("발견: 기존 기사 제목 조회 실패: %s", e)
+        return []
 
 
 def _fetch_headlines() -> list[str]:
@@ -212,7 +253,7 @@ JSON 배열만 출력: [{{"name":"영문 또는 대표표기","ko":"한글표기
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
-            max_tokens=700,
+            max_tokens=1200,   # 700이면 묶음에 따라 잘려 JSON 파싱이 깨졌다
             temperature=0.1,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -227,13 +268,36 @@ JSON 배열만 출력: [{{"name":"영문 또는 대표표기","ko":"한글표기
 
 def run() -> dict:
     cap = date.today()
-    headlines = _fetch_headlines()
+    session = get_session()
+    rss = _fetch_headlines()
+    # 광역 RSS + 우리가 이미 수집한 기사 제목을 합쳐서 본다.
+    mine = _recent_article_titles(session)
+    seen, headlines = set(), []
+    for t in rss + mine:
+        if t and t not in seen:
+            seen.add(t)
+            headlines.append(t)
+    logger.info("발견 재료: RSS %d + 기존기사 %d → 중복제거 %d건",
+                len(rss), len(mine), len(headlines))
     if not headlines:
         logger.info("발견: 헤드라인 0건")
+        session.close()
         return {"headlines": 0, "new": []}
 
-    extracted = _extract_brands(headlines)
-    session = get_session()
+    # 한 번에 270건을 넣으면 응답이 잘려 JSON 파싱이 깨진다(_MAX_HEADLINES가
+    # 110인 이유). 묶음으로 나눠 호출하고 이름 기준으로 합친다.
+    # 묶음이 크면 모델이 조용히 일부를 빠뜨린다 — 110건으로 돌렸을 때 '뎁티'가
+    # 4번이나 나오는데도 추출 목록에서 빠졌다(4건만 따로 주면 바로 잡는다).
+    _CHUNK = 55
+    extracted, _seen_name = [], set()
+    for i in range(0, len(headlines), _CHUNK):
+        for d in _extract_brands(headlines[i:i + _CHUNK]):
+            key = ((d.get("name") or d.get("ko") or "").strip().lower())
+            if key and key not in _seen_name:
+                _seen_name.add(key)
+                extracted.append(d)
+    logger.info("발견: 묶음 %d회 추출 → 후보명 %d개",
+                (len(headlines) + _CHUNK - 1) // _CHUNK, len(extracted))
     new_candidates: list[dict] = []
     try:
         _ensure_tables(session)
@@ -247,6 +311,12 @@ def run() -> dict:
             if _is_block(name, ko):
                 continue
             # 'A.P.R.'과 '에이피알'이 같은 것으로 걸리도록 점·공백을 뗀 형태까지 대조한다
+            # 이미 등록된 브랜드면 건너뛴다. LLM이 한글명을 name 칸에 넣는 일이
+            # 잦은데(예: name='메디큐브', ko=''), 예전엔 영문 집합하고만 대조해서
+            # 메디큐브·아누아·조선미녀 같은 등록 브랜드가 '신규 후보'로 올라왔다.
+            # canonical_brand는 한글·영문 표기를 모두 되돌린다.
+            if canonical_brand(name) or (ko and canonical_brand(ko)):
+                continue
             forms_en = {v.lower() for v in _corp_variants(name)}
             forms_ko = set(_corp_variants(ko)) if ko else set()
             if (forms_en & known_en) or (forms_ko & known_ko):
