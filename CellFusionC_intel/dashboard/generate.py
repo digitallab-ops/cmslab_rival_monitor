@@ -3528,7 +3528,8 @@ def _render_metric_rail(stats: dict, growth_story: dict, spikes: list, days: int
     d_ctry  = _delta_html(stats.get("countries_active", 0), stats.get("prev_countries_active", 0))
     return (
         '<div class="rail">'
-        f'<div class="met"><div class="l">수집 {days}D</div><div class="v tnum"><span id="kpi-total">{stats.get("total",0):,}</span></div><div id="kpi-d-total">{d_total}</div><div id="kpi-spark">{spark}</div></div>'
+        # '수집 N건'은 시스템 관리자용 지표다. 사용자는 몇 건 긁었는지 알 필요가 없다.
+        # (kpi-total·kpi-spark를 쓰는 JS는 모두 null 가드가 있어 제거해도 안전)
         f'<div class="met"><div class="l">HIGH 신호</div><div class="v tnum" style="color:var(--coral)"><span id="kpi-high">{stats.get("high",0)}</span></div><div id="kpi-d-high">{d_high}</div></div>'
         f'<div class="met"><div class="l">활성 브랜드</div><div class="v tnum"><span id="kpi-brands">{stats.get("brands_active",0)}</span></div><div id="kpi-d-brands">{d_brand}</div></div>'
         f'<div class="met"><div class="l">커버 국가</div><div class="v tnum"><span id="kpi-countries">{stats.get("countries_active",0)}</span></div><div id="kpi-d-countries">{d_ctry}</div></div>'
@@ -4516,6 +4517,11 @@ _BRIEF_STYLE = """<style>
 #bf2 .cwhy{font-size:13px;color:#9fd8be;margin:5px 0 0;line-height:1.55}
 #bf2 .cstrat{font-size:13px;color:#a9c2ff;margin:6px 0 0;line-height:1.55}
 #bf2 .quiet{font-size:11.5px;color:#6b769a;margin:12px 0 0;padding:10px 14px;background:#0f1726;border:1px solid #26314e;border-radius:9px;line-height:1.6}
+#bf2 .quiet>summary{cursor:pointer;list-style:none;color:#8490b0}
+#bf2 .quiet>summary::-webkit-details-marker{display:none}
+#bf2 .quiet>summary::before{content:"▸ ";color:#6b769a}
+#bf2 .quiet[open]>summary::before{content:"▾ "}
+#bf2 .quiet .qnames{margin-top:7px;color:#6b769a}
 #bf2 .bhint{font-size:11.5px;color:#6b769a;margin:10px 2px 0;text-align:center}
 #bf2 .bf-empty{color:#6b769a;font-size:13px;padding:16px}
 </style>"""
@@ -4761,8 +4767,13 @@ def _render_brief_feed(records, rp=None, mkt=None, strat_data=None, asof="",
     if monitored:
         quiet = sorted(_bko(m) for m in monitored if m not in shown_brands)
         if quiet:
-            quiet_html = (f'<p class="quiet">이번 주 새 활동 없음({len(quiet)}): '
-                          + " · ".join(_esc(q) for q in quiet) + "</p>")
+            # 안 움직인 브랜드 이름을 전부 나열하면 소음이다. 기획팀의 '하단 표기'
+            # 요구는 지키되 기본은 한 줄로 접고, 눌러야 이름이 보이게 한다.
+            quiet_html = (
+                '<details class="quiet"><summary>'
+                f'외 {len(quiet)}개 브랜드 이번 주 활동 없음</summary>'
+                '<div class="qnames">' + " · ".join(_esc(q) for q in quiet)
+                + '</div></details>')
     mon_n = len(monitored) if monitored else len(shown_brands)
 
     basis = f'{days_label}'

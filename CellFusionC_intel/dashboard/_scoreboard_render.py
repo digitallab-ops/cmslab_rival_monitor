@@ -54,6 +54,13 @@ def render_scoreboard(sb: dict, esc, upcoming: list = None) -> str:
     up = upcoming or []
     if not rows and not up:
         return ""
+    # '판단불가'는 수집하지 않는 지표로 예측한 항목이라 채점 자체가 불가능하다.
+    # 목록에 그대로 깔면 화면 절반이 "판단불가"로 찬다. 숨기되 건수는 각주로
+    # 남긴다 — 못 본 척하는 것과 못 채점한다고 밝히는 것은 다르다.
+    unknown_n = sum(1 for r in rows if (r.get("status") or "") == "unknown")
+    rows = [r for r in rows if (r.get("status") or "") != "unknown"]
+    if not rows and not up:
+        return ""
     st = (sb or {}).get("stat") or {}
     hit, miss = st.get("hit", 0), st.get("miss", 0)
     rate = st.get("rate")
@@ -113,8 +120,9 @@ def render_scoreboard(sb: dict, esc, upcoming: list = None) -> str:
         해외 리테일 순위 · 기사량. 틱톡샵 매출처럼 수집하지 않는 지표는
         <b>맞혔다고 적지 않고</b> 판단불가로 둡니다. 수출액은 관세청 확정분이
         두 달가량 늦어 그만큼 결과가 늦게 나옵니다.<br>
-        확인 방법을 적지 않은 옛 항목(23건)은 채점할 수 없어 적중률 계산에서 뺐습니다.
+        확인 방법을 적지 않았거나 우리가 수집하지 않는 지표로 짚은 항목
+        <b>{UNKNOWN}건</b>은 채점할 수 없어 목록과 적중률에서 뺐습니다.
       </p>
       {UPSTRIP}
       </div>
-    </div>''').replace("{UPSTRIP}", strip)
+    </div>''').replace("{UPSTRIP}", strip).replace("{UNKNOWN}", str(unknown_n))
