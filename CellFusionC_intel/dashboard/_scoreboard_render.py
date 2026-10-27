@@ -7,37 +7,37 @@ generate.py의 거대 f-string 밖에서 만들어지므로 중괄호 이스케�
 _SB_STYLE = """<style>
 #sb .sb-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:0 0 14px}
 #sb .sb-rate{font-size:30px;font-weight:700;letter-spacing:-1px;font-variant-numeric:tabular-nums}
-#sb .sb-rate small{font-size:13px;font-weight:600;color:#8490b0;margin-left:5px;letter-spacing:0}
-#sb .sb-cnt{font-size:13px;color:#8490b0}
-#sb .sb-cnt b{color:#c6ccf2;font-variant-numeric:tabular-nums}
-#sb .sb-none{font-size:13.5px;color:#8490b0;line-height:1.6}
-#sb .sb-list{display:flex;flex-direction:column;border-top:1px solid #2f3a6b}
+#sb .sb-rate small{font-size:13px;font-weight:600;color:var(--text-muted);margin-left:5px;letter-spacing:0}
+#sb .sb-cnt{font-size:13px;color:var(--text-muted)}
+#sb .sb-cnt b{color:var(--text-primary);font-variant-numeric:tabular-nums}
+#sb .sb-none{font-size:13.5px;color:var(--text-muted);line-height:1.6}
+#sb .sb-list{display:flex;flex-direction:column;border-top:1px solid var(--blue)}
 #sb .sb-row{display:grid;grid-template-columns:96px 1fr 240px;gap:16px;align-items:start;
-  padding:13px 4px;border-bottom:1px solid rgba(47,58,107,.5)}
-#sb .sb-when{font-size:12px;color:#6b769a;font-variant-numeric:tabular-nums;line-height:1.5}
-#sb .sb-when i{display:block;font-style:normal;color:#8189cc;margin-top:2px}
-#sb .sb-claim{font-size:14.5px;color:#e7eafc;line-height:1.5}
-#sb .sb-claim em{font-style:normal;color:#8b95ff;font-weight:700;margin-right:7px}
-#sb .sb-how{display:block;font-size:12px;color:#6b769a;margin-top:4px}
+  padding:13px 4px;border-bottom:1px solid color-mix(in srgb, var(--blue) 50%, transparent)}
+#sb .sb-when{font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;line-height:1.5}
+#sb .sb-when i{display:block;font-style:normal;color:var(--blue);margin-top:2px}
+#sb .sb-claim{font-size:14.5px;color:var(--text-primary);line-height:1.5}
+#sb .sb-claim em{font-style:normal;color:var(--blue);font-weight:700;margin-right:7px}
+#sb .sb-how{display:block;font-size:12px;color:var(--text-muted);margin-top:4px}
 #sb .sb-res{font-size:13px;line-height:1.5}
 #sb .sb-tag{display:inline-block;font-size:11.5px;font-weight:700;border-radius:5px;
   padding:2px 8px;margin-bottom:5px}
-#sb .t-hit{background:rgba(5,224,224,.14);color:#05e0e0}
-#sb .t-miss{background:rgba(255,107,122,.14);color:#ff6b7a}
-#sb .t-unknown{background:rgba(132,144,176,.14);color:#8490b0}
-#sb .t-pending{background:rgba(240,162,86,.14);color:#f0a256}
-#sb .sb-note{color:#c6ccf2}
-#sb .sb-note.dim{color:#8490b0}
-#sb .sb-foot{font-size:12.5px;color:#6b769a;line-height:1.7;margin-top:12px}
+#sb .t-hit{background:color-mix(in srgb, var(--aqua) 14%, transparent);color:var(--aqua)}
+#sb .t-miss{background:color-mix(in srgb, var(--critical) 14%, transparent);color:var(--critical)}
+#sb .t-unknown{background:color-mix(in srgb, var(--text-muted) 14%, transparent);color:var(--text-muted)}
+#sb .t-pending{background:color-mix(in srgb, var(--serious) 14%, transparent);color:var(--serious)}
+#sb .sb-note{color:var(--text-primary)}
+#sb .sb-note.dim{color:var(--text-muted)}
+#sb .sb-foot{font-size:12.5px;color:var(--text-muted);line-height:1.7;margin-top:12px}
 /* 곧 나올 것 — 짚은 것이 언제 판가름나는지. 적중표와 한 덩어리다. */
-#sb .up-strip{display:flex;flex-wrap:wrap;gap:0;margin:18px 0 0;border-top:1px solid #2f3a6b}
-#sb .up-i{flex:1 1 220px;padding:13px 18px 4px 0;border-right:1px solid rgba(47,58,107,.5)}
+#sb .up-strip{display:flex;flex-wrap:wrap;gap:0;margin:18px 0 0;border-top:1px solid var(--blue)}
+#sb .up-i{flex:1 1 220px;padding:13px 18px 4px 0;border-right:1px solid color-mix(in srgb, var(--blue) 50%, transparent)}
 #sb .up-i:last-child{border-right:none}
-#sb .up-d{font-size:11px;font-weight:700;letter-spacing:1px;color:#f0a256;
+#sb .up-d{font-size:11px;font-weight:700;letter-spacing:1px;color:var(--serious);
   font-variant-numeric:tabular-nums}
-#sb .up-t{font-size:14px;font-weight:700;color:#e7eafc;margin:4px 0 3px}
-#sb .up-n{font-size:12px;color:#8490b0;line-height:1.5}
-@media (max-width:900px){#sb .up-i{border-right:none;border-bottom:1px solid rgba(47,58,107,.5)}}
+#sb .up-t{font-size:14px;font-weight:700;color:var(--text-primary);margin:4px 0 3px}
+#sb .up-n{font-size:12px;color:var(--text-muted);line-height:1.5}
+@media (max-width:900px){#sb .up-i{border-right:none;border-bottom:1px solid color-mix(in srgb, var(--blue) 50%, transparent)}}
 @media (max-width:900px){#sb .sb-row{grid-template-columns:1fr}}
 </style>"""
 
