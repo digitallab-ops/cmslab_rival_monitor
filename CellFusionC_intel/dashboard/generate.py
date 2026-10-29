@@ -930,8 +930,11 @@ def _render_self_position(sp: dict) -> str:
             f'<span class="sp-rc">★{x["rating"] if x["rating"] else "—"}</span></div>'
             for x in amz.get("peers", [])[:6])
         bench.append(
-            f'<div class="sp-block"><div class="sp-bt">해외 판매 — 아마존 '
-            f'{_esc(_bf_cty(amz["country"]))} · {_esc(amz["category"])}</div>{peers}</div>')
+            f'<div class="sp-block sp-wide"><div class="sp-bt">해외 판매 — 아마존 '
+            f'{_esc(_bf_cty(amz["country"]))} · {_esc(amz["category"])}'
+            f'<span class="sp-sub">우리 {amz["rank"]}위 · ★{amz["rating"]} · '
+            f'리뷰 {amz["reviews"]:,}</span></div>'
+            f'<div class="sp-cols">{peers}</div></div>')
 
     for key, lab, note in (("naver", "국내 검색 수요", "네이버 데이터랩 · 최근 30일 평균"),
                            ("google", "해외 검색 수요", "구글 트렌드 · 최근 30일 평균")):
@@ -964,7 +967,12 @@ def _render_self_position(sp: dict) -> str:
             f'<div class="sp-block"><div class="sp-bt">올리브영 선반 — {_esc(c["category"])}'
             f'<span class="sp-sub">우리 {c["self_rank"]}/{len(c["rows"])}위</span></div>{rows}</div>')
 
-    bench_html = (f'<div class="sp-grid">{"".join(bench)}</div>') if bench else ""
+    # 좁은 블록이 홀수면 마지막 하나가 한 칸만 차지해 옆이 빈다 → 가로로 채운다.
+    narrow = [i for i, b in enumerate(bench) if "sp-wide" not in b]
+    if len(narrow) % 2 == 1:
+        k = narrow[-1]
+        bench[k] = bench[k].replace('class="sp-block"', 'class="sp-block sp-wide"', 1)
+    bench_html = (f'<div class="sp-grid sp-bench">{"".join(bench)}</div>') if bench else ""
     sp_basis = ('<div class="section-basis" style="margin:2px 0 8px">'
                 '📅 올영 성과·리뷰=최신 수집 스냅샷 · 뉴스 노출=최근 30일 · '
                 '아마존·검색·선반=경쟁사와 동일 기준으로 측정</div>')
@@ -2332,21 +2340,34 @@ a:hover { color: var(--gold); }
 .sp-read { font-size:14px; color:var(--hi); background:color-mix(in srgb, var(--blue) 8%, transparent); border-left:3px solid var(--champ);
   border-radius:8px; padding:10px 13px; margin-bottom:14px; line-height:1.55; }
 .sp-read b { color:var(--champ2); }
-.sp-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.sp-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-lg); margin-top:var(--space-md); }
 @media (max-width:900px){ .sp-grid { grid-template-columns:1fr; } }
-.sp-block { background:var(--deep); border:1px solid var(--border); border-radius:9px; padding:12px 14px; }
+.sp-block { background:var(--surface-2); border:1px solid var(--border);
+  border-radius:var(--radius); padding:18px 20px; }
 /* 같은 축 비교 블록 — 우리 줄을 강조해야 '어디쯤인지'가 한눈에 들어온다 */
 .sp-rank { min-width:30px; font-size:12px; color:var(--text-muted); font-variant-numeric:tabular-nums; }
-.sp-prow.me { background:color-mix(in srgb, var(--blue) 12%, transparent);
-  margin:0 -14px; padding-left:14px; padding-right:14px; border-radius:4px; }
+/* 가로전체 블록. 몇 번째가 혼자 남는지는 파이썬에서 세어 sp-wide를 붙인다 —
+   nth-child(odd)로는 가로전체 블록이 섞인 순간 계산이 틀어진다. */
+.sp-bench { gap:var(--space-lg); }
+.sp-bench .sp-wide { grid-column: 1 / -1; }
+/* 가로로 넓은 블록은 목록을 2열로 흘려 세로로 길어지지 않게 */
+.sp-cols { columns:2; column-gap:28px; }
+@media (max-width:900px){ .sp-cols { columns:1; } }
+.sp-cols .sp-prow { break-inside:avoid; }
+.sp-prow.me { background:color-mix(in srgb, var(--blue) 14%, transparent);
+  margin:0 -20px; padding-left:20px; padding-right:20px; }
 .sp-prow.me .sp-pn { color:var(--text-primary); font-weight:600; }
 .sp-prow.me .sp-rank { color:var(--blue); font-weight:700; }
-.sp-me { font-size:13px; color:var(--text-secondary); margin:2px 0 8px; line-height:1.6; }
+.sp-me { font-size:var(--text-sm); color:var(--text-secondary);
+  margin:0 0 var(--space-sm); line-height:1.6; }
 .sp-me b { color:var(--text-primary); }
 .sp-zero { display:block; font-size:11.5px; color:var(--text-muted); margin-top:3px; }
-.sp-sub { float:right; font-size:11.5px; font-weight:400; color:var(--text-muted); }
-.sp-bt { font-size:13px; font-weight:800; color:var(--hi); margin-bottom:9px; }
-.sp-prow { display:flex; align-items:baseline; gap:9px; padding:5px 0; border-bottom:1px solid color-mix(in srgb, var(--blue) 30%, transparent); }
+.sp-sub { float:right; font-size:var(--text-xs); font-weight:400; color:var(--text-muted); }
+.sp-bt { font-size:var(--text-base); font-weight:var(--fw-bold); color:var(--text-primary);
+  margin-bottom:var(--space-sm); padding-bottom:var(--space-sm);
+  border-bottom:1px solid var(--border); overflow:hidden; }
+.sp-prow { display:flex; align-items:baseline; gap:10px; padding:9px 0; line-height:1.5;
+  border-bottom:1px solid var(--border); }
 .sp-prow:last-child { border-bottom:none; }
 .sp-star { font-family:var(--mono); font-size:13px; font-weight:800; color:var(--teal); white-space:nowrap; }
 .sp-pn { flex:1; font-size:12.5px; color:var(--mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
