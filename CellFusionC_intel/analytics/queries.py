@@ -1354,6 +1354,50 @@ def get_self_position(session: Session) -> dict:
         """)).scalar() or 0
     except Exception:
         pass
+    # ── 같은 축 비교 ── 리뷰 점수·뉴스 건수 둘로는 '우리가 어디쯤인지'를 못 본다.
+    # 경쟁사를 재는 지표(해외판매·검색·선반순위)로 자사도 똑같이 잰다.
+    try:    # 아마존 — 자사 상품의 카테고리 순위
+        r = session.execute(text(f"""
+            SELECT country, category, rank, rating, review_count, product_name
+            FROM {DB_SCHEMA}.retail_rankings
+            WHERE brand = 'CellFusionC'
+              AND capture_date = (SELECT MAX(capture_date) FROM {DB_SCHEMA}.retail_rankings
+                                  WHERE brand = 'CellFusionC')
+            ORDER BY rank LIMIT 1""")).fetchone()
+        if r:
+            peers = session.execute(text(f"""
+                SELECT brand, rank, rating FROM {DB_SCHEMA}.retail_rankings
+                WHERE retailer='amazon' AND country=:c AND category=:g AND brand IS NOT NULL
+                  AND capture_date=(SELECT MAX(capture_date) FROM {DB_SCHEMA}.retail_rankings
+                                    WHERE category=:g)
+                ORDER BY rank LIMIT 8"""), {"c": r[0], "g": r[1]}).fetchall()
+            out["amazon"] = {"country": r[0], "category": r[1], "rank": r[2],
+                             "rating": float(r[3]) if r[3] else None,
+                             "reviews": r[4], "product": r[5] or "",
+                             "peers": [{"brand": x[0], "rank": x[1],
+                                        "rating": float(x[2]) if x[2] else None} for x in peers]}
+    except Exception as e:
+        session.rollback(); logger.warning("자사 아마존 조회 실패: %s", e)
+
+    try:    # 검색 수요 — 국내(네이버)·해외(구글)를 경쟁사와 나란히
+        for key, tbl, col in (("naver", "search_trends", "ratio"),
+                              ("google", "google_trends", "ratio")):
+            rows = session.execute(text(f"""
+                SELECT term, ROUND(AVG({col}))::int v FROM {DB_SCHEMA}.{tbl}
+                WHERE period >= CURRENT_DATE - 30 GROUP BY 1 ORDER BY v DESC NULLS LAST"""))                .fetchall()
+            rank = [x[0] for x in rows]
+            out[key] = {"self": next((x[1] for x in rows if x[0] == "CellFusionC"), None),
+                        "rank": (rank.index("CellFusionC") + 1) if "CellFusionC" in rank else None,
+                        "total": len(rank),
+                        "top": [{"brand": x[0], "v": x[1]} for x in rows[:5]]}
+    except Exception as e:
+        session.rollback(); logger.warning("자사 검색 조회 실패: %s", e)
+
+    try:    # 올리브영 선반 — 같은 카테고리 비교군 안에서의 위치
+        out["shelf"] = get_shelf_position(session).get("categories", [])
+    except Exception as e:
+        session.rollback(); logger.warning("자사 선반 위치 조회 실패: %s", e)
+
     return out
 
 

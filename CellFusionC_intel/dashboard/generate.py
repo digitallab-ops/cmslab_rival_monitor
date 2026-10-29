@@ -918,9 +918,58 @@ def _render_self_position(sp: dict) -> str:
     kw_html = (f'<div class="sp-block"><div class="sp-bt">우리 리뷰 강점·약점 키워드</div>'
                f'<div class="sp-kws"><span class="sp-kl">강점</span>{pos}</div>'
                f'<div class="sp-kws"><span class="sp-kl">약점</span>{neg}</div></div>') if (pos or neg) else ""
+    # ── 같은 축 비교 ── 경쟁사를 재는 지표로 우리도 재야 '어디쯤인지'가 보인다.
+    bench = []
+
+    amz = sp.get("amazon")
+    if amz:
+        peers = "".join(
+            f'<div class="sp-prow{" me" if x["brand"] == "CellFusionC" else ""}">'
+            f'<span class="sp-rank">{x["rank"]}위</span>'
+            f'<span class="sp-pn">{_esc("셀퓨전씨" if x["brand"] == "CellFusionC" else x["brand"])}</span>'
+            f'<span class="sp-rc">★{x["rating"] if x["rating"] else "—"}</span></div>'
+            for x in amz.get("peers", [])[:6])
+        bench.append(
+            f'<div class="sp-block"><div class="sp-bt">해외 판매 — 아마존 '
+            f'{_esc(_bf_cty(amz["country"]))} · {_esc(amz["category"])}</div>{peers}</div>')
+
+    for key, lab, note in (("naver", "국내 검색 수요", "네이버 데이터랩 · 최근 30일 평균"),
+                           ("google", "해외 검색 수요", "구글 트렌드 · 최근 30일 평균")):
+        d = sp.get(key) or {}
+        if d.get("rank") is None:
+            continue
+        tops = "".join(
+            f'<div class="sp-prow"><span class="sp-rank">{i + 1}</span>'
+            f'<span class="sp-pn">{_esc(t["brand"])}</span>'
+            f'<span class="sp-rc">{t["v"]}</span></div>'
+            for i, t in enumerate(d.get("top", [])[:4]))
+        zero = (' <span class="sp-zero">검색량이 기준치 미만이면 0으로 나옵니다 — '
+                '데이터 누락이 아니라 수요가 적다는 뜻입니다.</span>') if d.get("self") == 0 else ""
+        bench.append(
+            f'<div class="sp-block"><div class="sp-bt">{lab}</div>'
+            f'<div class="sp-me">우리 <b>{d["rank"]}위</b> / {d["total"]}개 · 지수 '
+            f'<b>{d["self"]}</b>{zero}</div>{tops}</div>')
+
+    shelf = sp.get("shelf") or []
+    for c in shelf:
+        rows = "".join(
+            f'<div class="sp-prow{" me" if r.get("is_self") else ""}">'
+            f'<span class="sp-rank">{i + 1}</span>'
+            f'<span class="sp-pn">{_esc(r["brand"])}</span>'
+            f'<span class="sp-rc">'
+            + ("순위권 밖" if r.get("absent") else f'평균 {r["avg"]}위 · {r["days"]}일')
+            + '</span></div>'
+            for i, r in enumerate(c.get("rows", [])[:9]))
+        bench.append(
+            f'<div class="sp-block"><div class="sp-bt">올리브영 선반 — {_esc(c["category"])}'
+            f'<span class="sp-sub">우리 {c["self_rank"]}/{len(c["rows"])}위</span></div>{rows}</div>')
+
+    bench_html = (f'<div class="sp-grid">{"".join(bench)}</div>') if bench else ""
     sp_basis = ('<div class="section-basis" style="margin:2px 0 8px">'
-                '📅 올영 성과·리뷰=최신 수집 스냅샷 · 뉴스 노출=최근 30일 기준</div>')
-    return f'{sp_basis}{cmp_html}{read_html}<div class="sp-grid">{prod_html}{kw_html}</div>'
+                '📅 올영 성과·리뷰=최신 수집 스냅샷 · 뉴스 노출=최근 30일 · '
+                '아마존·검색·선반=경쟁사와 동일 기준으로 측정</div>')
+    return (f'{sp_basis}{cmp_html}{read_html}{bench_html}'
+            f'<div class="sp-grid">{prod_html}{kw_html}</div>')
 
 
 def _render_ingredient_intel(items: list) -> str:
@@ -2286,6 +2335,16 @@ a:hover { color: var(--gold); }
 .sp-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 @media (max-width:900px){ .sp-grid { grid-template-columns:1fr; } }
 .sp-block { background:var(--deep); border:1px solid var(--border); border-radius:9px; padding:12px 14px; }
+/* 같은 축 비교 블록 — 우리 줄을 강조해야 '어디쯤인지'가 한눈에 들어온다 */
+.sp-rank { min-width:30px; font-size:12px; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+.sp-prow.me { background:color-mix(in srgb, var(--blue) 12%, transparent);
+  margin:0 -14px; padding-left:14px; padding-right:14px; border-radius:4px; }
+.sp-prow.me .sp-pn { color:var(--text-primary); font-weight:600; }
+.sp-prow.me .sp-rank { color:var(--blue); font-weight:700; }
+.sp-me { font-size:13px; color:var(--text-secondary); margin:2px 0 8px; line-height:1.6; }
+.sp-me b { color:var(--text-primary); }
+.sp-zero { display:block; font-size:11.5px; color:var(--text-muted); margin-top:3px; }
+.sp-sub { float:right; font-size:11.5px; font-weight:400; color:var(--text-muted); }
 .sp-bt { font-size:13px; font-weight:800; color:var(--hi); margin-bottom:9px; }
 .sp-prow { display:flex; align-items:baseline; gap:9px; padding:5px 0; border-bottom:1px solid color-mix(in srgb, var(--blue) 30%, transparent); }
 .sp-prow:last-child { border-bottom:none; }
