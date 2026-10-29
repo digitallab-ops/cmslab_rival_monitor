@@ -10,6 +10,7 @@
 """
 
 import os
+import re
 import json
 import time
 import logging
@@ -99,10 +100,18 @@ def _strip_ver(k: str) -> str:
     return "".join(c for c in (k or "") if not c.isdigit())
 
 
+# 'K-뷰티'처럼 **나라 한 글자 + 뷰티/beauty**는 전부 카테고리 용어다.
+# K만 막아놨더니 'C-Beauty'(중국 뷰티)가 브랜드 후보로 슬랙에 나갔다.
+# J-Beauty·C-Beauty·K-Beauty… 어느 글자가 와도 같은 성격이라 통째로 막는다.
+_COUNTRY_CAT = re.compile(r"^[a-z가-힣](?:beauty|뷰티|cosmetic|코스메틱|스킨케어|skincare)$")
+
+
 def _is_block(name: str, ko: str) -> bool:
     nk, kk = _cmp_key(name), _cmp_key(ko)
     for v in (nk, kk, _strip_ver(nk), _strip_ver(kk)):
-        if v and v in _BLOCK_EXACT_K:
+        if not v:
+            continue
+        if v in _BLOCK_EXACT_K or _COUNTRY_CAT.match(v):
             return True
     return any(b in nk or (kk and b in kk) for b in _BLOCK_K)
 
