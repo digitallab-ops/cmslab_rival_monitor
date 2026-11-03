@@ -161,6 +161,20 @@ def notify_negative_signal(article) -> bool:
     return _post(payload)          # 실시간 속보 → 개인·수집 채널만
 
 
+def notify_ops(title: str, detail: str) -> bool:
+    """운영 경보 — 사람이 바로 조치해야 하는 장애.
+
+    수집 요약의 '오류 N건'에 묻히면 안 되는 것만 쓴다(크레딧 소진 등).
+    """
+    return _post({
+        "text": title,
+        "blocks": [
+            {"type": "header", "text": {"type": "plain_text", "text": title[:150]}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": detail[:2800]}},
+        ],
+    })
+
+
 def notify_collection_summary(label: str, agg: dict) -> bool:
     """수집 잡 완료 후 요약 리포트 전송.
 

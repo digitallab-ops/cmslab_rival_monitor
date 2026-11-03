@@ -67,13 +67,37 @@ def _get_client() -> OpenAI:
     return _client
 
 
+def _is_quota_error(err) -> bool:
+    """429 중 '잔액 소진'인지 — 속도 제한과 구분한다.
+
+    OpenAI는 둘 다 429로 준다. 속도 제한은 기다리면 풀리지만 잔액 소진은
+    기다려도 안 풀린다. 그런데 예전엔 구분 없이 20·40·80초를 쉬고 재시도해서,
+    실제로 하루 90분을 허비하고도 결국 전부 실패했다(2026-11-03, 268건).
+    """
+    code = getattr(getattr(err, "body", None), "get", lambda *_: None)("code")
+    if code is None:
+        body = getattr(err, "body", None)
+        if isinstance(body, dict):
+            code = (body.get("error") or {}).get("code")
+    txt = f"{code or ''} {err}".lower()
+    return "insufficient_quota" in txt or "exceeded your current quota" in txt
+
+
+class QuotaExhausted(RuntimeError):
+    """OpenAI 크레딧 소진 — 재시도해도 소용없다. 충전이 필요하다."""
+
+
 def _with_retry(fn, *args, **kwargs):
-    """429 RateLimitError 시 지수 백오프로 재시도."""
+    """429 시 지수 백오프 재시도. 단 '잔액 소진'이면 즉시 중단한다."""
     delay = RETRY_BASE_DELAY
     for attempt in range(MAX_RETRIES):
         try:
             return fn(*args, **kwargs)
-        except RateLimitError:
+        except RateLimitError as e:
+            if _is_quota_error(e):
+                logger.error("OpenAI 크레딧 소진 — 재시도하지 않고 중단합니다. "
+                             "결제/크레딧을 확인하세요. (%s)", str(e)[:140])
+                raise QuotaExhausted(str(e)[:200]) from e
             if attempt == MAX_RETRIES - 1:
                 raise
             logger.warning("Rate limit — %d초 대기 (%d/%d)", delay, attempt + 1, MAX_RETRIES)
@@ -107,6 +131,9 @@ def _filter_relevant(articles: list[RawArticle]) -> list[int]:
         indices = data.get("relevant", [])
         return [i for i in indices if isinstance(i, int) and 0 <= i < len(articles)]
 
+    except QuotaExhausted:
+        # '전체 통과'로 넘기면 분류 없이 저장돼 지표가 오염된다. 위로 올려 중단시킨다.
+        raise
     except Exception as e:
         logger.warning("Stage1 오류 → 전체 통과: %s", e)
         return list(range(len(articles)))
@@ -241,6 +268,8 @@ def _classify_batch(
                 logger.warning("배치 항목 파싱 오류 (idx=%s): %s", idx, e)
         return results
 
+    except QuotaExhausted:
+        raise
     except Exception as e:
         logger.error("배치 분류 오류: %s", e)
         return []

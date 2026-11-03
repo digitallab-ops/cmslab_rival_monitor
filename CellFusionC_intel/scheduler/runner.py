@@ -68,7 +68,11 @@ def _run_collection(label: str, brands: list[str], countries: list[str],
     saved_by_brand: dict = defaultdict(int)
     error_samples: list = []
 
+    from classifier.claude_classifier import QuotaExhausted
+    quota_out = False
     for brand in brands:
+        if quota_out:
+            break
         for country in countries:
             try:
                 st = run_pipeline(brand, country)
@@ -79,6 +83,24 @@ def _run_collection(label: str, brands: list[str], countries: list[str],
                 agg["errors"]     += st.errors
                 if st.saved:
                     saved_by_brand[brand] += st.saved
+            except QuotaExhausted as e:
+                # 크레딧이 없으면 남은 브랜드×국가를 돌아도 전부 실패한다.
+                # 예전엔 끝까지 돌며 재시도 대기로만 90분을 버렸다.
+                logger.error("OpenAI 크레딧 소진 — %s 수집을 여기서 중단합니다 "
+                             "(%s/%s까지 진행). 충전 후 재실행하세요.", label, brand, country)
+                agg["errors"] += 1
+                error_samples.append(f"크레딧 소진: {str(e)[:90]}")
+                quota_out = True
+                try:    # 원인이 명확한 장애라 '오류 N건'에 묻히면 안 된다
+                    from notifications.slack import notify_ops
+                    notify_ops(
+                        "🔴 OpenAI 크레딧 소진 — 분류가 멈췄습니다",
+                        f"{label} 수집을 {brand}/{country}에서 중단했습니다."
+                        + chr(10) + "수집·저장은 되지만 분류가 안 돼 기사가 쌓이지 않습니다."
+                        + chr(10) + "OpenAI 결제/크레딧 충전 후 스케줄러를 재시작하세요.")
+                except Exception:
+                    pass
+                break
             except Exception as e:
                 agg["errors"] += 1
                 if len(error_samples) < 5:
