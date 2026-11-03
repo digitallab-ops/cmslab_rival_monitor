@@ -74,12 +74,15 @@ def _is_quota_error(err) -> bool:
     기다려도 안 풀린다. 그런데 예전엔 구분 없이 20·40·80초를 쉬고 재시도해서,
     실제로 하루 90분을 허비하고도 결국 전부 실패했다(2026-11-03, 268건).
     """
-    code = getattr(getattr(err, "body", None), "get", lambda *_: None)("code")
-    if code is None:
-        body = getattr(err, "body", None)
-        if isinstance(body, dict):
-            code = (body.get("error") or {}).get("code")
-    txt = f"{code or ''} {err}".lower()
+    # 에러 모양이 SDK 버전·경로마다 다르다(body가 error를 감싸기도, 아니기도).
+    # 한 군데만 보면 놓치므로 가능한 출처를 전부 긁어 한 문자열로 합쳐 본다.
+    parts = [str(err), str(getattr(err, "message", "") or "")]
+    body = getattr(err, "body", None)
+    if isinstance(body, dict):
+        inner = body.get("error") if isinstance(body.get("error"), dict) else body
+        parts += [str(inner.get("code") or ""), str(inner.get("type") or ""),
+                  str(inner.get("message") or "")]
+    txt = " ".join(parts).lower()
     return "insufficient_quota" in txt or "exceeded your current quota" in txt
 
 
