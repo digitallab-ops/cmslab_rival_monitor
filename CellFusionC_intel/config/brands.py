@@ -41,6 +41,31 @@ TIER2_BRANDS = [
     "Aestura",           # 에스트라
     "Zeroid",            # 제로이드
     "Celimax",           # 셀리맥스
+
+    # ── 타겟 브랜드 리스트(261023 Jamie) 반영 — 네이버/올영 지표 기준 ──
+    "AHC",                # AHC
+    "Innisfree",          # 이니스프리
+    "Banila Co",          # 바닐라코
+    "Wellage",            # 웰라쥬
+    "Pation",             # 파티온
+    "Sikmulnara",         # 식물나라
+    "Isoi",               # 아이소이
+    "Marcique",           # 마르시끄
+    "Ilso",               # 일소
+    "Isntree",            # 이즈앤트리
+    "Eum",                # 이옴
+    "Banobagi",           # 바노바기
+    "Manyo Menokin",      # 메노킨
+    "Haveblue",           # 헤브블루
+    # ── 뷰티 디바이스(타사 디바이스 PRM 261103) — 자사 디바이스 사업 시작에 따라 ──
+    #    TV홈쇼핑·라이브커머스가 주전장이라 지금은 뉴스·검색만 잡힌다.
+    "Thome",              # 톰더글로우
+    "Quadcera",           # 쿼드쎄라
+    "GlowM",              # 글로우엠
+    "EOA",                # EOA
+    "LG Pra.L",           # LG프라엘
+    "Mamicare",           # 마미케어
+    "Viewandi",           # 뷰앤디
 ]
 
 ALL_BRANDS = TIER1_BRANDS + TIER2_BRANDS
@@ -257,6 +282,29 @@ BRAND_KO_NAMES: dict[str, list[str]] = {
     "Beauty of Joseon": ["조선미녀"],
     "Celimax":          ["셀리맥스"],
     "CellFusionC":      ["셀퓨전씨", "셀퓨전C", "셀퓨전시씨"],   # 자사
+
+    # ── 타겟 리스트 + 뷰티 디바이스 (261103) ──
+    "AHC":               ["AHC", "에이에이치씨"],
+    "Innisfree":         ["이니스프리"],
+    "Banila Co":         ["바닐라코"],
+    "Wellage":           ["웰라쥬"],
+    "Pation":            ["파티온"],
+    "Sikmulnara":        ["식물나라"],
+    "Isoi":              ["아이소이"],
+    "Marcique":          ["마르시끄"],
+    "Ilso":              ["일소"],
+    "Isntree":           ["이즈앤트리"],
+    "Eum":               ["이옴"],
+    "Banobagi":          ["바노바기"],
+    "Manyo Menokin":     ["메노킨"],
+    "Haveblue":          ["헤브블루"],
+    "Thome":             ["톰더글로우", "톰 더 글로우", "THOME", "톰"],
+    "Quadcera":          ["쿼드쎄라", "쿼드세라"],
+    "GlowM":             ["글로우엠", "글로우M"],
+    "EOA":               ["EOA", "이오에이", "풀쎄라", "풀써마", "풀텐자"],
+    "LG Pra.L":          ["LG프라엘", "프라엘", "LG Pra.L"],
+    "Mamicare":          ["마미케어", "브이쎄라"],
+    "Viewandi":          ["뷰앤디", "앤모드"],
 }
 
 
