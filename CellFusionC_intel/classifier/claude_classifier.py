@@ -265,6 +265,7 @@ def _classify_batch(
             idx = item.pop("index", None)
             if idx is None or not (0 <= idx < len(articles)):
                 continue
+            _normalize_importance(item)
             try:
                 results.append((idx, NewsClassification(**item)))
             except Exception as e:
@@ -279,6 +280,28 @@ def _classify_batch(
 
 
 # ── 공개 API ───────────────────────────────────────────────────────────────────
+
+def _normalize_importance(item: dict) -> None:
+    """importance를 strategic_score에서 결정적으로 되돌린다.
+
+    프롬프트에 '≥75 high · 55~74 medium · ≤54 low'라고 적혀 있는데도 모델이
+    경계에서 어긴다 — 표본 600건 중 64건(10.7%)이 불일치였고 그중 63건이
+    'score 48~54인데 medium'이었다. 둘은 같은 값을 두 번 말하는 것이라
+    어긋나면 지표가 둘로 갈린다(화면은 importance, 정렬은 score를 쓴다).
+    프롬프트로는 안 지켜지니 여기서 맞춘다.
+    """
+    s = item.get("strategic_score")
+    if s is None:
+        return
+    try:
+        s = int(s)
+    except (TypeError, ValueError):
+        return
+    want = "high" if s >= 75 else ("medium" if s >= 55 else "low")
+    if item.get("importance") != want:
+        logger.debug("importance 보정: %s → %s (score %s)", item.get("importance"), want, s)
+        item["importance"] = want
+
 
 def classify_articles(
     articles: list[RawArticle],
