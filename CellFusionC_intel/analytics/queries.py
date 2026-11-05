@@ -1124,6 +1124,44 @@ def get_negative_signals(session: Session, days: int = 30, limit: int = 20) -> l
              "importance": r[7] or ""} for r in rows]
 
 
+def get_channel_moves(session: Session, days: int = 90, limit: int = 8) -> list[dict]:
+    """새로 열리는 판매 경로 — 특정 브랜드 기사가 아니라 '판이 바뀌는' 유통 뉴스.
+
+    브랜드별 집계는 brand_focus가 incidental/unrelated인 기사를 전부 제외한다.
+    그런데 "배달앱이 화장품을 판다", "세포라가 K뷰티 코너를 깐다" 같은 기사는
+    주인공이 브랜드가 아니라 채널이라 unrelated로 떨어지고, 결과적으로 저장만 되고
+    화면에는 한 번도 안 나왔다. 기획팀 채점(2026-11-04)에서 이런 기사를 가장
+    높게 평가했기에, 집계에서 빠진 바로 그 조건을 역으로 끌어와 따로 보여준다.
+
+    활동유형은 유통_채널로 한정한다. 신시장_진출까지 넓히면 증시·스포츠 오분류가
+    섞여 들어온다(분류단에서 정리 중인 영역이라 표시 계층에서 좁게 잡는다).
+    """
+    cutoff = _cutoff_iso(days)
+    try:
+        rows = session.execute(text(f"""
+            SELECT DISTINCT ON (COALESCE(NULLIF(title_ko,''), title))
+                   COALESCE(NULLIF(title_ko,''), title) AS title,
+                   country, details, source_url, source_name,
+                   published_date::date::text, strategic_score
+            FROM {DB_SCHEMA}.news_articles
+            WHERE is_duplicate IS NOT TRUE
+              AND activity_type = '유통_채널'
+              AND brand_focus IN ('incidental', 'unrelated')
+              AND strategic_score >= 55
+              AND published_date >= :cutoff
+              -- 증시·연예·개인후기 노이즈 1차 방어(분류 점수와 별개로 제목에서 거른다)
+              AND COALESCE(title_ko, title) !~ '증시|코스피|코스닥|종목|목표주가|주가|리뷰|후기|언박싱'
+            ORDER BY COALESCE(NULLIF(title_ko,''), title), strategic_score DESC
+        """), {"cutoff": cutoff}).fetchall()
+    except Exception:
+        return []
+    out = [{"title": r[0] or "", "country": r[1] or "", "details": r[2] or "",
+            "source_url": r[3] or "", "source_name": r[4] or "",
+            "date": r[5] or "", "score": r[6] or 0} for r in rows]
+    out.sort(key=lambda x: (x["date"], x["score"]), reverse=True)
+    return out[:limit]
+
+
 def get_retail_performance(session: Session, days: int = 21) -> dict:
     """브랜드별 아마존 성과 — 서사의 '잘 나간다' 실측. 핵심영역(선·BB·베이스) 특화 강조.
 

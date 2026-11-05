@@ -54,6 +54,7 @@ from analytics.queries import (
     get_brand_insights_raw_by_range,
     get_ingredient_trends,
     get_negative_signals,
+    get_channel_moves,
     get_retail_rank_history,
     get_oliveyoung_movers,
     get_oliveyoung_category_rank,
@@ -1045,6 +1046,35 @@ def _render_negative_signals(negs: list) -> str:
             f'<div class="neg-title">{_esc(n.get("title",""))[:80]} {link}</div></div>'
         )
     return f'<div class="neg-list">{"".join(rows)}</div>'
+
+
+def _render_channel_moves(moves: list) -> str:
+    """판매 경로 — 브랜드가 아니라 '채널'이 주인공인 기사.
+
+    브랜드별 집계는 brand_focus가 incidental/unrelated면 전부 걸러낸다. 그래서
+    "배달앱이 화장품을 판다" 같은 판 자체가 바뀌는 기사가 저장만 되고 화면에는
+    한 번도 안 나왔다. 여기가 그 기사들의 자리다.
+    """
+    if not moves:
+        return '<p class="no-data">최근 90일 새로 열린 판매 경로 없음</p>'
+    rows = []
+    for m in moves:
+        flag = COUNTRY_FLAGS.get(m.get("country", ""), "🌐")
+        link = (f'<a class="cm-src" href="{_esc(m["source_url"])}" target="_blank" rel="noopener">▸</a>'
+                if str(m.get("source_url", "")).startswith("http") else "")
+        det = _esc((m.get("details") or "").strip())[:110]
+        rows.append(
+            f'<div class="cm-row">'
+            f'<div class="cm-cc">{flag}<span>{_esc(m.get("country",""))}</span></div>'
+            f'<div class="cm-body"><div class="cm-title">{_esc(m.get("title",""))[:88]} {link}</div>'
+            + (f'<div class="cm-det">{det}</div>' if det else "")
+            + f'<div class="cm-meta">{_esc(m.get("date",""))}'
+            + (f' · {_esc(m.get("source_name",""))}' if m.get("source_name") else "")
+            + '</div></div></div>'
+        )
+    return ('<div class="cm-list">' + "".join(rows) + '</div>'
+            '<p class="cm-note">특정 브랜드 소식이 아니라 <b>파는 곳 자체가 바뀌는</b> 뉴스만 모았습니다 '
+            '— 새 유통 채널이 열리면 우리도 들어갈 자리가 생깁니다.</p>')
 
 
 def _render_search_spikes(spikes: list) -> str:
@@ -2388,6 +2418,19 @@ a:hover { color: var(--gold); }
 .neg-cc { font-size: 13.5px; color:var(--lo); }
 .neg-title { font-size: 15px; color:var(--mid); line-height:1.5; }
 .neg-src { color:var(--champ); font-size: 13px; white-space:nowrap; }
+/* ── 판매 경로(채널이 주인공인 기사) ── */
+.cm-list { display:flex; flex-direction:column; gap:8px; }
+.cm-row { display:grid; grid-template-columns:58px 1fr; gap:12px; align-items:start;
+  padding:11px 13px; background:color-mix(in srgb, var(--blue) 5%, transparent);
+  border:1px solid color-mix(in srgb, var(--blue) 18%, transparent);
+  border-left:3px solid var(--blue); border-radius:8px; }
+.cm-cc { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:17px; line-height:1.1; }
+.cm-cc span { font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--lo); }
+.cm-title { font-size:15px; font-weight:650; color:var(--hi); line-height:1.5; }
+.cm-det { font-size:13.5px; color:var(--mid); line-height:1.5; margin-top:3px; }
+.cm-meta { font-family:var(--mono); font-size:12px; color:var(--lo); margin-top:4px; }
+.cm-src { color:var(--champ); font-size:13px; text-decoration:none; white-space:nowrap; }
+.cm-note { font-size:13px; color:var(--lo); line-height:1.6; margin:10px 2px 0; }
 /* ── 아마존 리테일 순위 추세 ── */
 .rt-head, .rt-row { display:grid; grid-template-columns:140px 1fr 62px 120px 74px; align-items:center; gap:12px; }
 .rt-head { font-size: 13.5px; font-weight:800; color:var(--champ); text-transform:uppercase; letter-spacing:.04em;
@@ -4984,6 +5027,7 @@ def _build_full_html(
     ingredient_intel: list = None,
     self_position: dict = None,
     negative_signals: list = None,
+    channel_moves: list = None,
     trademark_sig: dict = None,
     search_spikes: list = None,
     composite: list = None,
@@ -5048,6 +5092,7 @@ def _build_full_html(
     ingredient_intel_html = _render_ingredient_intel(ingredient_intel or [])
     self_position_html = _render_self_position(self_position or {})
     negative_signals_html = _render_negative_signals(negative_signals or [])
+    channel_moves_html = _render_channel_moves(channel_moves or [])
     rank_trends_html  = _render_rank_trends(rank_trends or [])
     oliveyoung_html   = _render_oliveyoung(oliveyoung_flagship or {}, oliveyoung_movers or [], oliveyoung_reviews or [])
     trademark_html    = _render_trademark(trademark_sig or {})
@@ -5329,6 +5374,15 @@ window.cssv = (function () {{
     <!-- 시장별 현황 — 옛 '뜨는 시장'(수출 YoY) + '해외 진출 플레이북'(진입 채널)을 통합.
          둘이 같은 기사를 다른 형식으로 두 번 보여주고 있어 국가 카드 하나로 합쳤다. -->
     {market_countries_html}
+
+    <!-- 판매 경로 — 브랜드가 아니라 채널이 주인공인 기사.
+         brand_focus incidental/unrelated라 모든 브랜드 집계에서 빠져 저장만 되던 기사들의 자리. -->
+    <div class="section">
+      <div class="section-title">
+        🛒 새로 열리는 판매 경로 <span class="section-sub">최근 90일 — 특정 브랜드가 아니라 파는 곳 자체가 바뀌는 소식</span>
+      </div>
+      {channel_moves_html}
+    </div>
 
     <!-- 화장품 수출 규모·성장 전체 랭킹 (스킨케어 330499) -->
     <div class="section">
@@ -6331,6 +6385,11 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
             negative_signals = get_negative_signals(session, days=30, limit=10)
         except Exception:
             negative_signals = []
+        # 판매 경로 — 브랜드 집계에서 빠지는 '채널이 주인공'인 기사
+        try:
+            channel_moves = get_channel_moves(session, days=90, limit=8)
+        except Exception:
+            channel_moves = []
         # 아마존 리테일 순위 추세(일별 스냅샷) — retail_rankings 없으면 빈 리스트
         try:
             rank_trends = get_retail_rank_history(session, days=30)
@@ -6638,6 +6697,7 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         ingredient_intel=ingredient_intel,
         self_position=self_position,
         negative_signals=negative_signals,
+        channel_moves=channel_moves,
         rank_trends=rank_trends,
         oliveyoung_movers=oliveyoung_movers,
         oliveyoung_flagship=oliveyoung_flagship,
