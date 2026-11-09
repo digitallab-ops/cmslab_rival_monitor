@@ -10,7 +10,7 @@ from urllib.parse import quote_plus
 import feedparser
 
 from collectors.base_collector import BaseCollector, RawArticle
-from config.brands import COUNTRIES, LOCALE_KEYWORDS
+from config.brands import COUNTRIES, LOCALE_KEYWORDS, BRAND_KO_NAMES
 from config.settings import RSS_REQUEST_DELAY
 
 logger = logging.getLogger(__name__)
@@ -173,6 +173,20 @@ class GoogleRSSCollector(BaseCollector):
 
         n_body = 0          # 본문까지 확보한 건수(로그용)
         queries = [f'"{brand}" beauty']
+
+        # 한국 기사는 한글 표기로 찾아야 한다. 등록명이 영문 음차라 국내 매체가
+        # 그 철자를 아예 안 쓰는 브랜드가 있다 — 실측으로 "Quadcera" 0건 / "쿼드쎄라"
+        # 48건, "Haveblue" 0건 / "헤브블루" 11건이었다. 뷰티 디바이스가 특히 심한데
+        # 국내 TV홈쇼핑이 주전장이라 영문 표기 기사가 거의 없다.
+        # KR에서만, 대표 별칭 1개만 더한다(쿼리 수 = 수집 비용).
+        # 한글 별칭을 그냥 던지면 일반 단어인 이름이 엉뚱한 기사를 긁어온다
+        # (실측: '라곰' 단독 52건 중 스웨덴 라이프스타일 기사, '일소' 57건 중
+        #  '일소일소 문화대학'·야구 '주자일소'). 업종어로 한정하면 라곰 27건·
+        #  일소 21건으로 줄고, 쿼드쎄라·톰더글로우처럼 고유한 이름은 그대로다.
+        if country.upper() == "KR":
+            for ko in (BRAND_KO_NAMES.get(brand) or [])[:1]:
+                if ko and ko.lower() != brand.lower():
+                    queries.append(f'"{ko}" (화장품 OR 뷰티 OR 스킨케어 OR 디바이스)')
         if DEEP_QUERY:
             queries.append(f'"{brand}" ({_ACTIVITY_TERMS})')
             # 현지어 키워드 쿼리 (해당 국가 언어권 기사 recall 보강) — 주간 심층수집만
