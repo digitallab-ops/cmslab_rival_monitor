@@ -49,6 +49,29 @@ def _get_tier_brands(tier: int) -> list[str]:
     return TIER1_BRANDS if tier == 1 else ALL_BRANDS
 
 
+# 디바이스 전업 브랜드가 도는 국가. 국내가 주전장이고 수출은 미국·일본에서만
+# 기사가 나온다. 넓히려면 여기만 고치면 된다.
+DEVICE_COUNTRIES = {"KR", "US", "JP"}
+
+
+def _device_only_brands() -> set:
+    """segment='device'인 브랜드 이름. 겸업(both)은 글로벌이라 제외한다."""
+    try:
+        from sqlalchemy import text
+        session = get_session()
+        try:
+            rows = session.execute(text(
+                "SELECT name FROM rival_intel.monitored_brands "
+                "WHERE is_active = TRUE AND segment = 'device'"
+            )).fetchall()
+        finally:
+            session.close()
+        return {r[0] for r in rows}
+    except Exception as e:
+        logger.warning("디바이스 브랜드 조회 실패 — 전체 국가로 진행: %s", e)
+        return set()
+
+
 def _run_collection(label: str, brands: list[str], countries: list[str],
                     deep_query: bool = False) -> None:
     """브랜드×국가 수집 루프 + 완료 후 Slack 요약 리포트.
@@ -70,10 +93,18 @@ def _run_collection(label: str, brands: list[str], countries: list[str],
 
     from classifier.claude_classifier import QuotaExhausted
     quota_out = False
+    _dev_only = _device_only_brands()
     for brand in brands:
         if quota_out:
             break
-        for country in countries:
+        # 뷰티 디바이스 전업 브랜드는 국내 TV홈쇼핑·라이브커머스가 주전장이다.
+        # 27개국을 다 돌면 시간만 먹고 기사는 안 나온다 — 쿼드쎄라·톰더글로우를
+        # 유럽·중남미에서 찾을 일이 없다. 수출 언급이 실제로 나오는 미국·일본만
+        # 남긴다. 메디큐브·센텔리안24처럼 스킨케어 겸업(both)은 글로벌이라 제외.
+        _countries = countries
+        if brand in _dev_only:
+            _countries = [c for c in countries if c.upper() in DEVICE_COUNTRIES]
+        for country in _countries:
             try:
                 st = run_pipeline(brand, country)
                 agg["found"]      += st.found
@@ -538,6 +569,18 @@ def job_brand_discovery() -> None:
         logger.warning("신흥 브랜드 발견 스킵: %s", e)
 
 
+def job_device_watch() -> None:
+    """디바이스 진출 감시 — 스킨케어로 보던 브랜드가 기기를 내면 슬랙 제안(주1회)."""
+    logger.info("=== [주간] 디바이스 진출 감시 시작 ===")
+    try:
+        from signals.device_watch import run as run_dw
+        r = run_dw()
+        logger.info("디바이스 진출 감시: 신호 %d · 신규 %d",
+                    len(r.get("found", [])), len(r.get("new", [])))
+    except Exception as e:
+        logger.warning("디바이스 진출 감시 스킵: %s", e)
+
+
 def job_self_collection() -> None:
     """자사(셀퓨전씨) 뉴스 수집 — 경쟁사 대비 기준선(baseline). is_self=True로 분리 저장.
 
@@ -757,6 +800,17 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(hour=9, minute=10),
         id="brand_discovery",
         name="[일별] 신흥 브랜드 발견",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 화요일 09:20 KST — 디바이스 진출 감시. 월요일 밤 풀스캔(Tier2 포함)이 끝난
+    # 뒤라야 스킨케어 브랜드의 기기 출시 기사가 들어와 있다.
+    scheduler.add_job(
+        job_device_watch,
+        trigger=CronTrigger(day_of_week="tue", hour=9, minute=20),
+        id="device_watch",
+        name="[주간] 디바이스 진출 감시",
         max_instances=1,
         coalesce=True,
     )
