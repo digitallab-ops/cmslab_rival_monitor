@@ -74,6 +74,18 @@ _BLOCK_EXACT = {
     "k뷰티", "kbeauty", "k-beauty", "korean beauty", "화장품", "코스메틱", "cosmetic",
     "cosmetics", "skincare", "스킨케어", "뷰티", "beauty", "선크림", "앰플", "토너",
     "마스크팩",
+    # 성분명 — 프롬프트로만 "성분 제외"라 일러뒀더니 새지 않았다.
+    # 실제 오탐: 'PDRN'이 5건 언급으로 슬랙 후보까지 올라왔다(쇼츠 해시태그 '#스킨케어 PDRN',
+    # 성분 나열 기사 '펩타이드, PDRN, 콜라겐'). 성분은 여러 브랜드가 같이 쓰니 언급수가
+    # 쉽게 쌓여 오히려 후보로 뜨기 좋다.
+    # 완전일치로만 막는다 — 부분일치로 넣으면 Biodance 'Bio-Collagen',
+    # '리쥬란' 계열처럼 성분명을 품은 진짜 브랜드가 영영 제안되지 않는다.
+    "pdrn", "연어핵산", "엑소좀", "exosome", "콜라겐", "collagen", "레티놀", "retinol",
+    "센텔라", "centella", "시카", "cica", "나이아신아마이드", "niacinamide",
+    "펩타이드", "peptide", "히알루론산", "hyaluronic acid", "판테놀", "panthenol",
+    "비타민c", "vitamin c", "아줄렌", "azulene", "세라마이드", "ceramide",
+    "스쿠알란", "squalane", "마데카소사이드", "madecassoside", "트라넥삼산",
+    "tranexamic acid", "살리실산", "salicylic acid", "글루타치온", "glutathione",
 }
 
 
