@@ -468,10 +468,16 @@ def check_answerable(question: str, session=None) -> dict:
                 "untracked_brand": str(got.get("untracked_brand") or "").strip(),
                 "reason": str(got.get("reason") or "").strip()})
     # 조회로 아는 사실이 LLM 판정보다 세다. 푸는 방향으로만 작동한다.
+    before = out["coverage"]
     try:
         out = _hard_facts(question, out)
     except Exception as e:
-        logger.debug("확정 사실 보정 실패: %s", e)
+        # 여기서 터지면 확정 규칙이 통째로 날아간다 — debug로 묻어 두는 바람에
+        # Render에서 게이트가 안 걸리는 원인을 한참 못 찾았다.
+        logger.warning("확정 사실 보정 실패(%s): %s", type(e).__name__, e, exc_info=True)
+    if before != out["coverage"]:
+        logger.info("확정 보정: %s → %s (%s)", before, out["coverage"],
+                    (out.get("reason") or "")[:60])
     return out
 
 

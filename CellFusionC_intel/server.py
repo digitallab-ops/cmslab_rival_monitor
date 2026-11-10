@@ -288,7 +288,7 @@ except Exception as e:                      # noqa: BLE001
 
 # ── 대시보드 ────────────────────────────────────────────────────────────────
 
-_GATE_PROBE: dict = {"at": 0.0, "val": None}
+_GATE_PROBE: dict = {"at": 0.0}
 
 
 @app.get("/health")
@@ -311,21 +311,29 @@ async def health(probe: int = 0):
         gate = f"off:{type(e).__name__}:{str(e)[:60]}"
     out = {"status": "ok", "ready": bool(_dashboard_html), "coverage_gate": gate}
 
+    # probe=1 게이트 함수만 · probe=2 봇 응답 경로 전체(슬랙·검색창이 실제로 타는 길)
     if probe:
         import time as _t
-        if _GATE_PROBE["val"] is None or _t.time() - _GATE_PROBE["at"] > 600:
+        key = f"p{probe}"
+        if _GATE_PROBE.get(key) is None or _t.time() - _GATE_PROBE["at"] > 600:
+            Q = "아누아 작년 광고비 얼마나 썼어?"   # 반드시 막혀야 하는 고정 질문
             try:
                 from analytics.answerable import check_answerable
-                # 반드시 막혀야 하는 고정 질문. 결과가 none이 아니면 게이트가 샌다.
-                r = await asyncio.to_thread(
-                    check_answerable, "아누아 작년 광고비 얼마나 썼어?")
-                _GATE_PROBE["val"] = {"coverage": r.get("coverage"),
-                                      "reason": (r.get("reason") or "")[:140]}
+                r = await asyncio.to_thread(check_answerable, Q)
+                val = {"coverage": r.get("coverage"), "reason": (r.get("reason") or "")[:140]}
+                if int(probe) >= 2:
+                    # 게이트 함수는 막는데 봇은 안 막는 상황을 구분하려고 끝까지 돌린다.
+                    import slack_bot
+                    ans = await asyncio.wait_for(
+                        slack_bot.answer(Q, [], lambda t: None), timeout=120)
+                    val["bot_declined"] = "추측으로 답하지 않으려고" in (ans or "")
+                    val["bot_head"] = (ans or "")[:120]
+                _GATE_PROBE[key] = val
             except Exception as e:
-                _GATE_PROBE["val"] = {"coverage": "error",
-                                      "reason": f"{type(e).__name__}: {str(e)[:140]}"}
+                _GATE_PROBE[key] = {"coverage": "error",
+                                    "reason": f"{type(e).__name__}: {str(e)[:140]}"}
             _GATE_PROBE["at"] = _t.time()
-        out["gate_probe"] = _GATE_PROBE["val"]
+        out["gate_probe"] = _GATE_PROBE[key]
     return out
 
 
