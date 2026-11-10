@@ -424,7 +424,15 @@ def check_answerable(question: str, session=None) -> dict:
         return out
     mtxt = manifest_text(session)
     if not mtxt:
-        out["reason"] = "보유 명세를 읽지 못해 판정 생략"
+        # 명세를 못 읽어도 게이트를 통째로 끄지는 않는다. 광고비·점유율·재고처럼
+        # DB를 안 봐도 확실히 없는 주제는 그대로 막는다 — 예전엔 여기서 바로
+        # 돌아가는 바람에 명세 조회가 한 번 실패하면 게이트가 사라졌다.
+        blocked_by = _deterministic_block(q)
+        if blocked_by:
+            out.update({"coverage": "none", "missing": [f"'{blocked_by}' 관련 데이터"],
+                        "reason": f"'{blocked_by}'는 모으지 않는 항목(확정, 명세 없이 판정)"})
+        else:
+            out["reason"] = "보유 명세를 읽지 못해 판정 생략"
         return out
     try:
         from openai import OpenAI
