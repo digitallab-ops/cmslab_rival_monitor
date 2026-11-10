@@ -428,9 +428,13 @@ def run() -> dict:
     return {"headlines": len(headlines), "extracted": len(extracted), "new": new_candidates}
 
 
-# 등록할 수 없는 판정 — 슬랙에 올리지 않고 바로 rejected로 닫는다.
-_REJECT = {"company": "회사(브랜드는 따로)", "retailer": "유통사·플랫폼",
-           "ingredient": "성분명", "category": "카테고리·행사명", "unrelated": "뷰티 무관"}
+# 자동으로 닫는 판정. 'company'는 일부러 뺐다 — 회사명과 브랜드명이 같은
+# 브랜드(에스트라·아로마티카)를 회사로 잘못 보는 일이 있었고, 닫아 버리면
+# 다시는 안 올라와 진짜 브랜드를 영영 잃는다. 회사로 보이는 건 닫지 말고
+# 경고를 달아 올려서 사람이 판단하게 한다(슬랙 한 줄이 훨씬 싸다).
+# 아래 넷은 68회 판정에서 한 번도 진짜 브랜드를 오인하지 않았다.
+_REJECT = {"retailer": "유통사·플랫폼", "ingredient": "성분명",
+           "category": "카테고리·행사명", "unrelated": "뷰티 무관"}
 
 
 def _verify_candidates(cands: list[dict]) -> list[dict]:
@@ -469,6 +473,7 @@ def _verify_candidates(cands: list[dict]) -> list[dict]:
             continue
         c["_verdict"] = verdict
         c["_reason"] = v.get("reason", "")
+        c["_actual"] = v.get("actual_brand") or ""
         if not c.get("ko") and v.get("ko_name"):
             c["ko"] = v["ko_name"]
         kept.append(c)
@@ -517,6 +522,13 @@ def _notify_slack(cands: list[dict]) -> None:
         # 검색으로 확인한 내용을 같이 보여준다 — 승인 전에 또 찾아보지 않도록.
         if c.get("_verdict") == "unknown":
             lines.append("    ⚠️ 검색으로 확인 못 했습니다 — 직접 보고 판단해 주세요")
+        elif c.get("_verdict") == "company":
+            # 닫지 않고 올린다. 회사명=브랜드명인 진짜 브랜드일 수도 있어서다.
+            tail = f" 실제 브랜드는 '{c['_actual']}'로 보입니다." if c.get("_actual") else ""
+            lines.append(f"    ⚠️ 회사로 보입니다 —{tail} 회사면 `제외`, "
+                         f"회사명이 곧 브랜드명이면 `승인` 해주세요")
+            if c.get("_reason"):
+                lines.append(f"    ↳ {c['_reason'][:110]}")
         elif c.get("_reason"):
             lines.append(f"    ✅ 확인: {c['_reason'][:110]}")
     _post({"text": "\n".join(lines)}, secondary=False)

@@ -95,7 +95,11 @@ verdict 중 하나:
                예: PDRN은 파마리서치가 만들지만 PDRN 자체는 성분이다.
   category   — 카테고리·일반명사·행사명·기획전
   unrelated  — 뷰티와 무관
-  unknown    — 검색 결과만으로는 판단 불가
+  unknown    — 검색 결과만으로는 판단 불가. **검색 결과가 이 이름을 직접
+               다루지 않으면 반드시 unknown이다.** 비슷해 보이는 다른 것을
+               끌어다 판정하지 마라 — 진짜 브랜드를 탈락시키는 것이 모른다고
+               답하는 것보다 나쁘다. 이름이 영문 음차라 국내 검색이 비는 경우가
+               흔하다(헤브블루를 'Haveblue'로 찾으면 안 나온다).
 
 판정 순서: ①성분인가? → ingredient ②유통·플랫폼인가? → retailer
 ③이 이름으로 화장품을 파는가? → brand ④화장품 브랜드가 딴 이름인가? → company
@@ -105,16 +109,48 @@ JSON으로만:
  "reason":"한 문장, 근거가 된 검색 결과를 인용", "confidence":"high|medium|low"}"""
 
 
+def _norm(s: str) -> str:
+    """비교용 정규화 — 대소문자·공백·점·하이픈을 지운다('S.NATURE'↔'에스네이처'는 별칭으로 처리)."""
+    return "".join(c for c in (s or "").lower() if c.isalnum())
+
+
+def _mentions_any(evidence: list, labels: list) -> bool:
+    """검색 결과 중 하나라도 이 이름을 실제로 담고 있는가."""
+    blob = _norm(" ".join(evidence))
+    return any(_norm(lb) and _norm(lb) in blob for lb in labels)
+
+
 def verify_brand(name: str, ko: str = "", samples: list = None) -> dict:
     """브랜드 후보 검증. 반환에 verdict·reason·evidence가 들어간다.
 
     검색이 안 되거나 LLM이 실패하면 verdict='unknown' — 막지 않는다.
     확신 없이 거르면 진짜 신흥 브랜드를 놓친다.
     """
-    label = ko or name
-    ev = search(f"{label} 화장품") + search(label, kinds=("encyc",))
+    # 등록된 브랜드면 한글 별칭도 같이 검색한다. 등록명이 영문 음차라 국내
+    # 매체가 그 철자를 안 쓰는 경우가 많다 — "Haveblue"로는 아무것도 안 나오고
+    # "헤브블루"로는 나온다(수집기에서 같은 문제를 이미 겪었다).
+    labels = [x for x in (name, ko) if x]
+    try:
+        from config.brands import BRAND_KO_NAMES
+        for alias in (BRAND_KO_NAMES.get(name) or [])[:1]:
+            if alias and alias not in labels:
+                labels.append(alias)
+    except Exception:
+        pass
+
+    ev = []
+    for lb in labels[:2]:
+        ev += search(f"{lb} 화장품") + search(lb, kinds=("encyc",))
     if not ev:
         return {"verdict": "unknown", "reason": "검색 결과 없음", "evidence": []}
+
+    # 검색 결과가 이 이름을 실제로 다루는지 확인한다. 안 그러면 LLM이 엉뚱한
+    # 결과를 끌어다 판정한다 — "Haveblue"를 찾다 'ACID BLUE 9'이라는 원료가
+    # 걸려서 성분으로 판정하고 진짜 브랜드를 탈락시킨 적이 있다.
+    if not _mentions_any(ev, labels):
+        return {"verdict": "unknown",
+                "reason": f"검색 결과에 '{name}'를 다룬 내용이 없음 — 판단 보류",
+                "evidence": ev[:5]}
 
     # 근거(검색)를 먼저, 참고(뉴스)를 뒤에. 순서를 바꿨더니 뉴스 제목에 끌려가
     # hy를 브랜드로 판정했다 — 백과사전은 '유산균 음료 제조업체'라고 적고 있었는데도.
@@ -126,6 +162,18 @@ def verify_brand(name: str, ko: str = "", samples: list = None) -> dict:
     out = _ask(_BRAND_SYS, user)
     if not out.get("verdict"):
         return {"verdict": "unknown", "reason": "판정 실패", "evidence": ev[:5]}
+
+    # 'company'는 **다른** 브랜드명을 댈 수 있을 때만 탈락 사유가 된다.
+    # 회사명과 브랜드명이 같으면(에스트라·아로마티카) 추적해야 할 브랜드다.
+    # 백과사전이 "○○는 …전문기업이다"라고 적어 두면 LLM이 회사로 기울어서,
+    # 실제로 에스트라가 탈락할 뻔했다.
+    if out["verdict"] == "company":
+        actual = (out.get("actual_brand") or "").strip()
+        if not actual or _norm(actual) == _norm(name) or _norm(actual) == _norm(ko):
+            out["verdict"] = "brand"
+            out["actual_brand"] = None
+            out["reason"] = (out.get("reason") or "") + " (회사명=브랜드명이라 브랜드로 본다)"
+
     out["evidence"] = ev[:5]
     return out
 
