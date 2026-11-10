@@ -288,13 +288,19 @@ except Exception as e:                      # noqa: BLE001
 
 # ── 대시보드 ────────────────────────────────────────────────────────────────
 
+_GATE_PROBE: dict = {"at": 0.0, "val": None}
+
+
 @app.get("/health")
-async def health():
+async def health(probe: int = 0):
     """상태 점검. 답변가능성 게이트가 살아 있는지도 같이 알린다.
 
     게이트는 실패하면 조용히 통과시키도록(막는 쪽으로 기울지 않게) 만들었는데,
     그 탓에 '꺼져 있는 것'과 '켜져 있는데 통과시킨 것'을 밖에서 구분할 수 없었다.
-    LLM은 부르지 않고 보유 명세만 확인하므로 비용이 들지 않는다.
+    기본 응답은 보유 명세 길이만 보므로 LLM을 부르지 않는다.
+
+    ?probe=1 을 붙이면 고정 질문으로 게이트를 실제로 한 번 돌려 판정과 이유를
+    돌려준다(진단용). LLM을 부르므로 10분 캐시한다.
     """
     gate = "unknown"
     try:
@@ -303,7 +309,24 @@ async def health():
         gate = f"on:{n}" if n > 0 else "off:manifest_empty"
     except Exception as e:
         gate = f"off:{type(e).__name__}:{str(e)[:60]}"
-    return {"status": "ok", "ready": bool(_dashboard_html), "coverage_gate": gate}
+    out = {"status": "ok", "ready": bool(_dashboard_html), "coverage_gate": gate}
+
+    if probe:
+        import time as _t
+        if _GATE_PROBE["val"] is None or _t.time() - _GATE_PROBE["at"] > 600:
+            try:
+                from analytics.answerable import check_answerable
+                # 반드시 막혀야 하는 고정 질문. 결과가 none이 아니면 게이트가 샌다.
+                r = await asyncio.to_thread(
+                    check_answerable, "아누아 작년 광고비 얼마나 썼어?")
+                _GATE_PROBE["val"] = {"coverage": r.get("coverage"),
+                                      "reason": (r.get("reason") or "")[:140]}
+            except Exception as e:
+                _GATE_PROBE["val"] = {"coverage": "error",
+                                      "reason": f"{type(e).__name__}: {str(e)[:140]}"}
+            _GATE_PROBE["at"] = _t.time()
+        out["gate_probe"] = _GATE_PROBE["val"]
+    return out
 
 
 # 브라우저가 옛 대시보드를 캐시해 갱신이 안 보이는 문제 방지 — 항상 최신 제공.

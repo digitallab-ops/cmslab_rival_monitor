@@ -443,8 +443,15 @@ def check_answerable(question: str, session=None) -> dict:
                       {"role": "user", "content": mtxt + "\n\n[질문]\n" + q}])
         got = json.loads(r.choices[0].message.content or "{}")
     except Exception as e:
-        logger.warning("답변가능성 판정 실패(통과로 처리): %s", e)
-        out["reason"] = "판정 실패"
+        # 명세 실패 때와 같다 — LLM이 죽어도 확정 규칙은 살아 있어야 한다.
+        logger.warning("답변가능성 LLM 판정 실패(확정 규칙만 적용): %s: %s",
+                       type(e).__name__, e)
+        blocked_by = _deterministic_block(q)
+        if blocked_by:
+            out.update({"coverage": "none", "missing": [f"'{blocked_by}' 관련 데이터"],
+                        "reason": f"'{blocked_by}'는 모으지 않는 항목(확정, LLM 없이 판정)"})
+        else:
+            out["reason"] = f"판정 실패({type(e).__name__})"
         return out
 
     cov = str(got.get("coverage") or "full").lower()
