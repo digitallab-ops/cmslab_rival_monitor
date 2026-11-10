@@ -421,9 +421,81 @@ def run() -> dict:
     finally:
         session.close()
 
+    new_candidates = _verify_candidates(new_candidates)
+
     if new_candidates:
         _notify_slack(new_candidates)
     return {"headlines": len(headlines), "extracted": len(extracted), "new": new_candidates}
+
+
+# 등록할 수 없는 판정 — 슬랙에 올리지 않고 바로 rejected로 닫는다.
+_REJECT = {"company": "회사(브랜드는 따로)", "retailer": "유통사·플랫폼",
+           "ingredient": "성분명", "category": "카테고리·행사명", "unrelated": "뷰티 무관"}
+
+
+def _verify_candidates(cands: list[dict]) -> list[dict]:
+    """슬랙에 올리기 전에 검색으로 정체를 확인한다.
+
+    차단 목록은 아는 것만 막는다. 'hy'(옛 한국야쿠르트)처럼 처음 보는 이름은
+    막을 방법이 없어서, 회사인데 브랜드로 제안되는 일이 반복됐다. 사람이 후보를
+    받으면 어차피 검색부터 하니 그 단계를 앞당긴다.
+
+    판정 실패(unknown)는 그대로 올린다 — 확신 없이 거르면 진짜 신흥 브랜드를
+    놓친다. 대신 슬랙에 '검증 못 함'이라고 적어 사람이 더 보게 한다.
+    """
+    if not cands:
+        return cands
+    try:
+        from signals.web_verify import verify_brand
+    except Exception as e:
+        logger.warning("검증 모듈 로드 실패 — 검증 없이 제안: %s", e)
+        return cands
+
+    kept, dropped = [], []
+    for c in cands:
+        try:
+            v = verify_brand(c["name"], c.get("ko") or "",
+                             [c["sample"]] if c.get("sample") else [])
+        except Exception as e:
+            logger.warning("검증 실패(%s) — 그대로 제안: %s", c["name"], e)
+            kept.append(c)
+            continue
+        verdict = v.get("verdict", "unknown")
+        if verdict in _REJECT:
+            c["_why"] = _REJECT[verdict]
+            c["_reason"] = v.get("reason", "")
+            c["_actual"] = v.get("actual_brand") or ""
+            dropped.append(c)
+            continue
+        c["_verdict"] = verdict
+        c["_reason"] = v.get("reason", "")
+        if not c.get("ko") and v.get("ko_name"):
+            c["ko"] = v["ko_name"]
+        kept.append(c)
+
+    if dropped:
+        _close_rejected(dropped)
+        for d in dropped:
+            logger.info("   🚫 검증 탈락: %s — %s%s", d["name"], d["_why"],
+                        f" (실제 브랜드: {d['_actual']})" if d.get("_actual") else "")
+    logger.info("검증: 제안 %d · 탈락 %d", len(kept), len(dropped))
+    return kept
+
+
+def _close_rejected(dropped: list[dict]) -> None:
+    """검증에서 떨어진 후보를 rejected로 닫아 매일 다시 올라오지 않게 한다."""
+    try:
+        session = get_session()
+        try:
+            session.execute(text(f"""
+                UPDATE {DB_SCHEMA}.brand_candidates SET status = 'rejected'
+                WHERE name = ANY(:n) AND status IN ('pending', 'watching')
+            """), {"n": [d["name"] for d in dropped]})
+            session.commit()
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning("탈락 후보 닫기 실패: %s", e)
 
 
 def _notify_slack(cands: list[dict]) -> None:
@@ -442,6 +514,11 @@ def _notify_slack(cands: list[dict]) -> None:
         lines.append(f"• *{label}* — 언급 {c['count']}건")
         if c.get("sample"):
             lines.append(f"    ↳ {c['sample'][:80]}")
+        # 검색으로 확인한 내용을 같이 보여준다 — 승인 전에 또 찾아보지 않도록.
+        if c.get("_verdict") == "unknown":
+            lines.append("    ⚠️ 검색으로 확인 못 했습니다 — 직접 보고 판단해 주세요")
+        elif c.get("_reason"):
+            lines.append(f"    ✅ 확인: {c['_reason'][:110]}")
     _post({"text": "\n".join(lines)}, secondary=False)
 
 

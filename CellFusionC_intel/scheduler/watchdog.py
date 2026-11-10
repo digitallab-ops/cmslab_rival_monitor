@@ -209,7 +209,24 @@ def _diagnose(findings: list[dict]) -> dict:
 
 # ── 2단계: 데이터 드리프트 감시 ──────────────────────────────────────────────
 def _suggest_country_ko(codes: list[str]) -> dict:
-    """미매핑 국가코드 → {코드: 한국어명} 제안(1 LLM). 실패 시 코드=코드."""
+    """미매핑 국가코드 → {코드: 한국어명}. 확인 못 한 코드는 아예 빼서 돌려준다.
+
+    예전에는 LLM이 실패하면 코드를 그대로 넣어 'MN=MN'을 제안했다. 받는 사람에게
+    아무 정보가 없고, 그대로 승인하면 화면에 'MN'이 박힌다. 이제는 검색으로
+    확인한 것만 제안하고, 나라가 아닌 토큰(global·unrelated·LATAM)은 제외한다.
+    """
+    out: dict = {}
+    try:
+        from signals.web_verify import verify_country
+        for c in codes:
+            v = verify_country(c)
+            if v.get("is_country") and v.get("ko_name"):
+                out[c] = v["ko_name"]
+        if out or codes:
+            return out
+    except Exception as e:
+        logger.warning("국가명 검색 확인 실패 — 구 방식으로: %s", e)
+
     out = {c: c for c in codes}
     try:
         from openai import OpenAI
@@ -301,20 +318,38 @@ def check_data_drift(session) -> list[dict]:
                           and c not in known)
         if unmapped:
             sugg = _suggest_country_ko(unmapped)
-            for c in unmapped:                       # 제안을 DB에 등록(pending)
+            # 검색으로 확인된 것만 제안한다. 못 믿을 제안을 올리면 그대로 승인돼
+            # 화면에 코드가 박힌다.
+            verified = [c for c in unmapped if sugg.get(c)]
+            unknown = [c for c in unmapped if not sugg.get(c)]
+            for c in verified:                       # 제안을 DB에 등록(pending)
                 try:
-                    propose_mapping(session, "country", c, sugg.get(c, ""))
+                    propose_mapping(session, "country", c, sugg[c])
                 except Exception:
                     pass
-            sugg_txt = ", ".join(f"{c}={sugg.get(c, c)}" for c in unmapped)
-            findings.append({
-                "type": "drift_country", "key": "drift:cc:" + ",".join(unmapped),
-                "title": f"미매핑 국가코드 {len(unmapped)}개: {', '.join(unmapped)}",
-                "detail": (f"화면에 한국어명 없이 코드로 노출될 수 있음(예전 AE='UAE' 케이스). "
-                           f"제안: {sugg_txt}"),
-                "read": "슬랙봇에게 `매핑` 확인 후 `매핑 승인`(전체) 또는 `매핑 " + unmapped[0]
-                        + "=" + sugg.get(unmapped[0], "한국어") + "`(개별)로 반영",
-            })
+            if verified:
+                sugg_txt = ", ".join(f"{c}={sugg[c]}" for c in verified)
+                detail = (f"화면에 한국어명 없이 코드로 노출될 수 있음(예전 AE='UAE' 케이스). "
+                          f"검색으로 확인한 제안: {sugg_txt}")
+                if unknown:
+                    detail += (f" · 나라가 아니거나 확인 못 한 값 {len(unknown)}개는 제외했습니다"
+                               f"({', '.join(unknown[:6])}) — 분류기가 국가 칸에 엉뚱한 값을"
+                               f" 넣고 있는지 봐야 합니다")
+                findings.append({
+                    "type": "drift_country", "key": "drift:cc:" + ",".join(verified),
+                    "title": f"미매핑 국가코드 {len(verified)}개: {', '.join(verified)}",
+                    "detail": detail,
+                    "read": "슬랙봇에게 `매핑` 확인 후 `매핑 승인`(전체) 또는 `매핑 "
+                            + verified[0] + "=" + sugg[verified[0]] + "`(개별)로 반영",
+                })
+            elif unknown:
+                findings.append({
+                    "type": "drift_country", "key": "drift:ccbad:" + ",".join(unknown),
+                    "title": f"국가 칸에 나라가 아닌 값 {len(unknown)}개: {', '.join(unknown[:8])}",
+                    "detail": "검색으로 확인해 보니 실제 나라가 아닙니다. 분류기가 국가 칸을"
+                              " 잘못 채우고 있을 수 있어 매핑 제안은 올리지 않았습니다.",
+                    "read": "분류 프롬프트의 country 규칙 점검 — 매핑으로 해결할 문제가 아닙니다",
+                })
     except Exception as e:
         logger.warning("드리프트(국가) 체크 실패: %s", e)
     # 2) 새 활동유형 — 분류기 enum 밖 값(오분류/새 카테고리)
