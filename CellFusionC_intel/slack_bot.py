@@ -206,14 +206,16 @@ async def answer(question: str, history: list, on_delta, memory: dict | None = N
     try:
         from analytics.answerable import check_answerable, decline_message, partial_note
         chk = await asyncio.to_thread(check_answerable, question)
-        logger.info("답변가능성: %s %s", chk.get("coverage"), chk.get("reason", "")[:60])
+        logger.info("답변가능성: %s | %s", chk.get("coverage"), (chk.get("reason") or "")[:70])
         if chk.get("coverage") == "none":
             msg = _slackify(decline_message(chk))
             on_delta(msg)
             return msg
         sys_prompt += partial_note(chk)
     except Exception as e:
-        logger.debug("답변가능성 확인 건너뜀: %s", e)
+        # 통과시키는 건 의도한 동작이지만, 조용히 넘어가면 게이트가 죽은 걸
+        # 아무도 모른다 — 실제로 Render에서 debug로 묻혀 원인을 못 찾았다.
+        logger.warning("답변가능성 확인 실패(통과시킴): %s: %s", type(e).__name__, e)
 
     if memory:
         mem_txt = "\n".join(f"- {k}: {v}" for k, v in list(memory.items())[:12])

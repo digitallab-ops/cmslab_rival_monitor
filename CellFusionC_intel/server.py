@@ -290,7 +290,20 @@ except Exception as e:                      # noqa: BLE001
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "ready": bool(_dashboard_html)}
+    """상태 점검. 답변가능성 게이트가 살아 있는지도 같이 알린다.
+
+    게이트는 실패하면 조용히 통과시키도록(막는 쪽으로 기울지 않게) 만들었는데,
+    그 탓에 '꺼져 있는 것'과 '켜져 있는데 통과시킨 것'을 밖에서 구분할 수 없었다.
+    LLM은 부르지 않고 보유 명세만 확인하므로 비용이 들지 않는다.
+    """
+    gate = "unknown"
+    try:
+        from analytics.answerable import manifest_text
+        n = len(manifest_text() or "")
+        gate = f"on:{n}" if n > 0 else "off:manifest_empty"
+    except Exception as e:
+        gate = f"off:{type(e).__name__}:{str(e)[:60]}"
+    return {"status": "ok", "ready": bool(_dashboard_html), "coverage_gate": gate}
 
 
 # 브라우저가 옛 대시보드를 캐시해 갱신이 안 보이는 문제 방지 — 항상 최신 제공.
