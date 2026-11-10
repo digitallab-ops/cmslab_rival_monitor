@@ -78,6 +78,45 @@ def _resolve_brand(raw: dict, brand: str) -> str | None:
     return next((k for k in raw if b in k.lower()), None)
 
 
+def _krw(v) -> str:
+    """원 단위 숫자 → '1조 3,609억원'. 모델에게 환산을 시키면 자릿수를 틀린다 —
+    1,360,888,888,861원을 '1,360억원'으로 말한 적이 있다(10배 오차). 코드가 만든다."""
+    try:
+        n = int(round(float(v or 0)))
+    except Exception:
+        return ""
+    sign = "-" if n < 0 else ""
+    n = abs(n)
+    jo, rest = divmod(n, 10 ** 12)
+    eok = rest // 10 ** 8
+    if jo and eok:
+        return f"{sign}{jo}조 {eok:,}억원"
+    if jo:
+        return f"{sign}{jo}조원"
+    if eok:
+        return f"{sign}{eok:,}억원"
+    return f"{sign}{n:,}원"
+
+
+@rival_mcp.tool()
+def check_answerable(question: str) -> dict:
+    """이 질문을 우리 데이터로 답할 수 있는지 먼저 확인한다. 답하기 전에 부를 것.
+
+    coverage='none'이면 답을 만들지 말고 사용자에게 "그건 모으지 않는다"고 말하라.
+    'partial'이면 missing에 적힌 항목은 없다고 밝히고 나머지만 답하라.
+    'full'이면 그냥 진행하면 된다.
+    """
+    from analytics.answerable import check_answerable as _chk
+    return _chk(question)
+
+
+@rival_mcp.tool()
+def describe_coverage() -> dict:
+    """우리가 어떤 데이터를 얼마나 갖고 있는지 — 보유 명세(건수·기간·국가는 DB 실측)."""
+    from analytics.answerable import manifest_text, NOT_COLLECTED
+    return {"manifest": manifest_text(), "not_collected": NOT_COLLECTED}
+
+
 @rival_mcp.tool()
 def list_brands() -> dict:
     """추적 중인 경쟁 브랜드 목록. Tier1=매일 수집, Tier2=주간. 다른 툴의 brand 인자로 영문명을 쓴다."""
@@ -422,14 +461,24 @@ def get_financials() -> dict:
         if not fins:
             return {"available": False,
                     "note": "재무 데이터 없음(수집 전이거나 OPENDART_KEY 미설정)."}
-        return {"available": True, "unit": "매출·영업이익은 원",
+        return {"available": True,
+                "unit": "revenue·op_income은 원 단위 원본. "
+                        "**사람에게 말할 때는 revenue_text·op_income_text를 그대로 쓸 것** "
+                        "— 직접 억/조로 환산하지 마라.",
                 "companies": [{
                     "brand": f["brand"], "corp": f["corp_name"],
                     "listed": bool(f["stock_code"]),
                     "is_brand_level": f["is_brand_level"],
-                    "year": f["year"], "revenue": f["revenue"],
-                    "op_income": f["op_income"], "opm_pct": f["opm"],
+                    "year": f["year"],
+                    # 연간인지 분기누적인지 반드시 같이 준다. 안 주면 모델이
+                    # 상반기 수치를 연매출처럼 말한다.
+                    "period": f.get("period", ""),
+                    "revenue": f["revenue"], "revenue_text": _krw(f["revenue"]),
+                    "op_income": f["op_income"], "op_income_text": _krw(f["op_income"]),
+                    "opm_pct": f["opm"],
                     "revenue_yoy_pct": f["rev_yoy_pct"],
+                    "prev_revenue_text": _krw(f.get("prev_revenue")),
+                    "yoy_basis": "전년 같은 보고서 대비(연간↔연간, 반기↔반기)",
                 } for f in fins]}
     finally:
         s.close()

@@ -2272,24 +2272,40 @@ def get_competitor_financials(session: Session) -> list[dict]:
     반환: 최신연도 매출 desc. [{brand, corp_name, stock_code, is_brand_level,
           year, revenue, op_income, opm, prev_revenue, rev_yoy_pct}]
     """
+    # competitor_financials는 한 해에 보고서가 여러 건이다(11011 연간 · 11014 3분기누적
+    # · 11012 반기 · 11013 1분기). 예전 쿼리는 연도만 보고 ROW_NUMBER를 매겨서
+    # rn=1·rn=2가 **같은 해의 다른 보고서**가 되는 일이 있었다 — 그래서 2026년
+    # 1분기(5,934억)를 2026년 3분기누적(13,609억)과 비교해 "전년 대비 56.4% 감소"
+    # 라는 거짓을 슬랙봇이 말했다(9개 브랜드 전부 YoY가 틀렸다).
+    # 같은 reprt_code끼리, 연도만 달리해서 비교한다(get_dart_yoy와 같은 규칙).
     try:
         rows = session.execute(text(f"""
             WITH ranked AS (
                 SELECT brand, corp_name, stock_code, is_brand_level, bsns_year,
-                       revenue, op_income, net_income,
-                       ROW_NUMBER() OVER (PARTITION BY brand ORDER BY bsns_year DESC) rn
+                       reprt_code, revenue, op_income,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY brand
+                           ORDER BY bsns_year DESC,
+                                    array_position(ARRAY['11011','11014','11012','11013'],
+                                                   reprt_code)) rn
                 FROM {DB_SCHEMA}.competitor_financials
                 WHERE revenue IS NOT NULL
             )
             SELECT c.brand, c.corp_name, c.stock_code, c.is_brand_level, c.bsns_year,
-                   c.revenue, c.op_income, p.revenue
+                   c.revenue, c.op_income, p.revenue, c.reprt_code
             FROM ranked c
-            LEFT JOIN ranked p ON p.brand = c.brand AND p.rn = 2
+            LEFT JOIN {DB_SCHEMA}.competitor_financials p
+              ON p.brand = c.brand
+             AND p.reprt_code = c.reprt_code          -- 같은 종류의 보고서끼리만
+             AND p.bsns_year = c.bsns_year - 1        -- 진짜 전년
+             AND p.revenue IS NOT NULL
             WHERE c.rn = 1
             ORDER BY c.revenue DESC
         """)).fetchall()
     except Exception:
         return []
+
+    _RC = {"11011": "연간", "11014": "3분기누적", "11012": "상반기", "11013": "1분기"}
 
     out = []
     for r in rows:
@@ -2303,6 +2319,8 @@ def get_competitor_financials(session: Session) -> list[dict]:
             "opm": round(op / rev * 100, 1) if rev else None,
             "prev_revenue": prev,
             "rev_yoy_pct": round((rev / prev - 1) * 100, 1) if prev > 0 else None,
+            # 연간인지 분기누적인지 밝힌다 — 안 적으면 분기 수치를 연매출로 읽는다.
+            "period": _RC.get(r[8], ""),
         })
     return out
 

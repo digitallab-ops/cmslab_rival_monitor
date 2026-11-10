@@ -138,6 +138,12 @@ async def _mcp_session():
             yield session
 
 
+# 슬랙봇은 답변가능성 게이트를 answer() 안에서 이미 돌린다. 같은 걸 툴로도
+# 노출하면 모델이 한 번 더 부른다(실측: 질문 하나에 중복 호출 1회). 외부 MCP
+# 클라이언트에는 필요하므로 서버에는 두고, 여기서만 뺀다.
+_SKIP_TOOLS = {"check_answerable", "describe_coverage"}
+
+
 async def _get_openai_tools(session) -> list:
     """MCP 툴 목록 → OpenAI function 포맷 (프로세스 레벨 캐시)."""
     global _tools_cache
@@ -150,7 +156,7 @@ async def _get_openai_tools(session) -> list:
                 "description": t.description or "",
                 "parameters": t.inputSchema or {"type": "object", "properties": {}},
             },
-        } for t in listed.tools]
+        } for t in listed.tools if t.name not in _SKIP_TOOLS]
         logger.info("MCP 툴 %d개 로드: %s", len(_tools_cache),
                     [t["function"]["name"] for t in _tools_cache])
     return _tools_cache
@@ -191,6 +197,24 @@ async def answer(question: str, history: list, on_delta, memory: dict | None = N
     """gpt-4o tool-calling 루프. on_delta(text): 스트리밍 부분답변 콜백.
     memory: {키:값} 이 사용자에 대해 기억하는 지속 사실 → 시스템 프롬프트에 주입(개인화)."""
     sys_prompt = SYSTEM_PROMPT
+
+    # 답하기 전에 "우리 데이터가 이걸 커버하는가"를 먼저 본다.
+    # 없는 걸 물으면 툴은 뭐라도 돌려주고 모델은 그걸로 그럴듯한 답을 만든다 —
+    # 받는 사람은 그게 실측인지 추정인지 구분할 수 없다.
+    # 'none'일 때만 막고, 'partial'은 빠진 부분을 명시하게만 한다. 판정이
+    # 애매하거나 실패하면 통과시킨다(답할 수 있는 질문을 막는 쪽이 더 나쁘다).
+    try:
+        from analytics.answerable import check_answerable, decline_message, partial_note
+        chk = await asyncio.to_thread(check_answerable, question)
+        logger.info("답변가능성: %s %s", chk.get("coverage"), chk.get("reason", "")[:60])
+        if chk.get("coverage") == "none":
+            msg = _slackify(decline_message(chk))
+            on_delta(msg)
+            return msg
+        sys_prompt += partial_note(chk)
+    except Exception as e:
+        logger.debug("답변가능성 확인 건너뜀: %s", e)
+
     if memory:
         mem_txt = "\n".join(f"- {k}: {v}" for k, v in list(memory.items())[:12])
         sys_prompt += (
