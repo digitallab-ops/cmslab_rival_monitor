@@ -412,9 +412,51 @@ def sync_profile() -> None:
         sys.exit(1)
 
 
+def _acquire_single_instance():
+    """스케줄러가 두 번 뜨는 것을 막는다. 잠금 파일 핸들을 반환(열린 채로 유지).
+
+    작업 스케줄러의 IgnoreNew만 믿을 수 없다. 2026-11-10에 실제로 두 개가 떠서
+    그날 잡이 전부 두 번씩 돌았다 — 수집비가 두 배로 나가고 슬랙이 두 번 갔다.
+    등록 정보를 바꾸면 기존 프로세스가 작업 추적에서 빠지는 게 원인이었다.
+    바깥 설정이 어떻든 프로그램 스스로 막는 편이 확실하다.
+
+    잠금은 파일을 독점 모드로 연 채 유지하는 방식이다. 프로세스가 죽으면 OS가
+    핸들을 닫으므로 묵은 잠금이 남지 않는다(PID 파일 방식의 고질병을 피한다).
+    """
+    import os
+    # 프로젝트 폴더에 둔다. tempfile.gettempdir()은 계정마다 경로가 달라서
+    # (SYSTEM은 C:\Windows\Temp, 사용자는 각자 Temp) 계정이 다른 두 프로세스를
+    # 못 막는다 — 오늘 중복이 바로 그 조합이었다(구 Administrator + 신 SYSTEM).
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             ".scheduler.lock")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fh = open(lock_path, "w")
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fh = open(lock_path, "w")
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return None
+    try:
+        fh.write(str(os.getpid()))
+        fh.flush()
+    except Exception:
+        pass
+    return fh
+
+
 @cli.command()
 def run() -> None:
     """스케줄러 시작 (백그라운드 운영용, Ctrl+C 로 종료)."""
+    import logging as _logging
+    lock = _acquire_single_instance()
+    if lock is None:
+        _logging.getLogger(__name__).warning(
+            "스케줄러가 이미 실행 중이라 이번 실행은 종료합니다(중복 방지).")
+        return
     from scheduler.runner import start
     start()
 
