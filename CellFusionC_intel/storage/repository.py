@@ -272,30 +272,71 @@ def _ensure_value_mappings(session: Session) -> None:
             UNIQUE (kind, code)
         )
     """))
+    # 용어 사전 단일 출처(config/vocab.py)가 쓰는 두 칸.
+    #   region    — 국가코드의 권역(EU·SEA…). 없어서 42종 277건이 브리핑 '기타'로 샜다.
+    #   canonical — 같은 뜻의 대표코드(UK→GB). 같은 나라가 두 코드로 쪼개져 집계가 나뉘었다.
+    # NULL 허용 ADD COLUMN이라 기존 행을 건드리지 않고 즉시 끝난다(테이블 재작성 없음).
+    for col, ddl in (("region", "VARCHAR(12)"), ("canonical", "VARCHAR(12)")):
+        session.execute(text(
+            f"ALTER TABLE {DB_SCHEMA}.value_mappings ADD COLUMN IF NOT EXISTS {col} {ddl}"))
     session.commit()
     _VALUE_MAP_READY = True
 
 
-def propose_mapping(session: Session, kind: str, code: str, suggested: str = "") -> None:
-    """미매핑 값을 pending 제안으로 등록(이미 있으면 무시)."""
+def propose_mapping(session: Session, kind: str, code: str, suggested: str = "",
+                    region: Optional[str] = None,
+                    canonical: Optional[str] = None) -> None:
+    """미매핑 값을 pending 제안으로 등록(이미 있으면 무시).
+
+    국가(kind='country')는 한국어명만으로 부족하다 — 권역을 같이 제안해야
+    브리핑에서 '기타'로 새지 않는다. 승인 시 region·canonical이 함께 반영된다.
+    """
     _ensure_value_mappings(session)
     session.execute(text(f"""
-        INSERT INTO {DB_SCHEMA}.value_mappings (kind, code, suggested, status)
-        VALUES (:k, :c, :s, 'pending')
+        INSERT INTO {DB_SCHEMA}.value_mappings (kind, code, suggested, status, region, canonical)
+        VALUES (:k, :c, :s, 'pending', :r, :n)
         ON CONFLICT (kind, code) DO NOTHING
-    """), {"k": kind, "c": code, "s": suggested})
+    """), {"k": kind, "c": code, "s": suggested, "r": region, "n": canonical})
+    session.commit()
+
+
+def upsert_country_term(session: Session, code: str, ko: Optional[str] = None,
+                        region: Optional[str] = None,
+                        canonical: Optional[str] = None,
+                        status: str = "active") -> None:
+    """국가 용어를 정본(DB)에 직접 써넣는다 — 씨앗 보정·일괄 적재용.
+
+    넘기지 않은 칸은 기존 값을 그대로 둔다(COALESCE). 슬랙 승인 경로와 같은
+    테이블을 쓰므로 사전이 두 벌로 갈라지지 않는다.
+    """
+    _ensure_value_mappings(session)
+    session.execute(text(f"""
+        INSERT INTO {DB_SCHEMA}.value_mappings (kind, code, value, region, canonical, status)
+        VALUES ('country', :c, :v, :r, :n, :st)
+        ON CONFLICT (kind, code) DO UPDATE SET
+            value     = COALESCE(EXCLUDED.value,     {DB_SCHEMA}.value_mappings.value),
+            region    = COALESCE(EXCLUDED.region,    {DB_SCHEMA}.value_mappings.region),
+            canonical = COALESCE(EXCLUDED.canonical, {DB_SCHEMA}.value_mappings.canonical),
+            status    = EXCLUDED.status
+    """), {"c": (code or "").strip().upper(), "v": ko, "r": region,
+           "n": canonical, "st": status})
     session.commit()
 
 
 def list_pending_mappings(session: Session, kind: Optional[str] = None) -> list[tuple]:
-    """대기(pending) 제안 목록 → [(kind, code, suggested), ...]."""
+    """대기(pending) 제안 목록 → [(kind, code, suggested, region), ...].
+
+    권역(region)도 같이 돌려준다 — 한국어명만 보고 승인하면 그 나라는
+    주간 브리핑에서 계속 '기타'로 떨어지므로, 승인자가 함께 봐야 한다.
+    """
     _ensure_value_mappings(session)
-    q = f"SELECT kind, code, COALESCE(suggested,'') FROM {DB_SCHEMA}.value_mappings WHERE status='pending'"
+    q = (f"SELECT kind, code, COALESCE(suggested,''), COALESCE(region,'') "
+         f"FROM {DB_SCHEMA}.value_mappings WHERE status='pending'")
     p: dict = {}
     if kind:
         q += " AND kind = :k"; p["k"] = kind
     q += " ORDER BY kind, code"
-    return [(r[0], r[1], r[2]) for r in session.execute(text(q), p).fetchall()]
+    return [(r[0], r[1], r[2], r[3]) for r in session.execute(text(q), p).fetchall()]
 
 
 def approve_mapping(session: Session, code: str, value: Optional[str] = None,

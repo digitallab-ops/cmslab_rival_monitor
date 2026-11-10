@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from openai import OpenAI
 
 from config.settings import OPENAI_API_KEY, DB_SCHEMA
-from config.brands import REGION_MAP
+from config.vocab import country_region, REGION_ORDER
 from notifications.slack import (send_weekly_briefing, send_daily_briefing,
                                  send_afternoon_digest)
 from storage.models import get_session, save_briefing
@@ -85,9 +85,13 @@ def _build_prompt_by_region(rows, limit: int, detail_len: int) -> str:
         return "수집된 기사가 없습니다."
     buckets: dict = {}
     for r in rows[:limit]:
-        region = REGION_MAP.get((r[1] or "").upper(), "기타")
+        # 권역은 config/vocab 한 곳에서 본다. 예전엔 25개짜리 표를 직접 들고
+        # 있어서 ES·PT·CZ·HU·BE·CH·IE·FI 같은 유럽 국가가 전부 '기타'로 샜다
+        # (최근 180일 기준 42종 277건, 5.0%). vocab은 EU·GCC처럼 나라가 아닌
+        # 값도 권역만은 살려서 넣는다.
+        region = country_region(r[1])
         buckets.setdefault(region, []).append(r)
-    order = ["KR", "APAC", "SEA", "NA", "EU", "ME", "LATAM", "AF", "IN", "기타"]
+    order = REGION_ORDER
     lines = []
     for reg in sorted(buckets, key=lambda x: order.index(x) if x in order else 99):
         lines.append(f"\n=== [{reg}] ===")

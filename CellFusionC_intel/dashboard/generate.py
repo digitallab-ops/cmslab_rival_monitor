@@ -86,15 +86,9 @@ logger = logging.getLogger(__name__)
 CHARTJS_URL = "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"
 _CACHE_PATH = Path(__file__).parent / "chartjs_cache.min.js"
 
-COUNTRY_FLAGS = {
-    "US": "🇺🇸", "JP": "🇯🇵", "KR": "🇰🇷", "CN": "🇨🇳",
-    "PL": "🇵🇱", "SG": "🇸🇬", "TH": "🇹🇭", "GB": "🇬🇧",
-    "CA": "🇨🇦", "AU": "🇦🇺", "DE": "🇩🇪", "FR": "🇫🇷",
-    "ID": "🇮🇩", "MY": "🇲🇾", "VN": "🇻🇳", "PH": "🇵🇭",
-    "IT": "🇮🇹", "BR": "🇧🇷", "MX": "🇲🇽", "IN": "🇮🇳",
-    "AE": "🇦🇪", "SA": "🇸🇦", "ZA": "🇿🇦", "ES": "🇪🇸",
-    "RU": "🇷🇺", "KZ": "🇰🇿", "UZ": "🇺🇿", "BY": "🇧🇾",
-}
+# 국기는 config/vocab이 ISO 코드에서 직접 만든다 — 27개짜리 표를 여기와
+# notifications/slack.py가 따로 들고 있어서 칠레·뉴질랜드·몽골엔 국기가 없었다.
+from config.vocab import COUNTRY_FLAGS
 
 ACTIVITY_LABELS = {
     "신시장_진출":    "신시장 진출",
@@ -577,11 +571,23 @@ def _render_category_battle(battle: list) -> str:
     )
 
 
-# brief_strategy._COUNTRY_KO를 단일 출처로 쓴다(복사본 금지 — _BF_CC 주석 참고).
-# AE만 여기서는 짧게 'UAE'로 둔다 — 좁은 칸에 들어가는 라벨이라 줄여 쓴다.
-from analytics.brief_strategy import _COUNTRY_KO as _COUNTRY_KO_SRC
+# 국가 한국어명은 config/vocab 한 곳에서 가져온다(복사본 금지 — _bf_cty 주석 참고).
+# 동의어도 거기서 접힌다: UK로 들어온 기사도 GB(영국)와 같은 칸에 쌓인다.
+from config.vocab import country_ko as _vocab_country_ko, norm_country as _ncc
 
-_COUNTRY_KO_LBL = {**_COUNTRY_KO_SRC, "AE": "UAE"}
+# 좁은 칸용 짧은 라벨. AE는 '아랍에미리트'가 길어 'UAE'로 줄여 쓴다.
+_CC_SHORT = {"AE": "UAE"}
+
+
+def _cc_lbl(cc, fallback=""):
+    """국가코드 → 화면 라벨. 모르면 데이터에 있던 이름, 그것도 없으면 코드."""
+    c = _ncc(cc)
+    if not c:
+        return fallback or ""
+    if c in _CC_SHORT:
+        return _CC_SHORT[c]
+    ko = _vocab_country_ko(c)
+    return ko if ko != c else (fallback or c)
 
 
 
@@ -617,7 +623,7 @@ def _render_export_growth(growth: list, period_label: dict = None, stacked: dict
     ccs = [c["cc"] for c in countries]
     colmap = {cc: _XG_COLORS[min(i, len(_XG_COLORS) - 1)] for i, cc in enumerate(ccs)}
     colmap["기타"] = _XG_COLORS[-1]
-    nm = {c["cc"]: (_COUNTRY_KO_LBL.get(c["cc"], c["name"]) if c["cc"] != "기타" else "기타") for c in countries}
+    nm = {c["cc"]: (_cc_lbl(c["cc"], c["name"]) if c["cc"] != "기타" else "기타") for c in countries}
 
     mx = max((x["total"] for x in ser), default=1.0) or 1.0
     CHART_H = 180
@@ -676,7 +682,7 @@ def _render_export_growth_OLD(growth: list, period_label: dict = None) -> str:
     for g in top:
         cc = g["country_code"]
         flag = COUNTRY_FLAGS.get(cc, "🌐")
-        name = _COUNTRY_KO_LBL.get(cc, g["country_name"] or cc)
+        name = _cc_lbl(cc, g["country_name"] or cc)
         cur = g["exp_usd_3m"] / 1e6
         prev = g["prev_usd_3m"] / 1e6
         yoy = g["yoy_pct"]
@@ -1062,7 +1068,8 @@ def _render_channel_moves(moves: list) -> str:
         det = _esc((m.get("details") or "").strip())[:110]
         rows.append(
             f'<div class="cm-row">'
-            f'<div class="cm-cc">{flag}<span>{_esc(m.get("country",""))}</span></div>'
+            # 코드가 아니라 한국어명으로 보여준다 — 'NZ'·'SG'가 그대로 나가고 있었다.
+            f'<div class="cm-cc">{flag}<span>{_esc(_bf_cty(m.get("country","")))}</span></div>'
             f'<div class="cm-body"><div class="cm-title">{_esc(m.get("title",""))[:88]} {link}</div>'
             + (f'<div class="cm-det">{det}</div>' if det else "")
             + f'<div class="cm-meta">{_esc(m.get("date",""))}'
@@ -1364,7 +1371,11 @@ def _build_insights_script(brand_insights: dict) -> str:
     if not brand_insights:
         return ""
 
-    flag_json = json.dumps({"US":"🇺🇸","JP":"🇯🇵","KR":"🇰🇷","SG":"🇸🇬","PL":"🇵🇱","TH":"🇹🇭","CA":"🇨🇦","GB":"🇬🇧"})
+    # 브라우저로 넘기는 국기표. 8개만 박아 뒀던 탓에 나머지 나라는 JS에서 빈칸이었다.
+    # vocab이 ISO 코드로 만들어 주므로 사전에 있는 나라를 전부 넘긴다.
+    from config.vocab import COUNTRY_KO as _VK, COUNTRY_REGION as _VR
+    flag_json = json.dumps({c: COUNTRY_FLAGS.get(c, "") for c in (set(_VK) | set(_VR))
+                            if COUNTRY_FLAGS.get(c, "")}, ensure_ascii=False)
     imp_json  = json.dumps({"high": "var(--critical)", "medium": "var(--serious)", "low": "var(--text-secondary)"})
 
     return f"""
@@ -2421,8 +2432,9 @@ a:hover { color: var(--gold); }
   padding:11px 13px; background:color-mix(in srgb, var(--blue) 5%, transparent);
   border:1px solid color-mix(in srgb, var(--blue) 18%, transparent);
   border-left:3px solid var(--blue); border-radius:8px; }
-.cm-cc { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:17px; line-height:1.1; }
-.cm-cc span { font-family:var(--mono); font-size:11.5px; font-weight:700; color:var(--lo); }
+.cm-cc { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:17px; line-height:1.1; flex:0 0 46px; }
+/* 코드(2글자) 대신 한국어명이 들어가므로 좁은 칸에서 줄이 깨지지 않게 잡아 둔다. */
+.cm-cc span { font-size:10.5px; font-weight:700; color:var(--lo); text-align:center; word-break:keep-all; line-height:1.25; }
 .cm-title { font-size:15px; font-weight:650; color:var(--hi); line-height:1.5; }
 .cm-det { font-size:13.5px; color:var(--mid); line-height:1.5; margin-top:3px; }
 .cm-meta { font-family:var(--mono); font-size:12px; color:var(--lo); margin-top:4px; }
@@ -4078,7 +4090,7 @@ def _render_synth(stats7: dict, market_text: str, growth_story: dict, composite:
     high7 = (stats7 or {}).get("high", 0)
     growers = o.get("growers")
     top3 = ", ".join(_esc(b["brand"]) for b in composite[:3]) if composite else ""
-    top_mkt_name = _esc(_COUNTRY_KO_LBL.get(top_mkt["country_code"], top_mkt["country_name"])) if top_mkt else ""
+    top_mkt_name = _esc(_cc_lbl(top_mkt["country_code"], top_mkt["country_name"])) if top_mkt else ""
 
     # 수출(관세청)은 신빙성 있는 지표라 유지하되, 헤드라인 과대강조 대신 기준(실제 월범위)을
     # 붙여 표기. 작은 베이스(우즈벡류)는 get_market_growth_story에서 무브 우선순위로 걸러짐.
@@ -4171,8 +4183,14 @@ _CX_AX = [
     ("oliveyoung", "올리브영", "올영 판매 좋음", "var(--critical)",  8),
     ("trademark",  "진출준비", "해외 진출 준비", "var(--good)", 10),
 ]
-_CX_GEO = {"": "글로벌", "GLOBAL": "글로벌", "WORLD": "글로벌",
-           "US": "미국", "USA": "미국", "JP": "일본", "KR": "한국"}
+def _cx_geo(code: str, default: str = "해외") -> str:
+    """상표 출원 지역코드 → 한국어명. 4개국짜리 사본을 vocab으로 돌렸다."""
+    c = (code or "").strip().upper()
+    if not c or c in ("GLOBAL", "WORLD"):
+        return "글로벌"
+    from config.vocab import country_ko as _vk, norm_country as _vn
+    ko = _vk(c)
+    return ko if ko != _vn(c) else default
 
 _CX_STYLE = """<style>
 #cxtab{--cxink:var(--text-primary);--cxmut:var(--text-secondary);--cxdim:var(--text-muted);--cxline:var(--baseline);--cxline2:var(--baseline);
@@ -4523,7 +4541,7 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
             continue
         if b not in gspk or (s.get("spike_ratio", 0) > gspk[b]["mult"]):
             gspk[b] = {"mult": round(s.get("spike_ratio", 0), 1),
-                       "geo": _CX_GEO.get((s.get("geo") or "").upper(), s.get("geo") or "해외")}
+                       "geo": _cx_geo(s.get("geo") or "", s.get("geo") or "해외")}
     neg: dict = {}
     for n in (negative_signals or []):
         b = n.get("brand")
@@ -4693,12 +4711,6 @@ _BRIEF_STYLE = """<style>
 #bf2 .bf-empty{color:var(--text-muted);font-size:13px;padding:16px}
 </style>"""
 
-# 국가코드→한글(대시보드 _COUNTRY_KO_LBL의 영문 매핑 AE='UAE' 등을 오버라이드)
-# 국가 한국어명은 brief_strategy._COUNTRY_KO 한 곳에서 가져온다.
-# 예전엔 여기에 같은 표를 복사해 뒀는데, 한쪽에만 코드를 추가하면 다른 쪽에서
-# 코드가 그대로 노출됐다 — 실제로 MN(몽골)·NP(네팔)를 brief_strategy에만
-# 넣었더니 화면에는 'MN'으로 나왔다. 복사본을 없애 어긋날 여지를 지운다.
-_BF_CC = dict(_COUNTRY_KO_SRC)
 _BF_TAC = {"신시장_진출": ("🚩", "신흥시장 선점"), "유통_채널": ("🏬", "유통망 확대"),
            "신제품_런칭": ("🧪", "신제품 출시"), "브랜드_마케팅": ("📣", "브랜드 마케팅"),
            "인플루언서_협업": ("👥", "인플루언서"), "가격_프로모션": ("🏷️", "프로모션"),
@@ -4721,8 +4733,14 @@ _BF_CC_RUNTIME: dict = {}
 
 
 def _bf_cty(c):
-    c = (c or "").upper()
-    return _BF_CC_RUNTIME.get(c) or _BF_CC.get(c) or _COUNTRY_KO_LBL.get(c) or c
+    """브리핑 본문용 국가 한국어명(긴 표기 — '아랍에미리트').
+
+    표를 여기 복사해 두지 않는다. 예전엔 복사본이 있어서 한쪽에만 코드를
+    추가하면 다른 쪽에 'MN'·'NP'가 코드 그대로 노출됐다. 정본은 config/vocab이고,
+    DB 승인 매핑(_BF_CC_RUNTIME)만 그 위에 덮는다.
+    """
+    c = _ncc(c)
+    return _BF_CC_RUNTIME.get(c) or _vocab_country_ko(c)
 
 
 def _bf_prod_name(p):
@@ -5111,7 +5129,7 @@ def _build_full_html(
     market_list_html = "".join(
         f'<div class="mk-row" onclick="switchTab(\'strategy\')">'
         f'<span class="flag">{COUNTRY_FLAGS.get(m["country_code"], "🌐")}</span>'
-        f'<div><div class="nm">{_esc(_COUNTRY_KO_LBL.get(m["country_code"], m["country_name"]))}</div>'
+        f'<div><div class="nm">{_esc(_cc_lbl(m["country_code"], m["country_name"]))}</div>'
         f'<div class="why">{_esc((m["moves"][0]["brand"] + " · " + ACTIVITY_LABELS.get(m["moves"][0]["activity_type"], "")) if m.get("moves") else "활동 축적 중")}</div></div>'
         f'<span class="yoy">{"+" if m["yoy_pct"] >= 0 else ""}{m["yoy_pct"]:.0f}%</span></div>'
         for m in _mk[:7]

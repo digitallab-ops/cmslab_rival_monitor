@@ -157,18 +157,10 @@ COUNTRIES = {
     "BY": {"hl": "ru",     "gl": "BY", "ceid": "BY:ru",     "name": "벨라루스"},
 }
 
-# 국가 → 권역 (대시보드 필터·보고서 그룹핑)
-REGION_MAP = {
-    "GB": "EU", "PL": "EU", "DE": "EU", "FR": "EU", "IT": "EU",
-    "AE": "ME", "SA": "ME",
-    "BR": "LATAM", "MX": "LATAM",
-    "ZA": "AF",
-    "TH": "SEA", "SG": "SEA", "ID": "SEA", "MY": "SEA", "VN": "SEA", "PH": "SEA",
-    "IN": "IN",
-    "US": "NA", "CA": "NA",
-    "JP": "APAC", "CN": "APAC", "AU": "APAC", "KR": "KR",
-    "RU": "CIS", "KZ": "CIS", "UZ": "CIS", "BY": "CIS",
-}
+# 국가 → 권역. 표는 config/vocab.py 한 곳에 있다 — 여기 있던 25개짜리 사본은
+# 데이터에 나온 67종 중 42종을 몰라서 277건(5.0%)을 브리핑 '기타'로 흘렸다.
+# 새로 쓰는 코드는 vocab.country_region()을 부를 것(동의어·DB 정본까지 반영된다).
+from config.vocab import COUNTRY_REGION as REGION_MAP  # noqa: E402  (하위호환용 별칭)
 
 # 현지어 활동 키워드 (google_rss 주간 심층수집에서 브랜드명과 결합 → 현지 기사 recall↑)
 LOCALE_KEYWORDS = {
@@ -219,6 +211,10 @@ ACTIVITY_TYPES = [
     "투자_BD",          # 투자 유치, 해외 법인 설립, 유통 파트너십, 채용
     "브랜드_마케팅",    # 포지셔닝 변경, 팝업/전시회, PR·광고, 콜라보, 브랜드 스토리
     "실적_공시",        # 매출·실적 공시, 수상·인증·랭킹, 규제·법적, 경영진 인사
+    # 2026-11-11 추가 — 분류 프롬프트와 ACTIVITY_GROUPS에는 처음부터 있었는데
+    # 이 목록에만 빠져 있었다(736건). 파수꾼이 어쩔 수 없이 제 목록을 따로
+    # 들고 있었다 — 사전이 두 벌이 되는 전형적인 경로라 여기로 합친다.
+    "가격_프로모션",    # 가격 인하·인상, 할인·세일·번들, 리테일러 프로모션
     "기타",
 ]
 

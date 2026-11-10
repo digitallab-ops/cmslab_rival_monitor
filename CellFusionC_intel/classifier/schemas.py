@@ -1,11 +1,27 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class NewsClassification(BaseModel):
     brand: str = Field(description="브랜드명 (원본 영문)")
     country: str = Field(description="기사 관련 ISO 국가 코드 (예: US, PL, TH)")
+
+    @field_validator("country")
+    @classmethod
+    def _norm_country(cls, v: str) -> str:
+        """국가코드를 저장 전에 한 가지 표기로 맞춘다.
+
+        여기서 막지 않으면 같은 나라가 여러 값으로 쌓여 집계가 쪼개진다 —
+        실제로 영국이 GB 1,310건과 UK 17건으로 나뉘어 있었고, 분류기가 앞에
+        공백을 붙여 보낸 ' GB'는 또 다른 값이었다. 적재 경로가 여럿이라
+        스키마에서 한 번에 거른다(동의어 표는 config/vocab).
+        """
+        try:
+            from config.vocab import norm_country
+            return norm_country(v)
+        except Exception:
+            return (v or "").strip().upper()
     brand_focus: Literal["primary", "secondary", "incidental", "unrelated"] = Field(
         description="기사에서 브랜드의 비중: primary=주인공, secondary=주요 언급 중 하나, incidental=예시로 잠깐 언급"
     )

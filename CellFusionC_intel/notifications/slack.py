@@ -14,13 +14,8 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-COUNTRY_FLAGS = {
-    "US": "🇺🇸", "JP": "🇯🇵", "KR": "🇰🇷", "CN": "🇨🇳",
-    "PL": "🇵🇱", "SG": "🇸🇬", "TH": "🇹🇭", "GB": "🇬🇧",
-    "CA": "🇨🇦", "AU": "🇦🇺", "DE": "🇩🇪", "FR": "🇫🇷",
-    "ID": "🇮🇩", "MY": "🇲🇾", "VN": "🇻🇳", "PH": "🇵🇭",
-    "IT": "🇮🇹",
-}
+# 국기는 config/vocab이 ISO 코드에서 직접 만든다(표 사본 금지).
+from config.vocab import COUNTRY_FLAGS
 
 ACTIVITY_EMOJI = {
     "신시장_진출":   "🌏",

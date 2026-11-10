@@ -20,10 +20,12 @@ logger = logging.getLogger(__name__)
 _WD_MODEL = os.getenv("BRIEF_MODEL", "gpt-4o-mini")
 _COOLDOWN_HOURS = 72          # 같은 이상은 3일에 한 번만 알림(나그 방지)
 
-# 분류기가 실제 낼 수 있는 활동유형(claude_classifier enum이 진짜 기준 —
-# config/brands.ACTIVITY_TYPES는 '가격_프로모션' 누락 등 불일치가 있어 여기 고정).
-_KNOWN_ACTIVITY = {"신시장_진출", "유통_채널", "신제품_런칭", "인플루언서_협업",
-                   "투자_BD", "브랜드_마케팅", "실적_공시", "가격_프로모션", "기타"}
+# 분류기가 실제 낼 수 있는 활동유형. 예전엔 config/brands.ACTIVITY_TYPES에
+# '가격_프로모션'이 빠져 있어 여기에 목록을 따로 들고 있었다 — 사전이 두 벌이
+# 되는 바로 그 경로라, 빠진 값을 config에 넣고 여기서는 import만 한다.
+from config.brands import ACTIVITY_TYPES as _ACTIVITY_TYPES  # noqa: E402
+
+_KNOWN_ACTIVITY = set(_ACTIVITY_TYPES)
 
 
 # ── 중복 방지(high_alert_log 재사용) ─────────────────────────────────────────
@@ -208,6 +210,36 @@ def _diagnose(findings: list[dict]) -> dict:
 
 
 # ── 2단계: 데이터 드리프트 감시 ──────────────────────────────────────────────
+def _suggest_region(code: str, ko: str) -> str:
+    """국가코드 → 권역. 사전에 있으면 그대로, 없으면 LLM에 묻는다.
+
+    권역을 못 정하면 빈 문자열을 돌려준다 — 추측해서 엉뚱한 권역에 넣느니
+    '기타'로 두는 편이 낫다(승인자가 보고 고칠 수 있다).
+    """
+    from config.vocab import REGION_ORDER, country_region
+    r = country_region(code, "")
+    if r and r != "기타":
+        return r
+    try:
+        from openai import OpenAI
+        allowed = [x for x in REGION_ORDER if x != "기타"]
+        resp = OpenAI(api_key=os.getenv("OPENAI_API_KEY")).chat.completions.create(
+            model=_WD_MODEL, max_tokens=20, temperature=0,
+            messages=[{"role": "system", "content":
+                       "국가를 K-뷰티 유통 권역 하나로 분류한다. 아래 중 하나만 답하라: "
+                       + ", ".join(allowed) +
+                       ". KR=한국, APAC=동아시아·오세아니아, SEA=동남아, NA=북미, "
+                       "EU=유럽, ME=중동, LATAM=중남미, AF=아프리카, IN=인도, "
+                       "SASIA=인도 외 남아시아, CIS=러시아·구소련권. "
+                       "확신이 없으면 빈 문자열로 답하라."},
+                      {"role": "user", "content": f"{code} ({ko})"}])
+        out = (resp.choices[0].message.content or "").strip().upper()
+        return out if out in allowed else ""
+    except Exception as e:
+        logger.debug("권역 제안 실패(%s): %s", code, e)
+        return ""
+
+
 def _suggest_country_ko(codes: list[str]) -> dict:
     """미매핑 국가코드 → {코드: 한국어명}. 확인 못 한 코드는 아예 빼서 돌려준다.
 
@@ -301,34 +333,44 @@ def check_data_drift(session) -> list[dict]:
     findings: list[dict] = []
     # 1) 미매핑 국가코드(최근 7일 뉴스+리테일) — 화면에 코드로 노출될 위험
     try:
-        from analytics.brief_strategy import _COUNTRY_KO
+        from config.vocab import COUNTRY_KO as _COUNTRY_KO, COUNTRY_REGION, norm_country
         from storage.repository import known_mapping_codes, propose_mapping
-        known = set(_COUNTRY_KO) | known_mapping_codes(session, "country")
+        known = set(_COUNTRY_KO) | set(COUNTRY_REGION) | known_mapping_codes(session, "country")
         ccs = set()
         for (c,) in session.execute(text(
             f"SELECT DISTINCT country FROM {DB_SCHEMA}.news_articles "
             f"WHERE published_date >= now() - interval '7 days' AND country IS NOT NULL")):
-            ccs.add((c or "").upper())
+            ccs.add(norm_country(c))      # ' GB'·'uk' 같은 표기차는 여기서 접힌다
         for (c,) in session.execute(text(
             f"SELECT DISTINCT country FROM {DB_SCHEMA}.retail_rankings "
             f"WHERE capture_date >= now()::date - 7 AND country IS NOT NULL")):
-            ccs.add((c or "").upper())
+            ccs.add(norm_country(c))
+        # 사전이 이미 아는 값은 뺀다. EU·NA·GCC처럼 나라는 아니지만 권역과
+        # 한국어 라벨이 붙어 정상 표시되는 값까지 "문제"로 올리면 나그가 된다.
+        from config.vocab import country_ko as _vko, country_region as _vreg
+        handled = {c for c in ccs if _vko(c) != c or _vreg(c, "") not in ("", "기타")}
         unmapped = sorted(c for c in ccs
                           if c and c != "NULL" and c.isalpha() and len(c) <= 3
-                          and c not in known)
+                          and c not in known and c not in handled)
         if unmapped:
             sugg = _suggest_country_ko(unmapped)
             # 검색으로 확인된 것만 제안한다. 못 믿을 제안을 올리면 그대로 승인돼
             # 화면에 코드가 박힌다.
             verified = [c for c in unmapped if sugg.get(c)]
             unknown = [c for c in unmapped if not sugg.get(c)]
+            # 권역까지 같이 제안한다. 한국어명만 승인하면 그 나라는 여전히
+            # 주간 브리핑에서 '기타'로 떨어진다 — 실제로 ES·PT·CZ 등
+            # 42종 277건이 그렇게 새고 있었다.
+            regs = {c: _suggest_region(c, sugg[c]) for c in verified}
             for c in verified:                       # 제안을 DB에 등록(pending)
                 try:
-                    propose_mapping(session, "country", c, sugg[c])
+                    propose_mapping(session, "country", c, sugg[c], region=regs.get(c))
                 except Exception:
                     pass
             if verified:
-                sugg_txt = ", ".join(f"{c}={sugg[c]}" for c in verified)
+                sugg_txt = ", ".join(
+                    f"{c}={sugg[c]}" + (f"({regs[c]})" if regs.get(c) else "")
+                    for c in verified)
                 detail = (f"화면에 한국어명 없이 코드로 노출될 수 있음(예전 AE='UAE' 케이스). "
                           f"검색으로 확인한 제안: {sugg_txt}")
                 if unknown:

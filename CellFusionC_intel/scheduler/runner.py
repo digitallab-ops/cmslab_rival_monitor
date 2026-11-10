@@ -461,8 +461,10 @@ def _notify_new_trademarks(filings: list) -> None:
     url = os.getenv("SLACK_WEBHOOK_URL", "")
     if not url:
         return
-    _FL = {"US": "🇺🇸", "JP": "🇯🇵", "EU": "🇪🇺"}
-    lines = [f"• {f['date']} *{f['brand']}* {_FL.get(f['country'], f['country'])} — {f['mark']}"
+    # 국기는 vocab이 ISO 코드로 만든다 — 3개(US·JP·EU)만 박아 둬서 나머지
+    # 나라는 상표 알림에 코드로 나갔다.
+    from config.vocab import COUNTRY_FLAGS as _FL, country_ko as _FLKO
+    lines = [f"• {f['date']} *{f['brand']}* {_FL.get(f['country'], '')}{_FLKO(f['country'])} — {f['mark']}"
              for f in filings]
     text_msg = ("🪧 *진출 임박 조기경보 — 신규 해외 상표 출원*\n"
                 "_경쟁사가 해당 시장에 상표를 냈습니다. 뉴스보다 앞선 진출·신제품 신호._\n"

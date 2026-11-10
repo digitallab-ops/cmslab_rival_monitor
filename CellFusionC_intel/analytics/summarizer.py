@@ -206,12 +206,8 @@ def generate_brand_strategy_summary(brand: str, articles: list) -> str:
         return _fallback_from_data(brand, articles)
 
 
-_COUNTRY_KO = {
-    "US": "미국", "JP": "일본", "KR": "한국", "CN": "중국", "GB": "영국",
-    "PL": "폴란드", "SG": "싱가포르", "TH": "태국", "CA": "캐나다", "AU": "호주",
-    "DE": "독일", "FR": "프랑스", "ID": "인도네시아", "MY": "말레이시아",
-    "VN": "베트남", "PH": "필리핀", "IT": "이탈리아",
-}
+# 국가 한국어명은 config/vocab 한 곳에서 본다(17개짜리 사본이 여기 있었다).
+from config.vocab import country_ko as _vocab_country_ko
 
 
 def generate_brand_country_summary(brand: str, country: str, articles: list) -> str:
@@ -222,7 +218,7 @@ def generate_brand_country_summary(brand: str, country: str, articles: list) -> 
 
     articles: [{imp, act, title_ko, details, date}, ...] (해당 브랜드×국가만)
     """
-    country_ko = _COUNTRY_KO.get(country, country)
+    country_ko = _vocab_country_ko(country)
     if not articles:
         return f"### 핵심 행보\n{brand}의 {country_ko} 관련 주목할 만한 활동이 아직 없습니다."
 

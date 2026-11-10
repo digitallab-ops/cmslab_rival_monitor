@@ -382,6 +382,14 @@ def _mapping_command(text: str, user_id: str = ""):
     from storage.repository import (list_pending_mappings, approve_mapping,
                                     approve_all_pending, reject_mapping)
 
+    def _vocab_refresh():
+        """승인 즉시 이 프로세스의 용어 캐시를 새로 읽는다(기본 TTL 10분 대기 생략)."""
+        try:
+            from config.vocab import refresh
+            refresh()
+        except Exception:
+            pass
+
     def _can_write():
         return bool(_BRAND_ADMINS) and user_id in _BRAND_ADMINS
 
@@ -390,8 +398,11 @@ def _mapping_command(text: str, user_id: str = ""):
         if not rows:
             return "대기 중인 매핑 제안이 없어요."
         out = ["*미매핑 제안(대기)* — `매핑 승인`(전체 반영) · `매핑 <코드>=<값>`(개별) · `매핑 제외 <코드>`"]
-        for kind, code, sug in rows:
-            out.append(f"• [{kind}] `{code}` → 제안: {sug or '(없음)'}")
+        for kind, code, sug, region in rows:
+            # 권역이 비어 있으면 승인해도 주간 브리핑에서 '기타'로 떨어진다.
+            # 그대로 넘기지 말고 눈에 띄게 적어 둔다.
+            reg = f" · 권역 {region}" if region else " · ⚠️ 권역 미정(브리핑 '기타'로 들어감)"
+            out.append(f"• [{kind}] `{code}` → 제안: {sug or '(없음)'}{reg if kind == 'country' else ''}")
         return "\n".join(out)
 
     s = get_session()
@@ -413,6 +424,7 @@ def _mapping_command(text: str, user_id: str = ""):
             if not _can_write():
                 return f"🔒 매핑 승인은 관리자만 가능해요. (당신 ID: `{user_id}`)"
             n = approve_all_pending(s)
+            _vocab_refresh()
             return f"✅ 대기 제안 {n}건 반영했어요. 다음 대시보드 갱신부터 한국어로 표시됩니다." if n else "반영할(제안값 있는) 대기 항목이 없어요."
         # 개별: `매핑 HK=홍콩` 또는 `매핑 승인 HK` 또는 `매핑 HK`
         if not _can_write():
@@ -429,6 +441,7 @@ def _mapping_command(text: str, user_id: str = ""):
             return "코드를 지정해주세요. 예) `매핑 HK=홍콩` 또는 `매핑 승인 HK`"
         n = approve_mapping(s, code, val)
         if n:
+            _vocab_refresh()
             return f"✅ `{code}` → {val or '제안값'} 반영({n}건). 다음 갱신부터 표시돼요."
         return f"`{code}` 대기 제안이 없어요. `매핑`으로 목록 확인하세요."
     except Exception as e:
