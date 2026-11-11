@@ -49,9 +49,15 @@ _BACKOFF = 4.0                 # 한도에 걸렸을 때 첫 대기(초). 2배�
 
 # 우리 세그먼트와 관련 있는 상품류. 이 밖(의류·식품 등)은 저장은 하되 판독에서 뺀다.
 RELEVANT_CLASSES = {3, 5, 9, 10, 11, 21, 35, 44}
+# 3·35류는 이 바닥의 기본값이고, 나머지는 '하던 일과 다른 일'이다.
+# 29·30·32류(식품·음료)까지 실제로 나왔다 — 라벨이 없으면 "29류 29류"로 찍힌다.
 CLASS_LABEL = {
-    3: "화장품", 5: "의약·기능성", 9: "전자기기", 10: "의료기기",
-    11: "가전·LED", 21: "미용도구", 35: "판매·유통", 44: "미용·의료서비스",
+    1: "화장품 원료·화학", 3: "화장품", 5: "의약·기능성", 9: "전자기기",
+    10: "의료기기", 11: "가전·LED", 14: "장신구", 16: "인쇄물", 18: "가방",
+    20: "가구·용기", 21: "미용도구", 24: "직물", 25: "의류", 28: "완구",
+    29: "식품", 30: "식품·커피·차", 32: "음료", 33: "주류", 35: "판매·유통",
+    38: "통신", 41: "교육·엔터", 42: "연구·소프트웨어", 43: "음식점·숙박",
+    44: "미용·의료서비스",
 }
 
 # 출원인 자동 추론이 이 점수를 넘고 검색 확인까지 통과하면 자동 등록.
@@ -273,9 +279,19 @@ def ensure_tables(session) -> None:
         f"ON {DB_SCHEMA}.trademark_goods (app_number)"))
     # 상표명이 그 브랜드를 가리키는가. 출원인이 여러 브랜드를 가진 회사일 때
     # '그 브랜드 것'과 '같은 회사의 다른 라인'을 화면에서 가르는 기준이 된다.
-    session.execute(text(
-        f"ALTER TABLE {DB_SCHEMA}.trademark_filings "
-        f"ADD COLUMN IF NOT EXISTS mark_match BOOLEAN"))
+    #
+    # 이미 있으면 ALTER를 걸지 않는다. ADD COLUMN IF NOT EXISTS는 아무것도 안 바꿔도
+    # 테이블 배타잠금을 잡아서, 대시보드나 봇이 조회 중이면 거기서 막혀 수집 전체가
+    # 죽는다(실측으로 statement timeout에 걸려 한 회차가 통째로 날아갔다).
+    has_col = session.execute(text("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = :s AND table_name = 'trademark_filings'
+          AND column_name = 'mark_match'
+    """), {"s": DB_SCHEMA}).first()
+    if not has_col:
+        session.execute(text(
+            f"ALTER TABLE {DB_SCHEMA}.trademark_filings "
+            f"ADD COLUMN IF NOT EXISTS mark_match BOOLEAN"))
     session.execute(text(f"""
         CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.brand_applicants (
             brand      VARCHAR(100) NOT NULL,
@@ -515,8 +531,34 @@ def _save_goods(session, apn: str, items: list) -> int:
 
 # ── 실행 ─────────────────────────────────────────────────────────────────────
 
-def run(months: int = 24, resolve: bool = True) -> dict:
-    """국내 상표 + 지정상품 수집. 반환 {brands, filings, new, goods, pending}."""
+def backlog(session) -> list:
+    """아직 못 끝낸 브랜드. 세 가지다 — 출원인을 아직 못 정했거나, 출원을 한 건도
+    못 받았거나, 출원은 받았는데 지정상품 명세가 빠진 게 남아 있거나."""
+    rows = session.execute(text(f"""
+        SELECT b.name
+        FROM {DB_SCHEMA}.monitored_brands b
+        WHERE b.is_active AND b.name <> '대기' AND (
+              NOT EXISTS (SELECT 1 FROM {DB_SCHEMA}.brand_applicants a
+                          WHERE a.brand = b.name)
+           OR NOT EXISTS (SELECT 1 FROM {DB_SCHEMA}.trademark_filings f
+                          WHERE f.country = 'KR' AND f.brand = b.name)
+           OR EXISTS (SELECT 1 FROM {DB_SCHEMA}.trademark_filings f
+                      WHERE f.country = 'KR' AND f.brand = b.name
+                        AND NOT EXISTS (SELECT 1 FROM {DB_SCHEMA}.trademark_goods g
+                                        WHERE g.country = 'KR'
+                                          AND g.app_number = f.app_number))
+        )
+        ORDER BY b.tier, b.name
+    """)).fetchall()
+    return [r[0] for r in rows]
+
+
+def run(months: int = 24, resolve: bool = True, only_backlog: bool = False) -> dict:
+    """국내 상표 + 지정상품 수집. 반환 {brands, filings, new, goods, pending}.
+
+    only_backlog=True면 아직 못 끝낸 브랜드만 돈다. 한도가 하루치뿐이라 매일
+    전체를 돌리면 이미 끝난 앞쪽 브랜드에서 한도를 다 쓰고 뒤쪽엔 닿지 못한다.
+    """
     if not _key():
         logger.warning("KIPRIS_KEY 미설정 — 국내상표 수집 스킵")
         return {"brands": 0, "filings": 0, "new": 0, "goods": 0, "pending": 0}
@@ -530,6 +572,14 @@ def run(months: int = 24, resolve: bool = True) -> dict:
         brands = session.execute(text(
             f"SELECT name, ko_names FROM {DB_SCHEMA}.monitored_brands "
             f"WHERE is_active AND name <> '대기' ORDER BY tier, name")).fetchall()
+        if only_backlog:
+            left = set(backlog(session))
+            brands = [b for b in brands if b[0] in left]
+            if not brands:
+                logger.info("국내상표: 밀린 브랜드 없음 — 이번 회차는 호출하지 않습니다")
+                return stat
+            logger.info("국내상표 밀린 것부터: %d개 — %s",
+                        len(brands), ", ".join(b[0] for b in brands[:10]))
         since = date.today() - timedelta(days=int(months * 30.5))
         newly_pending = []
 

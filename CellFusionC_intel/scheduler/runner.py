@@ -539,6 +539,28 @@ def job_trademark_kr() -> None:
         logger.warning("국내상표 수집 스킵(KIPRIS_KEY/네트워크 확인): %s", e, exc_info=True)
 
 
+def job_trademark_kr_catchup() -> None:
+    """못 끝낸 브랜드만 매일 이어받는다. 밀린 게 없으면 호출 없이 바로 끝난다.
+
+    KIPRIS는 하루 치 호출만 준다 — 58개 브랜드 전수 수집이 한 회차에 안 끝나서,
+    주1회로 두면 다 채우는 데 몇 주가 걸린다. 다 차면 이 잡은 저절로 조용해진다.
+    """
+    try:
+        from signals.trademark_kr import run as run_kr
+        r = run_kr(only_backlog=True)
+        if not r.get("brands") and not r.get("no_applicant"):
+            return                                   # 밀린 것 없음 — 조용히 끝낸다
+        logger.info("=== [일간] 국내상표 밀린 수집: 브랜드 %d · 출원 %d(신규 %d) · 지정상품 %d ===",
+                    r.get("brands", 0), r.get("filings", 0), r.get("new", 0), r.get("goods", 0))
+        if r.get("quota_exhausted"):
+            logger.warning("KIPRIS 일일 한도 소진 — 남은 %d개는 내일: %s",
+                           len(r.get("not_reached") or []),
+                           ", ".join((r.get("not_reached") or [])[:12]))
+        _notify_intent(r)
+    except Exception as e:
+        logger.warning("국내상표 밀린 수집 스킵: %s", e, exc_info=True)
+
+
 def job_score_snapshot() -> None:
     """브랜드 종합스코어·모멘텀·리테일 순위 주간 스냅샷 (시계열 추세용). 주1회."""
     logger.info("=== [주간] 브랜드 스코어 스냅샷 시작 ===")
@@ -946,6 +968,13 @@ def create_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+
+    scheduler.add_job(
+        job_trademark_kr_catchup,
+        # 05:00 — 한도가 자정에 풀리고 나서, 다른 아침 작업들보다 앞에.
+        trigger=CronTrigger(hour=5, minute=0),
+        id="trademark_kr_catchup", name="[일간] KIPRIS 국내상표 밀린 수집",
+        max_instances=1, coalesce=True)
 
     # 매일 06:20 KST — 아마존 리테일 랭킹(실판매 성과·시계열). 랭킹 매일 변동 + 추세 축적.
     scheduler.add_job(

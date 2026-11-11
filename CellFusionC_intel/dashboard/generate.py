@@ -1193,13 +1193,17 @@ def _render_trademark(sig: dict) -> str:
     reads = (sig or {}).get("reads") or {}
     full = (sig or {}).get("reads_full") or {}
     _CONF = {"high": ("확실", "tm-conf-hi"), "medium": ("추정", "tm-conf-mid")}
-    read_rows, unsure = [], []
+    read_rows, unsure, routine = [], [], []
     for b in brands:
         bn = b["brand"]
         rd = reads.get(bn)
         info = full.get(bn) or {}
         if not rd:
-            if info.get("needs_check"):
+            # '평소와 같음'과 '확인 필요'는 다른 말이다 — 전자는 봤는데 특별한 게
+            # 없다는 뜻이고, 후자는 아예 못 봤다는 뜻이다. 섞으면 뭘 모르는지 가려진다.
+            if info.get("routine"):
+                routine.append((bn, info))
+            elif info.get("needs_check"):
                 unsure.append((bn, info))
             continue
         flag = COUNTRY_FLAGS.get(b["country"], "🌐")
@@ -1221,7 +1225,13 @@ def _render_trademark(sig: dict) -> str:
         read_rows.append(
             f'<div class="tm-unsure"><b>❓ 확인 필요</b> — 근거를 못 찾아 판독하지 않았습니다'
             f'<div class="tm-unsure-l">{"".join(items)}</div></div>')
-    reads_html = (f'<div class="tm-reads"><div class="tm-reads-h">🔮 상표 판독 — 조합이 시사하는 방향</div>'
+    if routine:
+        names = " · ".join(_esc(_tbko(bn)) for bn, _ in routine[:14])
+        read_rows.append(
+            f'<div class="tm-unsure tm-routine"><b>· 평소와 같음 {len(routine)}곳</b> — '
+            f'늘 내던 일반 화장품·판매업 출원만 있었습니다'
+            f'<div class="tm-unsure-l"><span class="tm-unsure-i">{names}</span></div></div>')
+    reads_html = (f'<div class="tm-reads"><div class="tm-reads-h">🔮 상표 판독 — 평소와 다른 움직임</div>'
                   f'{"".join(read_rows)}</div>') if read_rows else ""
 
     # 최근 출원 피드
@@ -2619,6 +2629,7 @@ a:hover { color: var(--gold); }
 .tm-unsure-l { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 5px; }
 .tm-unsure-i { font-size: 11.5px; }
 .tm-unsure-i b { color: var(--mid); }
+.tm-routine { opacity: .72; }
 .in-wrap { margin: 4px 0 14px; padding: 12px 14px; border-radius: 10px;
            background: color-mix(in srgb, var(--champ) 6%, transparent);
            border: 1px solid color-mix(in srgb, var(--champ) 22%, transparent); }
