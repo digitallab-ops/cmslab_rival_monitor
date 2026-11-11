@@ -1,6 +1,5 @@
 @echo off
 cd /d "c:\loki_project\cmslab_rival\CellFusionC_intel"
-REM stdout/stderr는 별도 파일로 — cli.py run 내부(runner.py)가 scheduler.log를
-REM FileHandler로 직접 열기 때문에 같은 파일에 리다이렉트하면 잠금 충돌 발생.
-REM -X utf8: stdout/stderr를 UTF-8로 강제 (한글 로그 cp1252 인코딩 에러 방지)
-"C:\Program Files\Python312\python.exe" -X utf8 cli.py run >> logs\scheduler_console.log 2>&1
+REM 작업 스케줄러는 pythonw.exe로 직접 실행(창 없음). 이 bat은 수동 실행용 보조.
+REM pythonw = 콘솔 창 없이 백그라운드. 로그는 runner.py가 logs\scheduler.log에 기록.
+start "" "C:\Program Files\Python312\pythonw.exe" -X utf8 cli.py run

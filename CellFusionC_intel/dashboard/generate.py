@@ -1142,9 +1142,38 @@ def _render_trademark(sig: dict) -> str:
         return (v[0] if isinstance(v, list) and v else (v or b))
     feed = (sig or {}).get("feed") or []
     brands = (sig or {}).get("brands") or []
-    if not feed and not brands:
-        return ('<p class="no-data">해외 상표 데이터 없음 '
-                '(KIPRIS 수집 전 · 매월 4일 갱신)</p>')
+    intent = (sig or {}).get("intent") or []
+    if not feed and not brands and not intent:
+        return ('<p class="no-data">상표 데이터 없음 '
+                '(KIPRIS 수집 전 · 해외 매월 4일 · 국내 매주 월요일 갱신)</p>')
+
+    # ── 무엇을 만들려 하는가(국내 출원 + 지정상품) ──────────────────────────
+    # 지정상품은 출원인이 '이 상표를 어떤 상품에 쓰겠다'고 직접 적은 문서다.
+    # 9·10·11류가 보이면 하던 일과 다른 일 — 디바이스 진입이라 먼저 띄운다.
+    _CLS = {3: "화장품", 5: "의약·기능성", 9: "전자기기", 10: "의료기기",
+            11: "가전·LED", 21: "미용도구", 35: "판매·유통", 44: "미용·의료서비스"}
+    intent_rows = []
+    for b in sorted(intent, key=lambda x: (not x.get("device"), -(x.get("filings") or 0)))[:12]:
+        if not b.get("goods_count"):
+            continue
+        tags = "".join(
+            f'<span class="in-cls{" in-dev" if c in (9, 10, 11) else ""}">{c}류 {_CLS.get(c, "")}</span>'
+            for c in (b.get("classes") or [])[:6])
+        goods = (b.get("goods_lines") or [""])[0]
+        goods = goods[:150] + ("…" if len(goods) > 150 else "")
+        intent_rows.append(
+            f'<div class="in-row{" in-row-dev" if b.get("device") else ""}">'
+            f'<div class="in-head">{"🔧 " if b.get("device") else ""}'
+            f'<b>{_esc(_tbko(b["brand"]))}</b>'
+            f'<span class="in-n">출원 {b["filings"]}건 · 지정상품 {b["goods_count"]}종 · '
+            f'최근 {_esc(b.get("latest") or "")}</span></div>'
+            f'<div class="in-tags">{tags}</div>'
+            f'<div class="in-goods">{_esc(goods)}</div></div>')
+    intent_html = (
+        '<div class="in-wrap"><div class="in-h">🧭 무엇을 만들려 하는가 — 국내 상표 지정상품</div>'
+        '<div class="in-sub">출원인이 직접 <b>“이 상표를 어떤 상품에 쓰겠다”</b>고 적은 문서입니다. '
+        '추측이 아닙니다. <b>9·10·11류</b>가 보이면 디바이스 진입 신호입니다.</div>'
+        + "".join(intent_rows) + '</div>') if intent_rows else ""
 
     # 브랜드 요약 칩 (최근 출원 많은 순)
     chips = []
@@ -1158,16 +1187,40 @@ def _render_trademark(sig: dict) -> str:
         )
     chips_html = f'<div class="tm-chips">{"".join(chips)}</div>' if chips else ""
 
-    # AI 의미 유추(판독) — 상표 조합이 시사하는 방향
+    # AI 의미 유추(판독) — 상표 조합이 시사하는 방향.
+    # 근거와 확신도를 같이 보여준다. 근거 없이 그럴듯한 한 줄만 띄우면 받는 사람이
+    # 실측인지 추측인지 구분할 수 없다 — 실제로 틀린 판독이 단정적으로 나갔었다.
     reads = (sig or {}).get("reads") or {}
-    read_rows = []
+    full = (sig or {}).get("reads_full") or {}
+    _CONF = {"high": ("확실", "tm-conf-hi"), "medium": ("추정", "tm-conf-mid")}
+    read_rows, unsure = [], []
     for b in brands:
-        rd = reads.get(b["brand"])
-        if rd:
-            flag = COUNTRY_FLAGS.get(b["country"], "🌐")
-            read_rows.append(
-                f'<div class="tm-read"><span class="tm-read-brand">{flag} {_esc(_tbko(b["brand"]))}</span>'
-                f'<span class="tm-read-txt">{_esc(rd)}</span></div>')
+        bn = b["brand"]
+        rd = reads.get(bn)
+        info = full.get(bn) or {}
+        if not rd:
+            if info.get("needs_check"):
+                unsure.append((bn, info))
+            continue
+        flag = COUNTRY_FLAGS.get(b["country"], "🌐")
+        lab, cls = _CONF.get(info.get("confidence") or "", ("", ""))
+        badge = f'<span class="tm-conf {cls}">{lab}</span>' if lab else ""
+        basis = info.get("basis") or info.get("basis_kind") or ""
+        basis_html = f'<span class="tm-basis">근거: {_esc(basis[:60])}</span>' if basis else ""
+        read_rows.append(
+            f'<div class="tm-read"><span class="tm-read-brand">{flag} {_esc(_tbko(bn))}</span>'
+            f'<span class="tm-read-txt">{badge}{_esc(rd)}{basis_html}</span></div>')
+    # 모르는 건 조용히 빼지 않는다 — 안 보이면 없는 것이나 마찬가지다.
+    if unsure:
+        items = []
+        for bn, info in unsure[:10]:
+            why = info.get("basis_kind") or "근거 없음"
+            uk = ", ".join((info.get("unknown") or [])[:4])
+            items.append(f'<span class="tm-unsure-i"><b>{_esc(_tbko(bn))}</b> '
+                         f'{_esc(why)}{(" · " + _esc(uk)) if uk else ""}</span>')
+        read_rows.append(
+            f'<div class="tm-unsure"><b>❓ 확인 필요</b> — 근거를 못 찾아 판독하지 않았습니다'
+            f'<div class="tm-unsure-l">{"".join(items)}</div></div>')
     reads_html = (f'<div class="tm-reads"><div class="tm-reads-h">🔮 상표 판독 — 조합이 시사하는 방향</div>'
                   f'{"".join(read_rows)}</div>') if read_rows else ""
 
@@ -1185,7 +1238,8 @@ def _render_trademark(sig: dict) -> str:
             f'<span class="tm-mark">{_esc(f["mark"] or "")}{ingr_html}</span>'
             f'</div>'
         )
-    return chips_html + reads_html + '<div class="tm-list">' + "".join(rows) + '</div>'
+    return (intent_html + chips_html + reads_html
+            + '<div class="tm-list">' + "".join(rows) + '</div>')
 
 
 def _yoy_badge_color(yoy) -> str:
@@ -2555,6 +2609,34 @@ a:hover { color: var(--gold); }
 .tm-read { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; font-size: 13.5px; }
 .tm-read-brand { font-weight: 700; color: var(--hi); white-space: nowrap; min-width: 120px; }
 .tm-read-txt { color: var(--mid); }
+.tm-conf { display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 4px;
+           font-size: 11px; font-weight: 800; vertical-align: 1px; }
+.tm-conf-hi  { background: color-mix(in srgb, var(--good) 22%, transparent); color: var(--good); }
+.tm-conf-mid { background: color-mix(in srgb, var(--mid) 18%, transparent); color: var(--mid); }
+.tm-basis { display: block; margin-top: 2px; font-size: 11.5px; color: var(--lo); }
+.tm-unsure { margin-top: 9px; padding-top: 8px; border-top: 1px dashed var(--border);
+             font-size: 12px; color: var(--lo); }
+.tm-unsure-l { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 5px; }
+.tm-unsure-i { font-size: 11.5px; }
+.tm-unsure-i b { color: var(--mid); }
+.in-wrap { margin: 4px 0 14px; padding: 12px 14px; border-radius: 10px;
+           background: color-mix(in srgb, var(--champ) 6%, transparent);
+           border: 1px solid color-mix(in srgb, var(--champ) 22%, transparent); }
+.in-h { font-size: 13px; font-weight: 800; color: var(--champ); }
+.in-sub { font-size: 11.5px; color: var(--lo); margin: 3px 0 9px; }
+.in-row { padding: 7px 0; border-top: 1px solid var(--border); }
+.in-row:first-of-type { border-top: 0; }
+.in-row-dev { background: color-mix(in srgb, var(--critical) 6%, transparent);
+              margin: 0 -8px; padding: 7px 8px; border-radius: 6px; }
+.in-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13.5px; }
+.in-head b { color: var(--hi); }
+.in-n { font-size: 11px; color: var(--lo); }
+.in-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 3px; }
+.in-cls { font-size: 10.5px; padding: 1px 6px; border-radius: 4px;
+          background: color-mix(in srgb, var(--mid) 14%, transparent); color: var(--mid); }
+.in-dev { background: color-mix(in srgb, var(--critical) 20%, transparent);
+          color: var(--critical); font-weight: 800; }
+.in-goods { font-size: 11.5px; color: var(--mid); line-height: 1.5; }
 /* 접이식 섹션 (백단 근거자료 — 기본 접기, 클릭 펼침) */
 .collapse-sec > summary { list-style:none; cursor:pointer; display:flex; flex-direction:column; gap:3px;
   padding:10px 14px; background:var(--elevated); border:1px solid var(--border); border-radius:10px; }
@@ -6416,6 +6498,18 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         # 해외 상표 출원 선행신호(KIPRIS) — trademark_filings 없으면 빈 dict
         try:
             trademark_sig = get_trademark_signals(session)
+            # 국내 상표 = '무엇을 만들려 하는가'. 해외(진출 신호)와 다른 축이라 따로 싣는다.
+            try:
+                from analytics.queries import get_intent_signals
+                from analytics.trademark_read import goods_evidence as _ge
+                _it = get_intent_signals(session).get("brands") or []
+                for _b in _it:
+                    _g = _ge(session, _b["brand"])
+                    _b["goods_lines"] = _g["lines"][:3]
+                    _b["goods_count"] = _g["n_goods"]
+                trademark_sig["intent"] = _it
+            except Exception as _ie:
+                logger.warning("국내 상표(의도) 집계 스킵: %s", _ie)
         except Exception:
             trademark_sig = {"feed": [], "brands": []}
         # 글로벌 검색 급등(구글 트렌드) — google_trends 없으면 빈 리스트
@@ -6607,7 +6701,14 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
         try:
             _tm_cached = get_digest_cache(insight_session, "__TRADEMARK_READS__")
             if _tm_cached:
-                trademark_sig["reads"] = json.loads(_tm_cached)
+                _c = json.loads(_tm_cached)
+                # 캐시에는 근거까지 담긴 형태({brand:{read,...}})로 넣는다.
+                # 옛 캐시({brand:"판독문"})도 남아 있으므로 둘 다 받는다.
+                if _c and isinstance(next(iter(_c.values())), dict):
+                    trademark_sig["reads_full"] = _c
+                    trademark_sig["reads"] = {b: v.get("read") for b, v in _c.items() if v.get("read")}
+                else:
+                    trademark_sig["reads"] = _c
             else:
                 # 화면 피드(전체 24행 상한)가 아니라 브랜드별로 모은 상표를 쓴다.
                 # 피드를 쓰면 출원이 많은 브랜드가 잘려 한두 건으로 방향을 유추하게 된다.
@@ -6616,12 +6717,26 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                     for _f in (trademark_sig.get("feed") or []):
                         if _f.get("mark"):
                             _bm.setdefault(_f["brand"], []).append(_f["mark"])
-                _reads = generate_trademark_reads(_bm)
+                # 근거(국내 지정상품·뉴스·검색)를 먼저 모아 읽는다. 상표명만 보고
+                # 물으면 모르는 걸 지어낸다 — 'DAILY ANTI-CIPATION'을 안티에이징으로
+                # 읽은 사고가 그래서 났다. 새 경로가 안 되면 옛 경로로 떨어진다.
+                try:
+                    from analytics.trademark_read import read_all as _read_all
+                    _labels = {b: (BRAND_KO_NAMES.get(b)[0]
+                                   if isinstance(BRAND_KO_NAMES.get(b), list) and BRAND_KO_NAMES.get(b)
+                                   else (BRAND_KO_NAMES.get(b) or b)) for b in _bm}
+                    _full = _read_all(insight_session, _bm, labels=_labels)
+                    trademark_sig["reads_full"] = _full
+                    _reads = {b: v["read"] for b, v in _full.items() if v.get("read")}
+                except Exception as _re:
+                    logger.warning("근거기반 상표 판독 실패 — 기존 경로 사용: %s", _re)
+                    _reads = generate_trademark_reads(_bm)
                 trademark_sig["reads"] = _reads
-                if _reads:
+                _to_cache = trademark_sig.get("reads_full") or _reads
+                if _to_cache:
                     upsert_insight_cache(insight_session, "__TRADEMARK_READS__",
                                          datetime.utcnow() - timedelta(days=1), datetime.utcnow(),
-                                         {"summary": json.dumps(_reads, ensure_ascii=False),
+                                         {"summary": json.dumps(_to_cache, ensure_ascii=False),
                                           "top_act": None, "top_pct": 0, "high_pct": 0.0})
         except Exception as _e:
             logger.warning("상표 판독 생성 스킵: %s", _e)

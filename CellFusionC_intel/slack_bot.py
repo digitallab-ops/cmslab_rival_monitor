@@ -476,6 +476,86 @@ def _mapping_command(text: str, user_id: str = ""):
         s.close()
 
 
+def _applicant_command(text: str, user_id: str = ""):
+    """상표 출원인 확인 명령('출원인'으로 시작). 명령이면 응답, 아니면 None.
+
+    브랜드마다 '이 회사가 그 브랜드 상표를 내는 게 맞나'를 한 번만 확정하면 된다.
+    자동 판정이 애매한 건만 여기로 온다 — 로레알이 닥터지를 인수한 것처럼
+    법인명(엘오케이)과 상호(로레알)가 다르면 기계가 확신할 수 없기 때문이다.
+    """
+    t = (text or "").strip()
+    if not t.startswith("출원인"):
+        return None
+    rest = t[3:].strip()
+    from sqlalchemy import text as _sql
+    from config.settings import DB_SCHEMA as _S
+    from storage.models import get_session as _gs
+
+    def _can_write():
+        return bool(_BRAND_ADMINS) and user_id in _BRAND_ADMINS
+
+    s = _gs()
+    try:
+        toks = rest.split()
+        verb = toks[0] if toks else ""
+        target = " ".join(toks[1:]).strip()
+
+        # 목록(조회는 누구나)
+        if not rest or verb in ("목록", "대기", "pending"):
+            rows = s.execute(_sql(
+                f"SELECT brand, applicant, score, evidence FROM {_S}.brand_applicants "
+                f"WHERE status = 'pending' ORDER BY score DESC LIMIT 20")).fetchall()
+            if not rows:
+                return "확인 대기 중인 상표 출원인이 없어요."
+            out = ["*상표 출원인 확인 대기* — `출원인 승인 <브랜드>` · `출원인 제외 <브랜드>`"]
+            for b, ap, sc, ev in rows:
+                out.append(f"• *{b}* ← `{ap}` (점수 {sc})")
+                if ev:
+                    out.append(f"    ↳ {ev[:120]}")
+            return "\n".join(out)
+
+        if verb not in _APPROVE_VERBS and verb not in _REJECT_VERBS:
+            return ("`출원인` 목록 · `출원인 승인 <브랜드>` · `출원인 제외 <브랜드>`\n"
+                    "브랜드 하나에 후보가 여럿이면 `출원인 승인 <브랜드> <회사명>`")
+        if not _can_write():
+            return f"🔒 출원인 승인/제외는 관리자만 가능해요. (당신 ID: `{user_id}`)"
+        if not target:
+            return "브랜드명을 붙여주세요. 예) `출원인 승인 Dr.G`"
+
+        parts = target.split()
+        brand = parts[0]
+        co = " ".join(parts[1:]).strip()
+        rows = s.execute(_sql(
+            f"SELECT brand, applicant FROM {_S}.brand_applicants "
+            f"WHERE status = 'pending' AND lower(brand) = lower(:b)"), {"b": brand}).fetchall()
+        if not rows:
+            return f"`{brand}` 대기 건이 없어요. `출원인`으로 목록 확인하세요."
+        if len(rows) > 1 and not co:
+            names = " · ".join(f"`{r[1]}`" for r in rows)
+            return f"`{brand}` 후보가 여러 개예요 — 회사명을 붙여주세요.\n{names}"
+        pick = [r for r in rows if not co or co.lower() in r[1].lower()]
+        if not pick:
+            return f"`{brand}`에 `{co}` 후보가 없어요."
+        new = "active" if verb in _APPROVE_VERBS else "rejected"
+        n = 0
+        for b, ap in pick:
+            s.execute(_sql(
+                f"UPDATE {_S}.brand_applicants SET status = :st, source = 'slack', "
+                f"decided_at = NOW() WHERE brand = :b AND applicant = :a"),
+                {"st": new, "b": b, "a": ap})
+            n += 1
+        s.commit()
+        who = " · ".join(f"`{r[1]}`" for r in pick)
+        if new == "active":
+            return (f"✅ *{brand}* 출원인 {who} 등록({n}건).\n"
+                    f"_다음 상표 수집(월요일)부터 이 회사 출원을 모읍니다._")
+        return f"🚫 *{brand}* 출원인 {who} 제외({n}건)."
+    except Exception as e:
+        return f"⚠️ 출원인 처리 실패: {e}"
+    finally:
+        s.close()
+
+
 def _memory_command(text: str, user_id: str = ""):
     """사용자 기억 제어 — `기억`(조회) / `기억해 <내용>`(추가) / `잊어`·`기억 삭제 <키>`(삭제).
     본인 기억만 다루므로 관리자 권한 불필요. 명령이면 응답 문자열, 아니면 None."""
@@ -579,6 +659,11 @@ async def _handle(event: dict, client, in_thread: bool):
     _cmd = _brand_command(text, user)
     if _cmd is not None:
         await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=_cmd)
+        return
+
+    _acmd = _applicant_command(text, user)
+    if _acmd is not None:
+        await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=_acmd)
         return
 
     ph = await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text="🔎 조회 중…")

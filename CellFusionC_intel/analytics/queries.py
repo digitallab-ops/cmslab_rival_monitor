@@ -2013,9 +2013,59 @@ def get_google_spikes(session: Session, spike_ratio: float = 1.5,
     return out
 
 
+def get_intent_signals(session: Session, months: int = 18, limit: int = 20) -> dict:
+    """국내 상표 = **무엇을 만들려 하는지** 신호. 해외 상표(진출 신호)와 다른 축이다.
+
+    지정상품 명세가 붙어 있어 추측이 아니다 — 아누아가 10류(의료기기)로 낸 출원의
+    지정상품이 '고주파 온열치료기·피부치료용 레이저·셀룰라이트 치료용 장치'다.
+
+    반환: {brands: [{brand, filings, classes, device, latest, marks}]}
+    """
+    try:
+        rows = session.execute(text(f"""
+            SELECT f.brand,
+                   COUNT(DISTINCT f.app_number)                       AS filings,
+                   MAX(f.app_date)                                    AS latest,
+                   ARRAY_AGG(DISTINCT f.cls_code)                     AS classes,
+                   ARRAY_AGG(DISTINCT f.mark_name) FILTER (WHERE COALESCE(f.mark_name,'') <> '') AS marks,
+                   COUNT(g.*)                                         AS goods
+            FROM {DB_SCHEMA}.trademark_filings f
+            LEFT JOIN {DB_SCHEMA}.trademark_goods g
+                   ON g.country = 'KR' AND g.app_number = f.app_number
+            WHERE f.country = 'KR' AND f.app_date IS NOT NULL
+              AND f.app_date >= (CURRENT_DATE - make_interval(months => :m))
+            GROUP BY f.brand
+            ORDER BY filings DESC, latest DESC
+            LIMIT :lim
+        """), {"m": months, "lim": limit}).fetchall()
+    except Exception:
+        return {"brands": []}
+
+    import re as _re
+    out = []
+    for r in rows:
+        cls = set()
+        for c in (r[3] or []):
+            for tok in _re.findall(r"\d+", c or ""):
+                try:
+                    cls.add(int(tok))
+                except ValueError:
+                    pass
+        out.append({"brand": r[0], "filings": r[1] or 0,
+                    "latest": str(r[2]) if r[2] else None,
+                    "classes": sorted(cls),
+                    "device": bool(cls & {9, 10, 11}),   # 디바이스 진입 신호
+                    "marks": list(r[4] or [])[:12], "goods": r[5] or 0})
+    return {"brands": out}
+
+
 def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -> dict:
     """
     해외 상표 출원 = 진출 선행신호(KIPRIS). 자기출원(is_own)·화장품류(is_cosmetic)만.
+
+    **국내(KR)는 뺀다.** 국내 출원은 '진출'이 아니라 '무엇을 만들려는가' 신호라
+    성격이 다르다 — get_intent_signals()가 따로 본다. 섞으면 '해외 진출 건수'가
+    부풀고 점수(sub_trademark)까지 오염된다.
 
     trademark_filings 없으면 {feed:[], brands:[]}.
     반환: {feed:[{brand,country,mark,date}], brands:[{brand,country,recent,total,latest}]}
@@ -2025,6 +2075,7 @@ def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -
             SELECT brand, country, mark_name, app_date
             FROM {DB_SCHEMA}.trademark_filings
             WHERE is_own AND is_cosmetic AND app_date IS NOT NULL
+              AND country <> 'KR'
               AND app_date >= (CURRENT_DATE - make_interval(months => :m))
             ORDER BY app_date DESC LIMIT :lim2
         """), {"m": months, "lim2": limit * 3}).fetchall()
@@ -2033,7 +2084,7 @@ def get_trademark_signals(session: Session, months: int = 18, limit: int = 24) -
                    COUNT(*) FILTER (WHERE app_date >= (CURRENT_DATE - make_interval(months => :m))) recent,
                    COUNT(*) total, MAX(app_date) latest
             FROM {DB_SCHEMA}.trademark_filings
-            WHERE is_own AND is_cosmetic
+            WHERE is_own AND is_cosmetic AND country <> 'KR'
             GROUP BY brand, country
             HAVING MAX(app_date) IS NOT NULL
             ORDER BY recent DESC, latest DESC

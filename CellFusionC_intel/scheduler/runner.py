@@ -493,6 +493,52 @@ def job_trademark() -> None:
         logger.warning("해외상표 수집 스킵(KIPRIS_KEY/네트워크 확인): %s", e)
 
 
+def _notify_intent(stat: dict) -> None:
+    """국내 신규 출원 중 **디바이스·의약류**만 따로 알린다 — 사업 방향 전환 신호.
+
+    화장품(3류)은 늘 나오니 알리면 소음이다. 10류(의료기기)·9류(전자기기)는
+    그 브랜드가 하던 일과 다른 일을 시작한다는 뜻이라 크다 — 실측으로 아누아·
+    달바·메디큐브가 한 분기에 나란히 10류를 냈다.
+    """
+    rows = stat.get("device_new") or []
+    if not rows:
+        return
+    try:
+        from notifications.slack import _post, mention_prefix
+    except Exception as e:
+        logger.warning("슬랙 모듈 로드 실패: %s", e)
+        return
+    lines = [f"{mention_prefix()}*🔧 신규 국내 상표 — 디바이스·의약 영역 {len(rows)}건*",
+             "_지정상품 명세에 적힌 내용입니다. 추측이 아니라 출원인이 직접 쓴 문서예요._", ""]
+    for r in rows[:10]:
+        lines.append(f"• *{r['brand']}* {r['date']} {r['cls']}류 — {r['mark'] or '(도형상표)'}")
+        if r.get("goods"):
+            lines.append(f"    ↳ {', '.join(r['goods'][:6])}")
+    try:
+        _post({"text": "\n".join(lines)}, secondary=False)
+    except Exception as e:
+        logger.warning("국내상표 알림 실패: %s", e)
+
+
+def job_trademark_kr() -> None:
+    """KIPRIS 국내상표 + 지정상품 수집 (무엇을 만들려는가 신호). 주1회(월)."""
+    logger.info("=== [주간] KIPRIS 국내상표·지정상품 수집 시작 ===")
+    try:
+        from signals.trademark_kr import run as run_kr
+        r = run_kr()
+        logger.info("국내상표 완료: 브랜드 %d · 출원 %d(신규 %d) · 지정상품 %d · 확인대기 %d",
+                    r.get("brands", 0), r.get("filings", 0), r.get("new", 0),
+                    r.get("goods", 0), r.get("pending", 0))
+        if r.get("quota_exhausted"):
+            # 조용히 넘기면 '이 브랜드는 출원이 없구나'로 오해한다.
+            logger.warning("KIPRIS 일일 호출 한도 소진 — 남은 %d개 브랜드는 다음 회차: %s",
+                           len(r.get("not_reached") or []),
+                           ", ".join((r.get("not_reached") or [])[:12]))
+        _notify_intent(r)
+    except Exception as e:
+        logger.warning("국내상표 수집 스킵(KIPRIS_KEY/네트워크 확인): %s", e, exc_info=True)
+
+
 def job_score_snapshot() -> None:
     """브랜드 종합스코어·모멘텀·리테일 순위 주간 스냅샷 (시계열 추세용). 주1회."""
     logger.info("=== [주간] 브랜드 스코어 스냅샷 시작 ===")
@@ -886,6 +932,17 @@ def create_scheduler() -> BackgroundScheduler:
         trigger=CronTrigger(day=4, hour=6, minute=50),
         id="trademark",
         name="[월간] KIPRIS 해외상표 수집",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 매주 월 07:10 KST — KIPRIS 국내상표 + 지정상품('무엇을 만들려는가' 신호).
+    # 해외상표(월1회)보다 자주 본다 — 국내 출원이 해외보다 앞서기 때문이다.
+    scheduler.add_job(
+        job_trademark_kr,
+        trigger=CronTrigger(day_of_week="mon", hour=7, minute=10),
+        id="trademark_kr",
+        name="[주간] KIPRIS 국내상표·지정상품",
         max_instances=1,
         coalesce=True,
     )

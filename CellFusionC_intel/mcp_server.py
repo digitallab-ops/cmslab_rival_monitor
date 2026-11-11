@@ -18,7 +18,8 @@ from sqlalchemy import text
 
 from storage.models import get_session
 from config.settings import DB_SCHEMA
-from config.brands import TIER1_BRANDS, TIER2_BRANDS, BRAND_KO_NAMES, COUNTRIES
+from config.brands import (TIER1_BRANDS, TIER2_BRANDS, BRAND_KO_NAMES, COUNTRIES,
+                           canonical_brand)
 from analytics.queries import (
     get_brand_insights_raw,
     get_category_battle,
@@ -502,6 +503,49 @@ def get_trademark_signals_view(months: int = 18) -> dict:
         return {"available": True, "scope": "US·JP · 자기출원·화장품류",
                 "recent_filings": sig["feed"],
                 "by_brand": sig["brands"]}
+    finally:
+        s.close()
+
+
+@rival_mcp.tool()
+def get_brand_intent(brand: str = "", months: int = 18) -> dict:
+    """
+    국내 상표 출원 + **지정상품 명세** = 그 브랜드가 무엇을 만들려는지.
+
+    "아누아 뭐 준비해?", "요즘 디바이스 하려는 브랜드 있어?", "달바 다음 먹거리"
+    류 질문용. 지정상품은 **출원인이 직접 '이 상표를 어떤 상품에 쓰겠다'고 적은
+    문서**라 추측이 아니다 — 아누아가 10류로 낸 출원의 지정상품이 '고주파
+    온열치료기·피부치료용 레이저·셀룰라이트 치료용 장치'다.
+
+    상품류: 3=화장품 · 5=의약/기능성 · 9=전자기기 · 10=의료기기 · 11=가전 ·
+            21=미용도구 · 35=판매유통 · 44=미용/의료서비스.
+    9·10·11류가 보이면 **디바이스 진입** 신호다.
+    brand를 비우면 최근 움직임이 큰 브랜드들을 모아 준다.
+    한계: 국내 출원만. 출원인 확인이 끝난 브랜드만 모은다(확인 대기 중이면 비어 있다).
+    """
+    from analytics.queries import get_intent_signals
+    from analytics.trademark_read import goods_evidence, CLASS_LABEL
+    s = get_session()
+    try:
+        if brand:
+            canon = canonical_brand(brand) or brand
+            g = goods_evidence(s, canon, months=months)
+            if not g["n_goods"]:
+                return {"available": False, "brand": canon,
+                        "note": "이 브랜드의 국내 상표 지정상품이 아직 없음"
+                                "(출원인 확인 대기이거나 최근 출원 없음)."}
+            return {"available": True, "brand": canon,
+                    "filings": g["n_filings"], "goods_count": g["n_goods"],
+                    "classes": [f"{c}류 {CLASS_LABEL.get(c, '')}".strip() for c in g["classes"]],
+                    "device_signal": bool(set(g["classes"]) & {9, 10, 11}),
+                    "marks": g.get("marks", [])[:12],
+                    "designated_goods": g["lines"]}
+        sig = get_intent_signals(s, months=months)
+        if not sig["brands"]:
+            return {"available": False, "note": "국내 상표 데이터 없음(수집 전)."}
+        return {"available": True, "scope": "국내(KR) 상표 + 지정상품",
+                "brands": sig["brands"],
+                "device_movers": [b["brand"] for b in sig["brands"] if b["device"]]}
     finally:
         s.close()
 

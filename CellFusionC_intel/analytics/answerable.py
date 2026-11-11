@@ -117,6 +117,7 @@ def _probe(session) -> dict:
         f"count(*) FILTER (WHERE app_date > now() - interval '1 year') "
         f"FROM {S}.trademark_filings", (0, 0, 0))
     m["tm_countries"] = lst(f"SELECT DISTINCT country FROM {S}.trademark_filings WHERE country IS NOT NULL")
+    m["tm_goods"] = (one(f"SELECT count(*) FROM {S}.trademark_goods", (0,)) or (0,))[0]
     m["ingredients"] = one(f"SELECT count(*) FROM {S}.product_ingredients", (0,))
     # 주제별 보유 행수 — 확정 해제(_topic_backed) 판정에 쓴다.
     for key, tbl in (("tm_rows", "trademark_filings"), ("az_rows", "retail_rankings"),
@@ -216,9 +217,13 @@ def manifest_text(session=None) -> str:
         f"여기에 더해 네이버 컨센서스(추정 실적), NICE 업계 통계. 상장·공시 기업만이다.",
         f"7. 관세청 화장품 수출통계 — {ex[0]}~{ex[1]}, {ex[2]}개국. "
         f"품목(HS코드)·국가 단위이고 브랜드 단위가 아니다.",
-        f"8. 해외 상표출원(KIPRIS) — {tm[0]:,}건, 브랜드 {tm[1]}개, "
+        f"8. 상표출원(KIPRIS) — {tm[0]:,}건, 브랜드 {tm[1]}개, "
         f"최근 1년 {tm[2]}건. 출원국은 "
-        f"{', '.join(m.get('tm_countries') or []) or '미상'}. 진출 선행지표로 쓴다.",
+        f"{', '.join(m.get('tm_countries') or []) or '미상'}. "
+        f"해외(US·JP)는 진출 선행지표, 국내(KR)는 **무엇을 만들려는가** 신호다. "
+        f"국내 출원에는 지정상품 명세 {m.get('tm_goods', 0):,}줄이 붙어 있어 "
+        f"'어떤 제품에 쓰겠다고 적었는지'(예: 고주파 온열치료기·피부치료용 레이저)까지 "
+        f"답할 수 있다.",
         f"9. 제품 전성분 — {m.get('ingredients', (0,))[0]}개 제품.",
         f"10. 가격 — 기사에 가격이 적힌 {pc[0]:,}건({pc[0]/max(pc[1],1)*100:.0f}%)뿐. 전수 가격표는 없다.",
         "",
@@ -299,7 +304,7 @@ _METRIC_WORDS = ("몇", "얼마", "수치", "지표", "팔로워", "조회수", 
 # 않는다. 조회하면 아는 사실을 LLM 판정에 맡기면 흔들린다 — '경쟁사 상표 출원
 # 뭐 들어왔어?'가 714건을 갖고도 4회 중 3회 막혔다. 메디큐브 매출과 같은 패턴.
 _TOPIC_DATA = {
-    "trademark": (("상표", "출원", "trademark", "등록출원"), "tm_rows"),
+    "trademark": (("상표", "출원", "trademark", "등록출원", "지정상품", "상품류"), "tm_rows"),
     "amazon":    (("아마존", "amazon", "랭킹", "순위"), "az_rows"),
     "oliveyoung": (("올리브영", "올영", "oliveyoung"), "oy_rows"),
     "youtube":   (("유튜브", "youtube", "조회수", "버즈"), "yt_rows"),
