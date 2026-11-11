@@ -1143,7 +1143,9 @@ def _render_trademark(sig: dict) -> str:
     feed = (sig or {}).get("feed") or []
     brands = (sig or {}).get("brands") or []
     intent = (sig or {}).get("intent") or []
-    if not feed and not brands and not intent:
+    # next_bet까지 봐야 한다. 해외 피드가 비는 날에도 국내 신호만으로 결론이
+    # 서는데, 여기서 먼저 빠져나가면 그 결론이 통째로 사라진다.
+    if not feed and not brands and not intent and not (sig or {}).get("next_bet"):
         return ('<p class="no-data">상표 데이터 없음 '
                 '(KIPRIS 수집 전 · 해외 매월 4일 · 국내 매주 월요일 갱신)</p>')
 
@@ -1192,10 +1194,18 @@ def _render_trademark(sig: dict) -> str:
     # 실측인지 추측인지 구분할 수 없다 — 실제로 틀린 판독이 단정적으로 나갔었다.
     reads = (sig or {}).get("reads") or {}
     full = (sig or {}).get("reads_full") or {}
+    nb = (sig or {}).get("next_bet") or {}
+    acts = nb.get("actions") or {}
     _CONF = {"high": ("확실", "tm-conf-hi"), "medium": ("추정", "tm-conf-mid")}
     read_rows, unsure, routine = [], [], []
-    for b in brands:
-        bn = b["brand"]
+    # 판독 대상은 '해외 피드 브랜드'만이 아니다. 국내에만 출원한 브랜드를 빼면
+    # 국내 신호밖에 없는 곳(b.plain의 10류 의료기기 9종)이 화면에서 사라진다.
+    _iter, _seen_b = [(b["brand"], b.get("country")) for b in brands], {b["brand"] for b in brands}
+    for bn in list(reads) + list(full):
+        if bn not in _seen_b:
+            _seen_b.add(bn)
+            _iter.append((bn, "KR"))
+    for bn, _cc in _iter:
         rd = reads.get(bn)
         info = full.get(bn) or {}
         if not rd:
@@ -1206,14 +1216,18 @@ def _render_trademark(sig: dict) -> str:
             elif info.get("needs_check"):
                 unsure.append((bn, info))
             continue
-        flag = COUNTRY_FLAGS.get(b["country"], "🌐")
+        flag = COUNTRY_FLAGS.get(_cc, "🌐")
         lab, cls = _CONF.get(info.get("confidence") or "", ("", ""))
         badge = f'<span class="tm-conf {cls}">{lab}</span>' if lab else ""
         basis = info.get("basis") or info.get("basis_kind") or ""
         basis_html = f'<span class="tm-basis">근거: {_esc(basis[:60])}</span>' if basis else ""
+        # '뭘 만들려 하나'에서 끊으면 받는 사람이 "그래서?"를 스스로 메워야 한다.
+        act = acts.get(bn)
+        act_html = (f'<div class="tm-act"><span class="tm-act-k">→ 우리는</span>'
+                    f'{_esc(act)}</div>') if act else ""
         read_rows.append(
             f'<div class="tm-read"><span class="tm-read-brand">{flag} {_esc(_tbko(bn))}</span>'
-            f'<span class="tm-read-txt">{badge}{_esc(rd)}{basis_html}</span></div>')
+            f'<span class="tm-read-txt">{badge}{_esc(rd)}{basis_html}{act_html}</span></div>')
     # 모르는 건 조용히 빼지 않는다 — 안 보이면 없는 것이나 마찬가지다.
     if unsure:
         items = []
@@ -1234,6 +1248,39 @@ def _render_trademark(sig: dict) -> str:
     reads_html = (f'<div class="tm-reads"><div class="tm-reads-h">🔮 상표 판독 — 평소와 다른 움직임</div>'
                   f'{"".join(read_rows)}</div>') if read_rows else ""
 
+    # ── 다음 먹거리 — 한 곳이 아니라 **여러 곳이 같은 쪽으로** 움직일 때가 신호다.
+    # 분모(수집이 끝난 브랜드 수)를 반드시 같이 적는다. 국내 상표는 아직 전수
+    # 수집 중이라 '7곳'만 쓰면 전체 58곳 중 7곳으로 읽힌다.
+    nb_html = ""
+    conv = nb.get("converge") or {}
+    bet = nb.get("bet") or {}
+    if conv.get("axes"):
+        ncol = conv.get("n_collected") or 0
+        ax_rows = []
+        for a in conv["axes"]:
+            if a["n"] < 1:
+                continue
+            hot = " nb-hot" if a["n"] >= 3 else ""
+            bs = " · ".join(_esc(_tbko(x)) for x in a["brands"])
+            ax_rows.append(
+                f'<div class="nb-ax{hot}"><div class="nb-axh"><b>{_esc(a["name"])}</b>'
+                f'<span class="nb-cnt">{ncol}곳 중 <b>{a["n"]}곳</b></span>'
+                f'<span class="nb-cls">{_esc(" · ".join(str(c) + "류" for c in a["classes"]))}</span></div>'
+                f'<div class="nb-axb">{bs}</div>'
+                f'<div class="nb-axd">{_esc(a["desc"])}</div></div>')
+        watch = "".join(f'<span class="nb-w">{_esc(w)}</span>' for w in (bet.get("watch") or []))
+        nb_html = (
+            '<div class="nb-wrap"><div class="nb-h">🎯 다음 먹거리 — 경쟁사들이 어디로 몰리나</div>'
+            + (f'<div class="nb-head">{_esc(bet["headline"])}</div>' if bet.get("headline") else "")
+            + (f'<div class="nb-body">{_esc(bet["body"])}</div>' if bet.get("body") else "")
+            + (f'<div class="nb-watchl"><b>지금 확인해볼 것</b>{watch}</div>' if watch else "")
+            + "".join(ax_rows)
+            + f'<div class="nb-note">※ 류(類)는 특허청 상품분류입니다. '
+              f'<b>3류(화장품)·35류(판매업)는 뺐습니다</b> — 화장품 회사면 다 내는 것이라 '
+              f'방향을 말해주지 않습니다. 분모 <b>{ncol}곳</b>은 국내 상표 수집이 '
+              f'<b>끝난</b> 브랜드 수입니다(전수 수집 진행 중이라 매일 늘어납니다).</div>'
+            '</div>')
+
     # 최근 출원 피드
     rows = []
     for f in feed:
@@ -1248,7 +1295,7 @@ def _render_trademark(sig: dict) -> str:
             f'<span class="tm-mark">{_esc(f["mark"] or "")}{ingr_html}</span>'
             f'</div>'
         )
-    return (intent_html + chips_html + reads_html
+    return (nb_html + intent_html + chips_html + reads_html
             + '<div class="tm-list">' + "".join(rows) + '</div>')
 
 
@@ -2630,6 +2677,34 @@ a:hover { color: var(--gold); }
 .tm-unsure-i { font-size: 11.5px; }
 .tm-unsure-i b { color: var(--mid); }
 .tm-routine { opacity: .72; }
+.tm-act { margin-top: 3px; font-size: 12.5px; color: var(--hi); }
+.tm-act-k { display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 4px;
+  font-size: 10.5px; font-weight: 800; vertical-align: 1px;
+  background: color-mix(in srgb, var(--good) 20%, transparent); color: var(--good); }
+/* 다음 먹거리 — 여러 경쟁사가 같은 쪽으로 움직일 때만 올라오는 블록 */
+.nb-wrap { margin: 4px 0 14px; padding: 13px 15px; border-radius: 10px;
+  background: color-mix(in srgb, var(--good) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--good) 26%, transparent);
+  border-left: 3px solid var(--good); }
+.nb-h { font-size: 13px; font-weight: 800; color: var(--good); }
+.nb-head { font-size: 15px; font-weight: 800; color: var(--hi); margin: 7px 0 5px; }
+.nb-body { font-size: 13px; color: var(--mid); line-height: 1.65; }
+.nb-watchl { margin: 9px 0 4px; font-size: 12px; color: var(--lo);
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.nb-w { background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  color: var(--hi); border-radius: 20px; padding: 2px 10px; font-size: 11.5px; }
+.nb-ax { margin-top: 8px; padding: 7px 0 0; border-top: 1px solid var(--border); }
+.nb-axh { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 13px; }
+.nb-axh b { color: var(--hi); }
+.nb-hot .nb-axh b { color: var(--good); }
+.nb-cnt { font-size: 12px; color: var(--lo); font-variant-numeric: tabular-nums; }
+.nb-cnt b { color: var(--good); }
+.nb-cls { font-size: 11px; color: var(--lo); }
+.nb-axb { font-size: 12px; color: var(--mid); margin-top: 2px; }
+.nb-axd { font-size: 11.5px; color: var(--lo); margin-top: 1px; }
+.nb-note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border);
+  font-size: 11px; color: var(--lo); line-height: 1.6; }
 .in-wrap { margin: 4px 0 14px; padding: 12px 14px; border-radius: 10px;
            background: color-mix(in srgb, var(--champ) 6%, transparent);
            border: 1px solid color-mix(in srgb, var(--champ) 22%, transparent); }
@@ -6728,6 +6803,21 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                     for _f in (trademark_sig.get("feed") or []):
                         if _f.get("mark"):
                             _bm.setdefault(_f["brand"], []).append(_f["mark"])
+                # marks_by_brand는 **해외 출원**에서만 만들어진다. 국내에만 낸
+                # 브랜드는 여기 없어서 판독 자체를 건너뛴다 — 실측으로 b.plain이
+                # 10류(의료기기) 9종을 냈는데도 화면에 한 줄도 안 나왔다.
+                # 백필이 58개로 늘면 그만큼 더 샌다. 국내 쪽을 보태 둔다.
+                try:
+                    from analytics.next_bet import collected_brands as _cb
+                    from analytics.trademark_read import goods_evidence as _ge2
+                    for _kb in _cb(insight_session):
+                        if _kb in _bm:
+                            continue
+                        _kg = _ge2(insight_session, _kb)
+                        if _kg["lines"] and _kg["marks"]:
+                            _bm[_kb] = _kg["marks"][:12]
+                except Exception as _ke:
+                    logger.warning("국내 전용 브랜드 판독 대상 추가 실패: %s", _ke)
                 # 근거(국내 지정상품·뉴스·검색)를 먼저 모아 읽는다. 상표명만 보고
                 # 물으면 모르는 걸 지어낸다 — 'DAILY ANTI-CIPATION'을 안티에이징으로
                 # 읽은 사고가 그래서 났다. 새 경로가 안 되면 옛 경로로 떨어진다.
@@ -6751,6 +6841,29 @@ def generate_report(output_path: str = "rival_report.html", days: int = 30) -> s
                                           "top_act": None, "top_pct": 0, "high_pct": 0.0})
         except Exception as _e:
             logger.warning("상표 판독 생성 스킵: %s", _e)
+        # 다음 먹거리(하루 1회 캐시) — 판독을 '우리 대응'과 '어디로 몰리나'로 잇는다.
+        # 집계(몇 곳이 어느 류로)는 코드가 세고, LLM은 문장만 쓴다. 숫자를 모델에
+        # 맡기면 틀려도 확인할 길이 없다.
+        try:
+            _nb_cached = get_digest_cache(insight_session, "__NEXT_BET__")
+            if _nb_cached:
+                trademark_sig["next_bet"] = json.loads(_nb_cached)
+            else:
+                from analytics.next_bet import build as _nb_build
+                _nb_labels = {b: (BRAND_KO_NAMES.get(b)[0]
+                                  if isinstance(BRAND_KO_NAMES.get(b), list) and BRAND_KO_NAMES.get(b)
+                                  else (BRAND_KO_NAMES.get(b) or b)) for b in BRAND_KO_NAMES}
+                _nb = _nb_build(insight_session,
+                                reads=trademark_sig.get("reads_full") or {},
+                                labels=_nb_labels)
+                if _nb:
+                    trademark_sig["next_bet"] = _nb
+                    upsert_insight_cache(insight_session, "__NEXT_BET__",
+                                         datetime.utcnow() - timedelta(days=1), datetime.utcnow(),
+                                         {"summary": json.dumps(_nb, ensure_ascii=False),
+                                          "top_act": None, "top_pct": 0, "high_pct": 0.0})
+        except Exception as _e:
+            logger.warning("다음 먹거리 생성 스킵: %s", _e)
         # 브리핑 탭(재설계) — 나라별 전략 해석·왜 잘나가나·브랜드 종합·주간 총평 생성/캐시
         try:
             _bf_to = datetime.utcnow().date().isoformat()
