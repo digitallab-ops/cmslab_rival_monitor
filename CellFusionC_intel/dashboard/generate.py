@@ -1262,10 +1262,21 @@ def _render_trademark(sig: dict) -> str:
                 continue
             hot = " nb-hot" if a["n"] >= 3 else ""
             bs = " · ".join(_esc(_tbko(x)) for x in a["brands"])
+            # 디바이스 축만 드릴인을 건다. 다른 축은 경쟁사 탭에 대응하는
+            # 필터가 없어서 눌러도 갈 곳이 없다 — 눌리는 것처럼 보이게만
+            # 해두면 누른 사람이 고장으로 읽는다.
+            _drill = a.get("key") == "device"
+            _open = ((''' class="nb-ax%s nb-drill" role="button" tabindex="0"'''
+                      ''' onclick="nbToDevice()"'''
+                      ''' onkeydown="if(event.key==='Enter')nbToDevice()"''')
+                     % hot) if _drill else f' class="nb-ax{hot}"'
+            _cue = ('<span class="nb-go">경쟁사에서 디바이스만 보기 ›</span>'
+                    if _drill else '')
             ax_rows.append(
-                f'<div class="nb-ax{hot}"><div class="nb-axh"><b>{_esc(a["name"])}</b>'
+                f'<div{_open}><div class="nb-axh"><b>{_esc(a["name"])}</b>'
                 f'<span class="nb-cnt">{ncol}곳 중 <b>{a["n"]}곳</b></span>'
-                f'<span class="nb-cls">{_esc(" · ".join(str(c) + "류" for c in a["classes"]))}</span></div>'
+                f'<span class="nb-cls">{_esc(" · ".join(str(c) + "류" for c in a["classes"]))}</span>'
+                f'{_cue}</div>'
                 f'<div class="nb-axb">{bs}</div>'
                 f'<div class="nb-axd">{_esc(a["desc"])}</div></div>')
         watch = "".join(f'<span class="nb-w">{_esc(w)}</span>' for w in (bet.get("watch") or []))
@@ -2702,6 +2713,10 @@ a:hover { color: var(--gold); }
 .nb-cnt b { color: var(--good); }
 .nb-cls { font-size: 11px; color: var(--lo); }
 .nb-axb { font-size: 12px; color: var(--mid); margin-top: 2px; }
+.nb-drill { cursor: pointer; border-radius: 8px; margin-left: -8px; margin-right: -8px;
+  padding-left: 8px; padding-right: 8px; transition: background .12s; }
+.nb-drill:hover, .nb-drill:focus-visible { background: color-mix(in srgb, var(--good) 9%, transparent); }
+.nb-go { font-size: 11.5px; color: var(--good); font-weight: 700; margin-left: auto; white-space: nowrap; }
 .nb-axd { font-size: 11.5px; color: var(--lo); margin-top: 1px; }
 .nb-note { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border);
   font-size: 11px; color: var(--lo); line-height: 1.6; }
@@ -4500,6 +4515,12 @@ _CX_SHELL = """<div id="cxtab">
     <button class="cx-sbtn" data-k="google">해외검색</button>
     <button class="cx-sbtn" data-k="demand">국내검색</button>
   </div>
+  <div class="cx-segbar"><span class="cx-lbl">사업 구분</span>
+    <button class="cx-gbtn on" data-g="all">전체</button>
+    <button class="cx-gbtn" data-g="skincare">스킨케어</button>
+    <button class="cx-gbtn" data-g="device">디바이스</button>
+    <span class="cx-ghint" id="cx-ghint"></span>
+  </div>
   <div class="cx-board">
     <div class="cx-bhead"><span>순위</span><span>브랜드</span><span>종합 요약</span><span class="cx-r">성장세</span><span></span></div>
     <div id="cx-rows"></div>
@@ -4516,6 +4537,20 @@ _CX_SHELL = """<div id="cxtab">
   <div id="cx-detail"><div class="cx-empty">브랜드 행을 클릭하면 “왜 이 점수·이 순위인지” 상세가 열립니다.</div></div>
 </div>"""
 
+_CX_SEG_STYLE = """<style>
+#cxtab .cx-segbar{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:9px 0 2px}
+#cxtab .cx-gbtn{background:var(--surface-2);border:1px solid var(--baseline);color:var(--text-secondary);
+  border-radius:999px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;transition:all .12s}
+#cxtab .cx-gbtn:hover{border-color:var(--blue);color:var(--text-primary)}
+#cxtab .cx-gbtn.on{background:color-mix(in srgb, var(--blue) 18%, transparent);
+  border-color:var(--blue);color:var(--text-primary)}
+#cxtab .cx-ghint{font-size:11.5px;color:var(--text-muted);margin-left:4px;line-height:1.5}
+#cxtab .cx-ghint b{color:var(--text-secondary);font-weight:700}
+#cxtab .cx-summ.cx-pend{color:var(--text-muted);font-style:italic}
+#cxtab .cx-empty{padding:18px 16px;font-size:13px;color:var(--text-secondary);line-height:1.7}
+#cxtab .cx-empty b{color:var(--text-primary)}
+</style>"""
+
 _CX_SCRIPT = r"""<script>
 (function(){
   var AX=window.CX_AX, DATA=window.CX_DATA||{};
@@ -4524,7 +4559,15 @@ _CX_SCRIPT = r"""<script>
     latent:{lab:"숨은 수요",c:"var(--warning)",bg:"color-mix(in srgb, var(--warning) 16%, transparent)",desc:"검색이 기사보다 먼저 늚"},
     pr:{lab:"홍보 위주",c:"var(--critical)",bg:"color-mix(in srgb, var(--critical) 16%, transparent)",desc:"기사만 늘고 검색은 그대로"},
     stable:{lab:"조용함",c:"var(--text-secondary)",bg:"color-mix(in srgb, var(--text-secondary) 14%, transparent)",desc:"큰 변화 없음"}};
-  var curSort="attn", sel=null;
+  var curSort="attn", curSeg="all", sel=null;
+  // 겸업(both)은 스킨케어·디바이스 양쪽에 모두 나온다. 메디큐브는 스킨케어
+  // 경쟁사이면서 동시에 기기 경쟁사다 — 한쪽에만 넣으면 어느 쪽을 보든 빠진다.
+  function segOK(b){
+    if(curSeg==="all") return true;
+    var g=b.seg||"skincare";
+    return g===curSeg || g==="both";
+  }
+  function segList(){return B.filter(segOK);}
   var GEO_KO={US:"미국",USA:"미국",JP:"일본",CN:"중국",EU:"유럽",KR:"한국",GB:"영국",VN:"베트남"};
   function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
   function tmGeoShort(b){
@@ -4567,7 +4610,14 @@ _CX_SCRIPT = r"""<script>
     var i=t.search(/[.。]\s/); if(i>0&&i<120) t=t.slice(0,i+1);
     return t.slice(0,120);
   }
-  function summaryLine(b){ return firstSent(b.synth||b.headline)|| (esc(b.n)+" 최근 신호"); }
+  // 기사가 한 건도 없는 브랜드는 '조용한 것'이 아니라 '아직 안 걷힌 것'이다.
+  // 둘을 같은 빈칸으로 두면 보는 사람이 "이 브랜드는 잠잠하구나"로 읽는다 —
+  // 전업 디바이스 9곳이 실제로 그런 상태였다. 말해주는 편이 낫다.
+  function notYet(b){ return !(b.recent4w>0) && !b.synth && !b.headline; }
+  function summaryLine(b){
+    if(notYet(b)) return "아직 기사가 수집되지 않았습니다 — 주간 풀스캔 대기";
+    return firstSent(b.synth||b.headline)|| (esc(b.n)+" 최근 신호");
+  }
   function fmtMd(t){ return esc(t||"").replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/\n/g,"<br>"); }
   function fmtMdB(t){ return esc(t||"").replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/(^|\n)\s*[-•]\s*/g,"$1• ").replace(/\n/g,"<br>"); }
   function productsHTML(b){
@@ -4585,16 +4635,31 @@ _CX_SCRIPT = r"""<script>
     else if(b.mult<=0.8)p.push("<b>성장세 둔화</b>");
     if(b.gt)p.push("해외("+esc(b.gt.geo)+") 검색 급등");
     if(b.verdict)p.push(vinfo(b.verdict).lab);
+    if(notYet(b)) return "<b>아직 기사가 수집되지 않았습니다.</b> 점수는 유튜브·상표 등 "
+      + "뉴스 밖 신호로만 매겨진 값이라 낮게 보입니다 — 조용하다는 뜻이 아닙니다.";
     return p.join(" · ")||(esc(b.n)+"의 최근 신호 요약");
   }
   function render(){
-    var arr=B.slice().sort(function(a,b){return keyOf(b,curSort)-keyOf(a,curSort);});
+    var arr=segList().sort(function(a,b){return keyOf(b,curSort)-keyOf(a,curSort);});
+    var hint=document.getElementById("cx-ghint");
+    if(hint){
+      var nb=B.filter(function(x){return (x.seg||"skincare")==="both";}).length;
+      hint.innerHTML = curSeg==="all"
+        ? "전체 <b>"+B.length+"곳</b>"
+        : "<b>"+arr.length+"곳</b>" + (nb?" (스킨케어·디바이스 겸업 "+nb+"곳 포함)":"");
+    }
+    if(!arr.length){
+      document.getElementById("cx-rows").innerHTML=
+        '<div class="cx-empty">이 구분에 <b>표시할 브랜드가 없습니다.</b><br>'
+        +'등록은 돼 있으나 아직 기사가 쌓이지 않았으면 순위에 오르지 않습니다.</div>';
+      return;
+    }
     document.getElementById("cx-rows").innerHTML=arr.map(function(b,i){
       var rank=i+1;
       return '<div class="cx-lrow" data-n="'+esc(b.n)+'">'
         +'<div class="cx-rank"><span class="cx-rnum '+(rank===1?"top":"")+'">'+rank+'</span></div>'
         +'<div><span class="cx-bname">'+esc(b.n)+'</span>'+(b.tier===1?'<span class="cx-btier">★1군</span>':'')+'</div>'
-        +'<div class="cx-summ">'+esc(summaryLine(b))+'</div>'
+        +'<div class="cx-summ'+(notYet(b)?" cx-pend":"")+'">'+esc(summaryLine(b))+'</div>'
         +'<div class="cx-mo '+moClass(b.mult)+'">'+moArrow(b.mult)+' '+b.mult.toFixed(1)+'배</div>'
         +'<div class="cx-chev">›</div></div>';
     }).join("");
@@ -4608,7 +4673,8 @@ _CX_SCRIPT = r"""<script>
     sel=name;
     var b=null; for(var i=0;i<B.length;i++){if(B[i].n===name){b=B[i];break;}}
     if(!b)return;
-    var arr=B.slice().sort(function(a,c){return keyOf(c,curSort)-keyOf(a,curSort);});
+    // 목록에서 본 순위와 상세의 순위가 달라지면 안 된다 — 같은 필터로 센다.
+    var arr=segList().sort(function(a,c){return keyOf(c,curSort)-keyOf(a,curSort);});
     var rank=0; for(var j=0;j<arr.length;j++){if(arr[j].n===name){rank=j+1;break;}}
     var v=vinfo(b.verdict);
     var evParts=[];
@@ -4657,6 +4723,18 @@ _CX_SCRIPT = r"""<script>
         btn.classList.add("on"); curSort=btn.getAttribute("data-k"); render();
       });
     });
+    var gbt=document.querySelectorAll("#cxtab .cx-gbtn");
+    Array.prototype.forEach.call(gbt,function(btn){
+      btn.addEventListener("click",function(){
+        Array.prototype.forEach.call(gbt,function(x){x.classList.remove("on");});
+        btn.classList.add("on"); curSeg=btn.getAttribute("data-g"); sel=null; render();
+      });
+    });
+    window.cxFilterSegment=function(g){            // 다음 먹거리에서 드릴인으로 부른다
+      Array.prototype.forEach.call(gbt,function(x){
+        x.classList.toggle("on", x.getAttribute("data-g")===g);});
+      curSeg=g; sel=null; render();
+    };
     render();
   }
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);
@@ -4698,7 +4776,7 @@ def _parse_insight_sections(strategy: str):
 
 def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
                               negative_signals, trademark_sig, brand_insights, score_trend,
-                              brand_products=None):
+                              brand_products=None, segments=None):
     """경쟁사 드릴인용 — 브랜드별 신호를 하나로 병합해 JSON 문자열로. (데이터 로직 변경 없음)"""
     radar = {r["brand"]: r for r in (brand_radar or [])}
     demand = {d["brand"]: d for d in (demand_tri or [])}
@@ -4782,6 +4860,9 @@ def _build_competitor_dossier(composite, brand_radar, demand_tri, search_spikes,
             "synth": synth,
             "arts": arts,
             "products": (brand_products or {}).get(b, {"global": [], "domestic": []}),
+            # 사업 구분. 값이 없으면 스킨케어로 본다 — '구분 없음' 칸을 만들면
+            # 거기에 대부분이 쌓여 필터가 무의미해진다.
+            "seg": (segments or {}).get(b, "skincare"),
         }
     return json.dumps(out, ensure_ascii=False)
 
@@ -4792,7 +4873,7 @@ def _render_competitor_tab(dossier_json: str, basis_text: str,
     ax_js = ",".join(
         "{k:'%s',n:'%s',sp:'%s',c:'%s',w:%d}" % (k, n, sp, c, w)
         for (k, n, sp, c, w) in _CX_AX)
-    return (_CX_STYLE
+    return (_CX_STYLE + _CX_SEG_STYLE
             + _CX_SHELL.replace("__BASIS__", html_lib.escape(basis_text))
                        .replace("__CADENCE__", html_lib.escape(cadence_text))
             + "<script>window.CX_DATA=" + dossier_json
@@ -5304,9 +5385,22 @@ def _build_full_html(
     ) or '<div class="mk-row"><div class="why" style="padding:10px">수출 데이터 축적 중 (관세청 수집 후)</div></div>'
     insights_script   = _build_insights_script(brand_insights)
     # 경쟁사 탭 — 근거형 리더보드 + 드릴인(브랜드 신호 병합 JSON)
+    try:
+        # 이 함수엔 세션이 안 넘어온다. 브랜드 58행짜리 단발 조회라 여기서
+        # 열고 닫는다 — 안 그러면 조용히 실패해 전부 '스킨케어'로 떨어진다.
+        from analytics.queries import brand_segments as _bsg
+        _sg_sess = get_session()
+        try:
+            _segments = _bsg(_sg_sess)
+        finally:
+            _sg_sess.close()
+    except Exception as _se:
+        logger.warning("브랜드 사업구분 조회 실패 — 필터는 전체만 보입니다: %s", _se)
+        _segments = {}
     competitor_json     = _build_competitor_dossier(
         composite, brand_radar, demand_tri, search_spikes,
-        negative_signals, trademark_sig, brand_insights, score_trend, brand_products)
+        negative_signals, trademark_sig, brand_insights, score_trend, brand_products,
+        segments=_segments)
     competitor_tab_html = _render_competitor_tab(
         competitor_json,
         f"{_bden(28)} ~ {_bt} (최근 4주) 기준 · 기사·네이버검색·구글검색·아마존·올리브영·매출·상표 "
@@ -6079,6 +6173,15 @@ function toggleStrat(id) {{
   var btn = el.nextElementSibling;
   if (btn && btn.classList.contains('insight-more')) btn.textContent = exp ? '접기 ▴' : '더보기 ▾';
 }}
+function nbToDevice() {{
+  // 경쟁사 탭으로 옮긴 뒤 디바이스 필터를 건다. 탭을 먼저 켜야 숨은 패널에
+  // 대고 그리지 않는다.
+  switchTab('brands');
+  if (window.cxFilterSegment) {{ window.cxFilterSegment('device'); }}
+  var el = document.getElementById('cxtab');
+  if (el && el.scrollIntoView) {{ el.scrollIntoView({{behavior: 'smooth', block: 'start'}}); }}
+}}
+
 function switchTab(name) {{
   document.querySelectorAll('.tab-btn').forEach(function(b) {{
     b.classList.toggle('active', b.dataset.tab === name);

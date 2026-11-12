@@ -2,8 +2,9 @@
 APScheduler 스케줄
 
 - Tier1 브랜드 × Tier1 국가: 매일 18:00 KST (업무시간 이후 — 피크 16시 이후 수집)
-- 전체 브랜드 × 전체 국가: 매주 월요일 20:00 KST (주간 풀스캔)
-- 주간 모멘텀 계산: 매주 화요일 06:00 KST (월요일 밤 풀스캔 뒤)
+- 전체 브랜드 × 전체 국가: 매주 월·화·수 20:00 KST (풀스캔 3등분 — 하룻밤에
+  다 못 돌아서 나눴다. 브랜드별 커버리지는 그대로 주 1회)
+- 주간 모멘텀 계산: 매주 목요일 06:00 KST (수요일 밤에 풀스캔이 다 끝난 뒤)
 - 주간 중복 정리: 매주 일요일 19:00 KST
 (Render는 유료플랜 상시가동 — keep-alive 핑 불필요, 제거됨)
 """
@@ -195,8 +196,32 @@ def job_daily_tier1() -> None:
     _run_collection("일별 Tier1", tier1, TIER1_COUNTRIES, deep_query=False)
 
 
-def job_weekly_full() -> None:
-    """전체 브랜드 × 전체 국가 — 주간 풀스캔."""
+FULLSCAN_CHUNKS = 3      # 풀스캔을 몇 밤에 나눠 돌 것인가 (월·화·수)
+
+
+def _fullscan_chunk(brands: list[str], chunk: int | None) -> list[str]:
+    """브랜드를 요일 조각으로 가른다.
+
+    왜 나누나: 한 번에 58곳×27국을 돌면 하룻밤에 못 끝난다. 실측으로 35곳에
+    8시간이 걸렸고, 58곳짜리 11-09 회차는 45시간을 돌다 재시작에 죽었다.
+    설정을 바꾸면 재시작은 필수라 이 사고는 반복된다. 끝까지 못 가면 **뒤쪽
+    브랜드가 통째로 안 걷힌다** — 디바이스 9곳이 실제로 기사 0건이었다.
+
+    왜 순번(i%n)이 아니라 crc32인가: 순번으로 가르면 브랜드를 하나 추가할
+    때마다 그 뒤 전체가 다른 요일로 밀린다. 슬랙 승인으로 브랜드가 계속
+    느는 구조라 재배치가 잦다. crc32는 이름만 보므로 **목록이 바뀌어도 그
+    브랜드의 요일은 그대로**다. 대신 균등하진 않다(58곳 기준 25/20/13) —
+    가장 큰 조각도 25곳이라 하룻밤에 끝난다.
+    """
+    if chunk is None:
+        return brands
+    import zlib
+    return [b for b in brands
+            if zlib.crc32(b.encode("utf-8")) % FULLSCAN_CHUNKS == chunk]
+
+
+def job_weekly_full(chunk: int | None = None) -> None:
+    """전체 브랜드 × 전체 국가 — 주간 풀스캔(요일별 조각)."""
     all_countries = list(COUNTRIES.keys())
     try:
         from sqlalchemy import text
@@ -211,9 +236,16 @@ def job_weekly_full() -> None:
         all_active = [r[0] for r in rows] or ALL_BRANDS
     except Exception:
         all_active = ALL_BRANDS
-    logger.info("=== [주간] 전체 수집 시작 (브랜드 %d개 x 국가 %d개) ===",
-                len(all_active), len(all_countries))
-    _run_collection("주간 풀스캔", all_active, all_countries, deep_query=True)
+
+    total = len(all_active)
+    targets = _fullscan_chunk(all_active, chunk)
+    label = "주간 풀스캔" if chunk is None else f"주간 풀스캔 {chunk + 1}/{FULLSCAN_CHUNKS}"
+    if not targets:
+        logger.warning("=== [%s] 대상 브랜드가 없습니다 (전체 %d곳) ===", label, total)
+        return
+    logger.info("=== [%s] 수집 시작 (브랜드 %d개/전체 %d개 x 국가 %d개) ===",
+                label, len(targets), total, len(all_countries))
+    _run_collection(label, targets, all_countries, deep_query=True)
 
 
 TIER_CHANGE_COOLDOWN_DAYS = 14   # 최근 변경 후 이 기간 내 재변경 금지 (플립플롭 방지)
@@ -829,23 +861,29 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # 매주 월요일 20:00 KST (일별 수집 완료 후 풀스캔)
-    scheduler.add_job(
-        job_weekly_full,
-        trigger=CronTrigger(day_of_week="mon", hour=20, minute=0),
-        id="weekly_full",
-        name="[주간] 전체 브랜드x국가 풀스캔",
-        max_instances=1,
-        coalesce=True,
-    )
+    # 풀스캔을 월·화·수 20:00 세 밤으로 나눈다. 한 번에 다 돌면 하룻밤에
+    # 못 끝나고, 재시작(설정 변경 시 필수)에 죽으면 뒤쪽 브랜드가 통째로
+    # 안 걷힌다 — 실제로 디바이스 9곳이 기사 0건이었다. 조각마다 20곳
+    # 안팎이라 자정 전후로 끝난다. 커버리지는 그대로 '주 1회'다.
+    for _c, _dow in enumerate(("mon", "tue", "wed")):
+        scheduler.add_job(
+            job_weekly_full,
+            trigger=CronTrigger(day_of_week=_dow, hour=20, minute=0),
+            id=f"weekly_full_{_c}",
+            name=f"[주간] 브랜드x국가 풀스캔 {_c + 1}/{FULLSCAN_CHUNKS}",
+            kwargs={"chunk": _c},
+            max_instances=1,
+            coalesce=True,
+        )
 
-    # 매주 화요일 06:00 KST — 모멘텀 계산 + 티어 승급/강등.
-    # 월 19시(풀스캔 20시 '전')에 돌던 것을 뒤로 옮겼다. 풀스캔 전에 계산하면 그 주에
-    # 모은 데이터가 항상 다음 주에나 티어에 반영돼 판정이 일주일씩 밀렸다.
-    # 화 06시면 월요일 밤 풀스캔이 끝난 뒤이고 화 08시 아침 브리핑보다는 앞선다.
+    # 매주 목요일 06:00 KST — 모멘텀 계산 + 티어 승급/강등.
+    # 원칙은 "풀스캔이 끝난 뒤에 계산한다"이다. 풀스캔 전에 계산하면 그 주에
+    # 모은 데이터가 다음 주에나 티어에 반영돼 판정이 일주일씩 밀린다.
+    # 풀스캔을 월·화·수 세 밤으로 나눴으니 그 기준점도 화→목으로 옮긴다.
+    # 화요일에 두면 월요일 조각 하나만 보고 티어를 올리고 내리게 된다.
     scheduler.add_job(
         job_weekly_momentum,
-        trigger=CronTrigger(day_of_week="tue", hour=6, minute=0),
+        trigger=CronTrigger(day_of_week="thu", hour=6, minute=0),
         id="weekly_momentum",
         name="[주간] 브랜드 모멘텀 계산",
         max_instances=1,
@@ -874,11 +912,12 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    # 화요일 09:20 KST — 디바이스 진출 감시. 월요일 밤 풀스캔(Tier2 포함)이 끝난
-    # 뒤라야 스킨케어 브랜드의 기기 출시 기사가 들어와 있다.
+    # 목요일 09:20 KST — 디바이스 진출 감시. 풀스캔(Tier2 포함)이 전부 끝난
+    # 뒤라야 스킨케어 브랜드의 기기 출시 기사가 들어와 있다. 풀스캔이 월·화·수
+    # 세 밤으로 나뉘었으므로 화요일에 두면 3분의 1만 보고 판단하게 된다.
     scheduler.add_job(
         job_device_watch,
-        trigger=CronTrigger(day_of_week="tue", hour=9, minute=20),
+        trigger=CronTrigger(day_of_week="thu", hour=9, minute=20),
         id="device_watch",
         name="[주간] 디바이스 진출 감시",
         max_instances=1,

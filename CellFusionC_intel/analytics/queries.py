@@ -3841,3 +3841,26 @@ def get_shelf_position(session: Session, days: int = 30) -> dict:
                 sugg.append({"category": cat, "brand": n, "days": d, "avg": a, "best": b})
     sugg.sort(key=lambda x: (x["avg"], -x["days"]))
     return {"categories": out, "suggestions": sugg}
+
+
+def brand_segments(session) -> dict:
+    """브랜드 → 사업 구분('skincare' / 'device' / 'both').
+
+    자사 디바이스 사업에 맞춰 경쟁사를 세 갈래로 본다. 전업 디바이스는
+    소비자가 보는 브랜드명으로 등록돼 있다(클래시스가 아니라 스케덤,
+    아모레가 아니라 메이크온) — 모회사 이름을 걸면 이미 등록된 자회사
+    기사가 전부 그쪽으로 오귀속되기 때문이다.
+
+    값이 없는 브랜드는 'skincare'로 본다. 화면에서 '구분 없음' 칸을
+    따로 만들면 대부분이 거기 쌓여 필터가 무의미해진다.
+    """
+    from sqlalchemy import text
+    from config.settings import DB_SCHEMA
+    try:
+        rows = session.execute(text(
+            f"SELECT name, coalesce(segment, 'skincare') "
+            f"FROM {DB_SCHEMA}.monitored_brands WHERE is_active = TRUE")).fetchall()
+    except Exception as e:
+        logger.warning("브랜드 사업구분 조회 실패(스킨케어로 간주): %s", e)
+        return {}
+    return {r[0]: (r[1] or "skincare") for r in rows}
