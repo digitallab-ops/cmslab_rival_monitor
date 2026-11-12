@@ -260,6 +260,9 @@ def run_pipeline(brand: str, country: str) -> PipelineStats:
 
 
 def reset_jangup_cache():
-    """피드 캐시 초기화 (매일 첫 수집 전 호출) — 장업신문 + 미디어RSS(글로벌 피드 run당 1회 파싱)."""
+    """피드 캐시 초기화 (매일 첫 수집 전 호출) — 장업신문 + 미디어RSS + Reddit.
+    모두 '피드를 run당 1회만 받아 모든 브랜드가 나눠 쓰는' 구조라, run이 바뀌면
+    반드시 비워야 어제 피드를 오늘 것으로 착각하지 않는다."""
     _jangup.reset_cache()
     _media.reset_cache()
+    _reddit.reset_cache()

@@ -210,6 +210,14 @@ class GoogleRSSCollector(BaseCollector):
                 logger.error("RSS 파싱 오류 (%s/%s): %s", brand, country, e)
                 continue
 
+            # HTTP 오류를 밖으로 꺼낸다. 구글도 과호출이면 429를 빈 피드로 준다 —
+            # status를 안 보면 수집이 죽은 걸 '뉴스가 없다'로 읽게 된다.
+            st = getattr(feed, "status", None)
+            if st is not None and st != 200:
+                logger.warning("구글 뉴스 RSS HTTP %s (%s/%s) — 수집 0건은 "
+                               "'뉴스 없음'이 아니라 '못 받음'입니다", st, brand, country)
+                continue
+
             for entry in feed.entries:
                 title = getattr(entry, "title", "").strip()
                 link = getattr(entry, "link", "").strip()

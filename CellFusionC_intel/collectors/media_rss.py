@@ -281,6 +281,18 @@ class MediaRSSCollector(BaseCollector):
         entries = []
         try:
             feed = feedparser.parse(url, agent=_FEED_UA)
+
+            # HTTP 오류를 밖으로 꺼낸다. 403·429는 형식이 멀쩡한 빈 피드로 오는
+            # 일이 잦아서(Reddit이 실제로 그랬다) status를 안 보면 '차단됨'이
+            # '오늘 글 없음'으로 둔갑한다. 이 피드는 원래 하루 0~1건이라
+            # 조용히 죽으면 건수 통계로도 안 잡힌다 — 여기서 말해야 한다.
+            st = getattr(feed, "status", None)
+            if st is not None and st != 200:
+                logger.warning("미디어 피드 HTTP %s — %s (0건은 '글 없음'이 아니라 "
+                               "'못 받음'입니다)", st, url)
+                self._entry_cache[url] = []
+                return []
+
             for entry in feed.entries:
                 title = getattr(entry, "title", "").strip()
                 link = getattr(entry, "link", "").strip()
