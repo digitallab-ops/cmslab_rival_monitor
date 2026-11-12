@@ -212,8 +212,13 @@ class GoogleRSSCollector(BaseCollector):
 
             # HTTP 오류를 밖으로 꺼낸다. 구글도 과호출이면 429를 빈 피드로 준다 —
             # status를 안 보면 수집이 죽은 걸 '뉴스가 없다'로 읽게 된다.
+            #
+            # 단, **글이 들어왔으면 상태코드와 무관하게 쓴다.** 구글 뉴스는
+            # gl=US 같은 경우 302로 리다이렉트하면서도 기사를 정상으로 준다
+            # (실측 AHC/US: status=302, entries=38). 상태만 보고 버리면
+            # 멀쩡한 38건을 날린다. 0건일 때만 '왜 0건인가'를 따진다.
             st = getattr(feed, "status", None)
-            if st is not None and st != 200:
+            if not feed.entries and st is not None and st != 200:
                 logger.warning("구글 뉴스 RSS HTTP %s (%s/%s) — 수집 0건은 "
                                "'뉴스 없음'이 아니라 '못 받음'입니다", st, brand, country)
                 continue

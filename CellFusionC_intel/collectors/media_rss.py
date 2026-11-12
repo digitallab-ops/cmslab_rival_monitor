@@ -286,8 +286,10 @@ class MediaRSSCollector(BaseCollector):
             # 일이 잦아서(Reddit이 실제로 그랬다) status를 안 보면 '차단됨'이
             # '오늘 글 없음'으로 둔갑한다. 이 피드는 원래 하루 0~1건이라
             # 조용히 죽으면 건수 통계로도 안 잡힌다 — 여기서 말해야 한다.
+            # 글이 들어왔으면 상태코드와 무관하게 쓴다 — 리다이렉트(3xx)도
+            # 본문은 정상인 경우가 많다. 0건일 때만 '왜 0건인가'를 따진다.
             st = getattr(feed, "status", None)
-            if st is not None and st != 200:
+            if not feed.entries and st is not None and st != 200:
                 logger.warning("미디어 피드 HTTP %s — %s (0건은 '글 없음'이 아니라 "
                                "'못 받음'입니다)", st, url)
                 self._entry_cache[url] = []

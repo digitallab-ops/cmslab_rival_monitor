@@ -96,8 +96,10 @@ class RedditCollector(BaseCollector):
             # 빈 Atom 피드**로 돌려준다 — feedparser는 정상 파싱하고 bozo도 안 뜬다.
             # status를 안 보면 "차단됐다"가 "오늘 글이 없다"로 둔갑해서,
             # 수집이 이틀 죽어도 로그엔 '0건'만 찍힌다. 실제로 그렇게 당했다.
+            # 글이 들어왔으면 상태코드와 무관하게 쓴다(리다이렉트 대응).
+            # 0건일 때만 '없는 것'과 '못 받은 것'을 가른다.
             st = getattr(feed, "status", None)
-            if st is not None and st != 200:
+            if not feed.entries and st is not None and st != 200:
                 logger.warning(
                     "Reddit 피드 HTTP %s (r/%s) — 수집 0건은 '글이 없음'이 아니라 "
                     "'차단됨'입니다. 요청 빈도나 엔드포인트를 확인하세요.", st, sub)
