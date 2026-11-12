@@ -5,9 +5,34 @@ FILTER_SYSTEM_PROMPT / CLASSIFICATION_SYSTEM_PROMPT 는 모듈 로드 시점에 
 OpenAI는 1024토큰 이상 동일 시스템 프롬프트를 자동 캐싱한다.
 """
 
-from config.brands import ALL_BRANDS
+from config.brands import ALL_BRANDS, BRAND_KO_NAMES
 
-_BRAND_LIST = "\n".join(f"- {b}" for b in ALL_BRANDS)
+
+def _brand_line(b: str) -> str:
+    """브랜드 한 줄: 영문명 + 한글·대체 표기.
+
+    **영문명만 주면 국내 기사가 통째로 버려진다.** 1차 필터는 "브랜드가 기사에
+    명확히 언급될 것"을 보는데, 기사엔 '뷰앤디'라 적혀 있고 목록엔 'Viewandi'만
+    있으면 모델이 둘을 잇지 못한다. 아누아·달바처럼 알려진 브랜드는 모델이 가진
+    지식으로 알아서 잇지만, 최근 등록한 작은 브랜드는 그 지식이 없다.
+    실제로 글로우엠·스케덤·뷰앤디·식물나라 4곳이 기사를 정상으로 걷어놓고도
+    Stage1에서 100% 탈락해 DB가 0건이었다(2026-11-12 실측).
+
+    대소문자·공백·점만 다른 중복 표기는 뺀다(EOA/"EOA", LG Pra.L/"LG Pra.L").
+    """
+    out: list[str] = []
+    seen = {b.replace(" ", "").replace(".", "").lower()}
+    for k in (BRAND_KO_NAMES.get(b) or []):
+        k = (k or "").strip()
+        key = k.replace(" ", "").replace(".", "").lower()
+        if not k or key in seen:
+            continue
+        seen.add(key)
+        out.append(k)
+    return f"- {b}" + (f" (={', '.join(out)})" if out else "")
+
+
+_BRAND_LIST = "\n".join(_brand_line(b) for b in ALL_BRANDS)
 
 # ── Stage 1: gpt-4o-mini 관련성 필터용 ───────────────────────────────────────
 FILTER_SYSTEM_PROMPT = f"""당신은 글로벌 뷰티 산업 분석가입니다. 수집된 뉴스 기사가 아래 모니터링 대상 브랜드와 실제로 관련 있는지 판단합니다.
@@ -16,8 +41,15 @@ FILTER_SYSTEM_PROMPT = f"""당신은 글로벌 뷰티 산업 분석가입니다.
 {_BRAND_LIST}
 
 === 판단 기준 ===
-- 해당 브랜드가 기사에 명확히 언급될 것
-- 뷰티/코스메틱 산업 맥락일 것 (스킨케어·색조·헤어·바디·향수·선케어·더마 등 전 카테고리 포함)
+- 유저 메시지에 **[대상 브랜드]**가 지정되면 그 브랜드 기준으로만 판단한다.
+  지정이 없을 때만 위 목록 전체를 기준으로 본다.
+- 브랜드가 기사에 명확히 언급될 것. **괄호 (=...) 안은 같은 브랜드의 한글·대체
+  표기다** — 기사가 그 표기로 적혀 있으면 같은 브랜드로 본다
+  (예: '뷰앤디' = Viewandi, '글로우엠' = GlowM)
+- 브랜드를 아는지 모르는지는 판단 근거가 아니다. **처음 보는 이름이어도
+  표기가 일치하고 뷰티 맥락이면 통과시킨다.** 신생·소형 브랜드가 대상이다
+- 뷰티/코스메틱 산업 맥락일 것 (스킨케어·색조·헤어·바디·향수·선케어·더마·뷰티
+  디바이스 등 전 카테고리 포함)
 - 브랜드의 마케팅·브랜딩·유통·캠페인·파트너십·수상·현지화 전략 등도 포함
 - 동명이인이거나 뷰티와 무관한 기업인 경우만 제외
 - 뷰티 관련 가능성이 조금이라도 있으면 통과 (관대한 판단)
@@ -197,9 +229,22 @@ unrelated — **이 브랜드 기사가 아니다**
 """
 
 
-def build_filter_prompt(articles: list) -> str:
-    """Haiku 필터 유저 프롬프트: 번호 붙인 기사 목록"""
-    lines = ["다음 기사들 중 모니터링 대상 브랜드와 관련 있는 것의 인덱스를 반환하세요.\n"]
+def build_filter_prompt(articles: list, brand: str | None = None) -> str:
+    """1차 필터 유저 프롬프트: 번호 붙인 기사 목록.
+
+    **대상 브랜드를 반드시 넘긴다.** 파이프라인은 'Viewandi로 수집한 기사'라는 걸
+    알고 있는데, 예전엔 그 사실을 빼고 "58개 목록 중 아무거나 해당되냐"만 물었다.
+    질문이 막연하니 모델이 모르는 소형 브랜드는 목록에서 묻혀 통째로 탈락했고,
+    같은 기사도 배치 구성에 따라 결과가 흔들렸다(실측: 아누아 91→78, 뎁티 11→4).
+    브랜드를 명시하면 질문이 "이 기사가 뷰앤디 기사냐"로 좁아진다.
+    """
+    if brand:
+        head = (f"[대상 브랜드] {_brand_line(brand).lstrip('- ')}\n\n"
+                f"위 브랜드로 수집된 기사 목록이다. 이 브랜드와 실제로 관련 있는 것의 "
+                f"인덱스를 반환하세요. 괄호 (=...) 안 표기로 적힌 기사도 같은 브랜드다.\n")
+    else:
+        head = "다음 기사들 중 모니터링 대상 브랜드와 관련 있는 것의 인덱스를 반환하세요.\n"
+    lines = [head]
     for i, a in enumerate(articles):
         lines.append(f"[{i}] 제목: {a.title}")
         if a.summary:

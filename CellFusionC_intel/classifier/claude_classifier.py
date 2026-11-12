@@ -111,11 +111,13 @@ def _with_retry(fn, *args, **kwargs):
 
 # ── Stage 1: gpt-4o-mini 필터 ─────────────────────────────────────────────────
 
-def _filter_relevant(articles: list[RawArticle]) -> list[int]:
-    """관련 기사 인덱스 반환. 오류 시 전체 통과."""
-    if not articles:
-        return []
+# LLM에게 한 번에 묻는 기사 수. 길면 모델이 성실히 세지 않는다 —
+# 111건을 한 번에 주면 제목에 브랜드가 박힌 110건 중 27건만 골라냈다.
+FILTER_CHUNK = 20
 
+
+def _ask_filter(articles: list[RawArticle], brand: str | None) -> list[int]:
+    """LLM에게 관련 여부를 묻는다. 오류 시 전체 통과."""
     client = _get_client()
     try:
         response = _with_retry(
@@ -123,7 +125,7 @@ def _filter_relevant(articles: list[RawArticle]) -> list[int]:
             model=CLASSIFIER_MODEL_FILTER,
             messages=[
                 {"role": "system", "content": FILTER_SYSTEM_PROMPT},
-                {"role": "user", "content": build_filter_prompt(articles)},
+                {"role": "user", "content": build_filter_prompt(articles, brand)},
             ],
             response_format={"type": "json_object"},
             max_completion_tokens=512,
@@ -140,6 +142,48 @@ def _filter_relevant(articles: list[RawArticle]) -> list[int]:
     except Exception as e:
         logger.warning("Stage1 오류 → 전체 통과: %s", e)
         return list(range(len(articles)))
+
+
+def _filter_relevant(articles: list[RawArticle], brand: str | None = None) -> list[int]:
+    """관련 기사 인덱스 반환.
+
+    **이름이 그대로 적힌 기사는 코드가 통과시키고, 안 보이는 것만 LLM에 묻는다.**
+
+    예전엔 전부 LLM에게 "이 목록에서 관련된 걸 골라라"고 물었다. 두 가지가
+    동시에 망가져 있었다(2026-11-13 실측):
+      · 브랜드를 안 알려주니 58개 목록을 놓고 막연히 판단했다. 모델이 모르는
+        소형 브랜드(뷰앤디·글로우엠·스케덤·식물나라)는 통째로 탈락해 DB가 0건.
+      · 목록이 길면 성실히 세지 않는다. 메디큐브 111건 중 제목에 이름이 박힌
+        110건을 주고 물으니 27건만 돌아왔다. 같은 입력이 102건↔33건으로 널뛰었다.
+    글자 대조는 코드가 100% 정확하고 공짜다. LLM은 판단이 필요한 데만 쓴다.
+    """
+    if not articles:
+        return []
+
+    if not brand:
+        # 대상 브랜드를 모르면 기계 대조를 할 수 없다. 예전처럼 전부 LLM에.
+        out: list[int] = []
+        for s in range(0, len(articles), FILTER_CHUNK):
+            out += [s + i for i in _ask_filter(articles[s:s + FILTER_CHUNK], None)]
+        return sorted(out)
+
+    from config.brands import mentions_brand
+
+    hit: list[int] = []        # 이름이 그대로 보임 → 통과 확정
+    ask: list[int] = []        # 안 보임 → LLM 판단
+    for i, a in enumerate(articles):
+        text = f"{a.title} {getattr(a, 'summary', '') or ''}"
+        (hit if mentions_brand(text, brand) else ask).append(i)
+
+    judged: list[int] = []
+    for s in range(0, len(ask), FILTER_CHUNK):
+        sub = ask[s:s + FILTER_CHUNK]
+        judged += [sub[i] for i in _ask_filter([articles[j] for j in sub], brand)]
+
+    if ask:
+        logger.debug("Stage1 [%s]: 이름대조 %d건 통과 · LLM판단 %d건 중 %d건 통과",
+                     brand, len(hit), len(ask), len(judged))
+    return sorted(hit + judged)
 
 
 # ── Stage 2: gpt-4o 배치 분류 ─────────────────────────────────────────────────
@@ -315,7 +359,7 @@ def classify_articles(
     if not articles:
         return []
 
-    relevant_indices = _filter_relevant(articles)
+    relevant_indices = _filter_relevant(articles, brand)
     logger.info("Stage1: %d/%d건 통과 [%s/%s]",
                 len(relevant_indices), len(articles), brand, country)
     if not relevant_indices:

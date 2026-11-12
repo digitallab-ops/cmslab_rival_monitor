@@ -263,7 +263,11 @@ BRAND_KO_NAMES: dict[str, list[str]] = {
     "b.plain":          ["비플레인"],
     "Goodal":           ["구달"],
     "Torriden":         ["토리든"],
-    "Medicube":         ["메디큐브", "메디큐브 에이지알", "메디큐브에이지알"],
+    # '에이지알'(AGE-R) 단독 표기가 빠져 있어 앱·디바이스 기사 9건이 통째로
+    # 빠졌다(2026-11-13 실측). 국내 매체는 '에이피알 에이지알 앱…'처럼
+    # 모회사+서브브랜드로만 쓰고 '메디큐브'를 안 적는 경우가 많다.
+    "Medicube":         ["메디큐브", "메디큐브 에이지알", "메디큐브에이지알",
+                         "에이지알", "AGE-R"],
     "Biodance":         ["바이오던스"],
     "COSRX":            ["코스알엑스"],
     "Dr.G":             ["닥터지"],
@@ -368,3 +372,100 @@ def _register_aliases() -> None:
 
 _merge_db_ko_names()
 _register_aliases()
+
+
+# ── 기사 본문에 브랜드가 그대로 적혀 있는가 (기계적 대조) ────────────────────
+#
+# LLM에게 시키면 안 되는 일이다. "이 111건 중 메디큐브 기사를 골라라"를 물었더니
+# 제목에 '메디큐브'가 박힌 110건 중 27건만 골라냈다(2026-11-13 실측). 배치를
+# 쪼개도 52~86%로 흔들렸다. 모델이 판단을 틀린 게 아니라 긴 목록을 성실히
+# 세지 않는다. 글자 대조는 코드가 100% 정확하고 공짜다.
+# LLM은 '이름이 안 보이는 기사'를 판단할 때만 쓴다.
+
+_MENTION_CACHE: dict[str, tuple] = {}
+
+# 짧은 표기는 일반 단어에 박혀 오탐 난다('톰'→톰 크루즈, '일소'→야구 일소 판정,
+# 'VT'→VT산업, 'Eum'→museum). 그렇다고 버리면 '달바'·'구달'처럼 한글명이
+# 두 글자뿐인 주력 브랜드가 통째로 빠진다(실측 달바 재현율 36%).
+# 그래서 **짧은 표기는 뷰티 맥락이 같이 있을 때만** 인정한다 —
+# 구글뉴스 수집기가 이미 쓰는 방식이다(`"달바" (화장품 OR 뷰티 OR ...)`).
+_MIN_KO_LEN = 3      # 이 이상이면 단독으로 인정
+_MIN_LATIN_LEN = 4
+
+# 뷰티 맥락어. 짧은 표기를 구제하는 용도라 넉넉히 둔다 —
+# 최종 정밀도는 2차 분류(brand_focus=unrelated)가 책임진다.
+BEAUTY_CONTEXT = (
+    "뷰티", "화장품", "코스메틱", "스킨케어", "선케어", "더마", "메이크업",
+    "세럼", "크림", "토너", "앰플", "마스크팩", "클렌징", "선크림", "에센스",
+    "올리브영", "화해", "컬리뷰티", "무신사뷰티", "세포라", "뷰티디바이스",
+    "뷰티 디바이스", "디바이스", "K뷰티", "K-뷰티", "피부",
+    "beauty", "cosmetic", "skincare", "serum", "sunscreen", "k-beauty",
+)
+
+
+def _is_distinctive(tok: str) -> bool:
+    """단독으로(맥락 없이) 자동 통과시켜도 될 만큼 변별력 있는 표기인가."""
+    t = tok.replace(" ", "").replace(".", "")
+    if not t:
+        return False
+    has_hangul = any("가" <= ch <= "힣" for ch in t)
+    return len(t) >= (_MIN_KO_LEN if has_hangul else _MIN_LATIN_LEN)
+
+
+def _tok_regex(t: str) -> str:
+    import re
+    parts = [re.escape(p) for p in re.split(r"[\s._-]+", t) if p]
+    if not parts:
+        return ""
+    body = r"[\s._-]*".join(parts)
+    # 한글은 교착어라 조사가 바로 붙는다('메디큐브가','메디큐브는') — 뒤 경계 없음.
+    if any("가" <= ch <= "힣" for ch in t):
+        return body
+    return rf"(?<![0-9A-Za-z]){body}(?![0-9A-Za-z])"
+
+
+def brand_mention_pattern(brand: str):
+    """(변별력 있는 표기 패턴, 짧은 표기 패턴). 각각 없으면 None.
+
+    짧은 표기 패턴에 걸린 기사는 뷰티 맥락어가 같이 있어야 인정한다.
+    """
+    import re
+    if brand in _MENTION_CACHE:
+        return _MENTION_CACHE[brand]
+
+    strong, weak, seen = [], [], set()
+    for t in [brand] + list(BRAND_KO_NAMES.get(brand) or []):
+        t = (t or "").strip()
+        key = t.replace(" ", "").replace(".", "").lower()
+        if not t or key in seen:
+            continue
+        seen.add(key)
+        rx = _tok_regex(t)
+        if not rx:
+            continue
+        (strong if _is_distinctive(t) else weak).append(rx)
+
+    out = (re.compile("|".join(strong), re.IGNORECASE) if strong else None,
+           re.compile("|".join(weak), re.IGNORECASE) if weak else None)
+    _MENTION_CACHE[brand] = out
+    return out
+
+
+def has_beauty_context(text: str) -> bool:
+    low = (text or "").lower()
+    return any(k in low for k in BEAUTY_CONTEXT)
+
+
+def mentions_brand(text: str, brand: str) -> bool:
+    """기사 텍스트에 이 브랜드가 그대로 적혀 있는가.
+
+    긴 표기는 단독으로 인정하고, 짧은 표기는 뷰티 맥락이 함께 있을 때만 인정한다.
+    """
+    if not text:
+        return False
+    strong, weak = brand_mention_pattern(brand)
+    if strong and strong.search(text):
+        return True
+    if weak and weak.search(text) and has_beauty_context(text):
+        return True
+    return False
