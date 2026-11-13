@@ -282,8 +282,17 @@ def _suggest_country_ko(codes: list[str]) -> dict:
 
 # 잡별 '이 주기 안에는 한 번 돌았어야 한다' 상한(일). 크론 주기보다 넉넉히 잡아
 # 하루이틀 밀린 것으로는 안 울리게 한다.
+#
+# 🔴 **잡 id를 바꾸면 여기도 같이 바꿀 것.** 2026-11-12에 풀스캔을 월·화·수
+# 세 조각으로 나누면서 id가 weekly_full → weekly_full_0/1/2로 바뀌었는데 이 표는
+# 'weekly_full' 그대로였다. 그 id로는 앞으로 영영 기록이 안 쌓이므로, 마지막 기록
+# (11-02)이 박제돼 **매번 '안 돌았다'고 울린다**. 실제로 11-13에 그렇게 울렸다.
+# 없어진 id는 조용히 무시되는 게 아니라 영구 오탐이 된다.
 _JOB_MAX_GAP_DAYS = {
-    "daily_tier1": 2, "weekly_full": 10, "weekly_momentum": 10,
+    "daily_tier1": 2,
+    # 풀스캔 3등분 — 조각마다 주 1회(월·화·수)라 상한은 조각 단위로 본다
+    "weekly_full_0": 10, "weekly_full_1": 10, "weekly_full_2": 10,
+    "weekly_momentum": 10,
     "brand_discovery": 3, "retail_ranking": 5, "oliveyoung_ranking": 3,
     "search_trends": 7, "google_trends": 5, "youtube_buzz": 3,
     "export_stats": 40, "dart_financials": 20, "trademark": 40,
