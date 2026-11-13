@@ -308,6 +308,72 @@ JSON 배열만 출력: [{{"name":"영문 또는 대표표기","ko":"한글표기
         return []
 
 
+# ── 같은 보도자료가 매체별로 다르게 실린 것을 한 건으로 묶기 ──────────────────
+#
+# 왜 문자 유사도가 아니라 의미 유사도인가 — 실측했다(2026-11-13).
+# 같은 보도자료인데 매체가 제목을 다시 쓰면 글자는 거의 안 겹친다:
+#   "싱클리, 숏폼 영상 23만 건 AI 분석…아누아·K18 부문별 소셜 영향력 1위"
+#   "싱클리, 10월 소셜 지수 발표… 스킨케어 1위 '아누아' · 헤어 1위 'K18'"
+#   → 문자 0.278 / 의미 0.681
+# 반대로 다른 사건인데 글자는 많이 겹치는 경우도 있다:
+#   "메디큐브, 울타뷰티 진출" vs "메디큐브, 나이카 입점" → 문자 0.623 / 의미 0.535
+# 문자 유사도는 묶을 것(0.278~0.857)과 나눌 것(0.154~0.623)의 범위가 겹쳐서
+# 어떤 임계값을 잡아도 멀쩡한 기사를 날린다. 의미 유사도는 겹치지 않는다.
+#
+# **임계값은 일부러 가운데(0.61)보다 높게 잡았다.** 안 묶어서 생기는 손해는
+# 후보가 한 번 더 올라오는 것뿐이지만, 잘못 묶으면 진짜 사건이 사라진다.
+# 같은 발표를 다루면서 해설을 덧붙인 기사는 0.508로 안전하게 분리된다.
+_SYNDICATION_COS = 0.65
+
+_EMBED_CACHE: dict[str, list[float]] = {}
+
+
+def _distinct_stories(titles: list[str]) -> list[list[str]]:
+    """제목 목록을 '같은 사건'끼리 묶어서 그룹 목록으로 돌려준다.
+
+    각 그룹의 첫 원소가 대표(가장 긴 제목 = 정보량이 많은 쪽).
+    임베딩을 못 구하면 묶지 않고 전부 따로 돌려준다 — 묶기에 실패해서
+    후보를 놓치는 것보다, 안 묶고 사람에게 보여주는 쪽이 낫다.
+    """
+    if len(titles) < 2:
+        return [[t] for t in titles]
+
+    try:
+        from deduplication.semantic_dedup import embed_texts, _cosine
+        todo = [t for t in titles if t not in _EMBED_CACHE]
+        if todo:
+            for t, v in zip(todo, embed_texts(todo)):
+                _EMBED_CACHE[t] = v
+        vecs = [_EMBED_CACHE[t] for t in titles]
+    except Exception as e:
+        logger.warning("보도자료 묶기 실패 — 묶지 않고 진행합니다: %s", e)
+        return [[t] for t in titles]
+
+    # union-find: A~B, B~C면 A·B·C가 한 사건
+    parent = list(range(len(titles)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(len(titles)):
+        for j in range(i + 1, len(titles)):
+            if _cosine(vecs[i], vecs[j]) >= _SYNDICATION_COS:
+                ri, rj = find(i), find(j)
+                if ri != rj:
+                    parent[ri] = rj
+
+    buckets: dict[int, list[str]] = {}
+    for i, t in enumerate(titles):
+        buckets.setdefault(find(i), []).append(t)
+    # 그룹 안은 긴 제목 먼저(대표), 그룹 순서는 원래 등장 순서를 지킨다
+    out = [sorted(g, key=len, reverse=True) for g in buckets.values()]
+    out.sort(key=lambda g: min(titles.index(t) for t in g))
+    return out
+
+
 def run() -> dict:
     cap = date.today()
     session = get_session()
@@ -363,12 +429,22 @@ def run() -> dict:
             forms_ko = set(_corp_variants(ko)) if ko else set()
             if (forms_en & known_en) or (forms_ko & known_ko):
                 continue
-            # 언급수 = 이 이름/한글이 등장한 헤드라인 수
+            # 언급수 = 이 이름이 등장한 **서로 다른 사건**의 수.
+            # 기사 수를 그대로 세면 보도자료 하나가 매체 3곳에 실린 것이 '언급 3건'이
+            # 된다 — K18이 그렇게 올라왔다(싱클리 소셜지수 발표 1건이 3건으로).
             keys = [k for k in {name, ko} if k]
-            cnt = sum(1 for h in headlines if any(k in h for k in keys))
+            mine_h = [h for h in headlines if any(k in h for k in keys)]
+            groups = _distinct_stories(mine_h)
+            cnt = len(groups)
             if cnt < _MENTION_MIN:
+                logger.debug("   건너뜀 %s: 기사 %d건이지만 서로 다른 사건은 %d건",
+                             name, len(mine_h), cnt)
                 continue
-            samples = " · ".join(h for h in headlines if any(k in h for k in keys))[:400]
+            # 대표 제목만 보여준다. 같은 사건이 여러 매체면 '외 N곳'을 붙여
+            # 사람이 '보도자료가 퍼진 것'인지 '여러 사건'인지 바로 알게 한다.
+            samples = " · ".join(
+                (g[0] + (f" (외 {len(g) - 1}곳)" if len(g) > 1 else "")) for g in groups
+            )[:400]
 
             # 하루치 스냅샷만 보고 제안하면 보도자료 하나가 여러 매체에 실린 것도
             # 후보가 된다(A.P.R.이 그 사례 — 같은 날 운영사 비교 기사 2건).
@@ -413,8 +489,11 @@ def run() -> dict:
             """), {"n": row_name, "c": cnt, "s": samples, "cap": cap})
             days = (cap - first_seen).days if first_seen else 0
             logger.info("   ✅ 제안 승격: %s (%d일에 걸쳐 재등장)", name, days)
+            # 대표 제목은 그룹에서 바로 꺼낸다. samples를 " · "로 되쪼개면
+            # 제목 안에 가운뎃점이 든 기사가 잘린다
+            # ("…스킨케어 1위 '아누아' · 헤어 1위 'K18'"이 실제로 그렇다).
             new_candidates.append({"name": name, "ko": ko, "count": cnt, "days": days,
-                                   "sample": samples.split(" · ")[0] if samples else ""})
+                                   "sample": groups[0][0] if groups else ""})
         session.commit()
         logger.info("발견: 헤드라인 %d · 추출 %d · 신규 후보 %d",
                     len(headlines), len(extracted), len(new_candidates))
