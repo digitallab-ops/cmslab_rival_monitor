@@ -337,6 +337,102 @@ def check_job_runs(session) -> list[dict]:
         "read": "스케줄러 프로세스 가동 이력과 해당 잡의 CronTrigger 설정을 확인할 것",
     }]
 
+
+# ── 데이터 신선도 ────────────────────────────────────────────────────────────
+# 🔴 **잡이 돌았는지와 데이터가 늘었는지는 다른 질문이다.**
+#
+# 2026-11-07부터 올리브영 MCP가 401을 돌려주기 시작했는데, 수집 잡은 매일
+# 정상 실행돼 "executed successfully"로 기록됐다. 위 check_job_runs는 잡 실행
+# 이력만 보므로 7일 내내 정상이라고 판단했고, 11-13에 사람이 테이블을 직접
+# 들여다보고서야 발견했다. 외부 소스가 조용히 끊기는 경로는 전부 이 모양이다.
+#
+# 임계값은 감이 아니라 최근 90일 실측 간격에서 잡았다(중앙/최대 기준).
+#   news_articles 중앙1·최대1 → 3  |  retail_rankings 중앙1·최대2 → 4
+#   oliveyoung_rankings 중앙1 → 3  |  oliveyoung_reviews 중앙7·최대8 → 12
+#   social_metrics 중앙1 → 3       |  youtube_lang 중앙1 → 3
+#   google_trends 중앙1 → 4        |  search_trends 중앙7(고정) → 12
+#   brand_score_history 중앙7(고정) → 12
+#
+# 일부러 뺀 것 —
+#   self_channel_products/meta : 90일 날짜 표본이 2·1개뿐이라 임계를 못 믿는다.
+#                                같은 올영 MCP를 타므로 그룹 알림이 대신 잡는다.
+#   trademark_goods            : fetched_at 날짜가 1개뿐(백필이라 불규칙).
+#   watch_items                : 최대 간격 14일 — 정상인데도 울린다.
+#   nice_financials/export_stats 등 월·연 단위 : check_job_runs가 이미 본다.
+_DATA_MAX_AGE_DAYS = (
+    # (소스 그룹, 테이블, 시간컬럼, 최대 허용 일수, 담당 잡 id)
+    ("뉴스 수집",         "news_articles",       "collected_at",   3, "daily_tier1"),
+    ("해외 리테일 랭킹",  "retail_rankings",     "capture_date",   4, "retail_ranking"),
+    ("올리브영 채널",     "oliveyoung_rankings", "capture_date",   3, "oliveyoung_ranking"),
+    ("올리브영 채널",     "oliveyoung_reviews",  "captured_at",   12, "oliveyoung_ranking"),
+    ("소셜 지표",         "social_metrics",      "captured_date",  3, None),
+    ("유튜브 버즈",       "youtube_lang",        "captured_date",  3, "youtube_buzz"),
+    ("구글 트렌드",       "google_trends",       "period",         4, "google_trends"),
+    ("네이버 검색트렌드", "search_trends",       "period",        12, "search_trends"),
+    ("점수 스냅샷",       "brand_score_history", "capture_date",  12, "score_snapshot"),
+)
+
+_SILENT_FAIL_JOB_DAYS = 2   # 잡이 이 안에 돌았는데 데이터가 멈췄으면 '조용한 실패'
+
+
+def check_data_freshness(session) -> list[dict]:
+    """테이블이 실제로 갱신되고 있는지 본다. 멈춘 소스를 소스 그룹 단위로 묶어 알린다.
+
+    잡 실행 이력과 대조해, 잡은 돌았는데 데이터만 멈춘 경우를 따로 짚는다.
+    그게 외부 API 인증 만료·응답 변화의 전형적인 모양이고, 사람이 가장 늦게
+    발견하는 종류다.
+
+    테이블이나 컬럼이 없으면 조용히 건너뛴다(스키마가 앞서거나 뒤처질 수 있다).
+    """
+    try:
+        jr = {r[0]: int(r[1] or 0) for r in session.execute(text(f"""
+            SELECT job_id, (CURRENT_DATE - MAX(ran_at)::date)
+            FROM {DB_SCHEMA}.job_runs WHERE ok GROUP BY job_id""")).fetchall()}
+    except Exception:
+        session.rollback()
+        jr = {}
+
+    groups: dict[str, list[tuple]] = {}
+    for grp, tab, col, limit, job in _DATA_MAX_AGE_DAYS:
+        try:
+            row = session.execute(text(
+                f"SELECT MAX({col})::date, (CURRENT_DATE - MAX({col})::date) "
+                f"FROM {DB_SCHEMA}.{tab}")).fetchone()
+        except Exception:
+            session.rollback()          # 없는 테이블/컬럼 — 트랜잭션만 되돌리고 통과
+            continue
+        if not row or row[0] is None:
+            continue                    # 한 번도 안 쌓인 테이블은 판단 보류
+        age = int(row[1] or 0)
+        if age > limit:
+            groups.setdefault(grp, []).append((tab, row[0], age, limit, job))
+
+    findings: list[dict] = []
+    for grp, items in groups.items():
+        items.sort(key=lambda x: -x[2])
+        body = " / ".join(f"`{t}` 마지막 {d}({a}일 전, 기준 {lim}일)"
+                          for t, d, a, lim, _ in items)
+        # 담당 잡이 최근 돌았는데 데이터가 멈췄나?
+        silent = [t for t, _d, _a, _l, job in items
+                  if job and jr.get(job) is not None and jr[job] <= _SILENT_FAIL_JOB_DAYS]
+        if silent:
+            detail = (f"**잡은 정상 실행됐는데 데이터가 늘지 않았다.** {body}. "
+                      f"수집기가 외부에서 빈 응답을 받고도 성공으로 끝났을 수 있다 "
+                      f"(인증 만료·응답 형식 변경·차단).")
+            read = ("해당 수집기의 최근 HTTP 상태를 먼저 볼 것 — 401/403이면 키 만료, "
+                    "200인데 0건이면 응답 형식 변경이다. 잡 실행 이력은 정상이므로 "
+                    "스케줄러가 아니라 외부 소스 쪽을 봐야 한다")
+        else:
+            detail = (f"데이터가 멈췄다. {body}. 담당 잡이 돌지 않았을 수 있다.")
+            read = "해당 잡의 실행 이력과 스케줄러 가동 상태를 확인할 것"
+        findings.append({
+            "type": "data_stale", "key": f"data:stale:{grp}",
+            "title": f"{grp} — 데이터 갱신 멈춤",
+            "detail": detail, "read": read,
+        })
+    return findings
+
+
 def check_data_drift(session) -> list[dict]:
     """미매핑 국가코드·새 활동유형·제품명 이상치를 감지 → 매핑/점검 제안."""
     findings: list[dict] = []
@@ -562,6 +658,10 @@ def run_watchdog(agg: dict | None = None) -> int:
                 findings += check_job_runs(session)
             except Exception as e:
                 logger.warning("잡 미실행 체크 실패: %s", e)
+            try:
+                findings += check_data_freshness(session)
+            except Exception as e:
+                logger.warning("데이터 신선도 체크 실패: %s", e)
         fresh = [f for f in findings if _dedup_ok(session, f["key"])]
         if not fresh:
             logger.info("watchdog: 새 이상 없음(전체 %d, 쿨다운 후 0)", len(findings))
