@@ -8,7 +8,7 @@ AI(mini)로 '가장 가능성 높은 원인 + 확인/조치 방향'을 진단해
 
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import text
 
@@ -445,6 +445,51 @@ def check_data_freshness(session) -> list[dict]:
     return findings
 
 
+# ── 자격·이용기간 만료 ───────────────────────────────────────────────────────
+# 🔴 **끊기고 나서 아는 것은 늦다.** 올리브영 MCP가 인증을 요구하기 시작했을 때
+# 7일을 몰랐고, KIPRIS 월 예산이 바닥났을 때 닷새를 몰랐다. 끝나는 날을 미리
+# 아는 것만이라도 먼저 알린다.
+#
+# 날짜는 사람이 발급처에서 보고 적는다 — API가 알려주지 않는다. 코드에 박아 두고
+# 갱신하면 주석과 함께 바뀐다(환경변수로 빼면 어디 적혔는지 아무도 모른다).
+_CREDENTIAL_DEADLINES = (
+    # (이름, 끝나는 날, 며칠 전부터 알릴지, 무엇을 해야 하는지)
+    ("KIPRIS Plus 오픈API 이용기간", date(2026, 12, 31), 45,
+     "plus.kipris.or.kr → 마이페이지 → 서비스 구매내역에서 "
+     "`상표 출원 속보`·`해외상표` 두 건을 재신청할 것. "
+     "끊기면 국내·해외 상표 수집이 통째로 멈춘다"),
+)
+
+
+def check_credential_expiry(session) -> list[dict]:
+    """발급처 이용기간이 끝나가는 것을 미리 알린다."""
+    today = _today_kst()
+    out = []
+    for label, end, lead, todo in _CREDENTIAL_DEADLINES:
+        left = (end - today).days
+        if left > lead:
+            continue
+        if left < 0:
+            title = f"{label} — **이미 끝났다**({end}, {-left}일 지남)"
+            detail = f"{end} 로 이용기간이 끝났다. 지금 호출이 되고 있다면 유예일 뿐이다."
+        else:
+            title = f"{label} — {left}일 남음"
+            detail = f"{end} 에 끝난다. 끝나고 나서 알면 그만큼 데이터가 빈다."
+        out.append({
+            "type": "cred_expiry",
+            # 키에 남은 일수를 넣지 않는다 — 넣으면 매일 새 키가 되어 쿨다운을 빠져나간다.
+            "key": f"cred:expiry:{label}:{end}",
+            "title": title, "detail": detail, "read": todo,
+        })
+    return out
+
+
+def _today_kst() -> date:
+    """DB가 UTC라 date.today()를 쓰면 새벽에 하루 어긋난다."""
+    from datetime import timezone
+    return (datetime.now(timezone.utc) + timedelta(hours=9)).date()
+
+
 def check_data_drift(session) -> list[dict]:
     """미매핑 국가코드·새 활동유형·제품명 이상치를 감지 → 매핑/점검 제안."""
     findings: list[dict] = []
@@ -674,6 +719,10 @@ def run_watchdog(agg: dict | None = None) -> int:
                 findings += check_data_freshness(session)
             except Exception as e:
                 logger.warning("데이터 신선도 체크 실패: %s", e)
+            try:
+                findings += check_credential_expiry(session)
+            except Exception as e:
+                logger.warning("자격 만료 체크 실패: %s", e)
         fresh = [f for f in findings if _dedup_ok(session, f["key"])]
         if not fresh:
             logger.info("watchdog: 새 이상 없음(전체 %d, 쿨다운 후 0)", len(findings))

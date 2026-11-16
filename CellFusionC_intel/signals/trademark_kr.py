@@ -568,8 +568,10 @@ def _save_filing(session, brand: str, r: dict, mark_match: "bool | None" = None)
         VALUES (:b, 'KR', :mk, :ap, :rh, :an, :ad, :rd, :nc, :cl, :cos, TRUE, :mm)
         ON CONFLICT (brand, country, app_number) DO UPDATE SET
             reg_date = EXCLUDED.reg_date, mark_name = EXCLUDED.mark_name,
-            is_cosmetic = EXCLUDED.is_cosmetic, mark_match = EXCLUDED.mark_match,
-            fetched_at = NOW()
+            is_cosmetic = EXCLUDED.is_cosmetic, mark_match = EXCLUDED.mark_match
+            -- 🔴 fetched_at 은 **덮지 않는다.** 매주 NOW()로 갱신하면 '처음 본 날'이
+            -- 사라지고, 그러면 (처음 본 날 − 출원일) = **KIPRIS 공개 지연**을
+            -- 영영 못 잰다. 겹침 폭을 감이 아니라 실측으로 줄이려면 이 값이 필요하다.
         RETURNING (xmax = 0) AS inserted
     """), {"b": brand, "mm": mark_match, "mk": (r.get("title") or "")[:200],
            "ap": (r.get("applicant") or "")[:200],
@@ -632,10 +634,25 @@ def backlog(session) -> list:
 # 12월에야 검색에 뜬다. "우리가 가진 최신 출원일 이후"만 긁으면 워터마크보다
 # 앞서 출원됐는데 늦게 공개된 건을 영영 놓친다. 그래서 그만큼 뒤로 겹쳐 긁는다.
 #
-# 🔴 90일은 **실측값이 아니라 넉넉히 잡은 추정치**다. 2026-11-11 에 한 번만
-# 긁어서 공개 지연을 잴 수 없었다(시차가 전부 백필 지연으로 나온다). 매주
-# 쌓이면 app_date 와 첫 fetched_at 의 차이로 진짜 지연을 잴 수 있다 — 그때 줄인다.
-_OVERLAP_DAYS = 90
+# 폭은 **비용이 아니라 품질로 정한다.** 실측(2026-11-16): 겹침을 30일로 줘도
+# 180일로 줘도 검색 호출이 249 vs 253회/월로 같다 — 브랜드당 최소 1페이지(30건)는
+# 어차피 받아오므로 페이지 하한에 걸려 폭이 비용에 거의 영향을 주지 않는다.
+# 좁혀봐야 아끼는 게 없고 놓칠 위험만 커진다.
+#
+# 근거: 매달 도는 해외상표 회차에서 **회차 최신 출원일이 수집일보다 121일 전**인
+# 적이 있었다(2026-10-03 회차. 2026-11-03 회차는 41일). 90일로 잡았으면 그 건을
+# 통째로 놓쳤다. 두 배 여유를 둬 180일로 간다.
+#
+# 🔴 이건 **해외 특허청 기준**이라 KR 지연과 같다는 보장이 없다. KR은 아직 못 쟀다 —
+# 2026-11-11 에 한 번만 긁어서 시차가 전부 백필 지연으로 나온다. 매주 쌓이면
+# (첫 fetched_at − app_date) 로 KR 지연 분포를 직접 잴 수 있다(그래서 _save_filing
+# 이 fetched_at 을 안 덮는다). 몇 달 뒤 실측으로 다시 맞출 것.
+_OVERLAP_DAYS = 180
+
+# 한 번도 안 받은 브랜드를 며칠치부터 볼 것인가. **겹침 폭과 다른 값이다** —
+# 겹침은 '늦게 뜨는 걸 놓치지 않으려는 것'이고 이건 '과거를 얼마나 사올 것인가'다.
+# 과거는 안 산다. 수집 시작 전에 이미 출시된 제품의 상표는 선행신호가 아니다.
+_FIRST_DAYS = 90
 
 
 def _since_for(session, brand: str, fallback_days: int) -> "date":
@@ -661,7 +678,7 @@ def _since_for(session, brand: str, fallback_days: int) -> "date":
 
 
 def run(resolve: bool = True, only_backlog: bool = False,
-        first_days: int = _OVERLAP_DAYS) -> dict:
+        first_days: int = _FIRST_DAYS) -> dict:
     """국내 상표 + 지정상품 수집. 반환 {brands, filings, new, goods, pending}.
 
     `first_days` — **한 번도 안 받은 브랜드**를 며칠치부터 볼 것인가. 기본은
