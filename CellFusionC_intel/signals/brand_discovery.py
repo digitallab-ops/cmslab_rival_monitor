@@ -325,15 +325,87 @@ JSON 배열만 출력: [{{"name":"영문 또는 대표표기","ko":"한글표기
 # 같은 발표를 다루면서 해설을 덧붙인 기사는 0.508로 안전하게 분리된다.
 _SYNDICATION_COS = 0.65
 
+# ── 언어가 다른 같은 기사 ────────────────────────────────────────────────────
+# 같은 글의 한글판·영문판은 의미 유사도가 생각보다 낮게 나온다. 실측:
+#   "[K-뷰티 핫 이슈] … 셀리맥스(모공 관리)와 바렌(발 관리) 부각!"        ← 한글판
+#   "11월 유튜브 폭발 인기! Celimax 모공 관리와 Baren 발 관리 … - Kagit"  ← 영문판
+#   → 0.534. 임계(0.65) 아래라 따로 세서, 한 사건이 둘이 되고 최소 기준 2건을
+#     채웠다. 'Baren'이 그렇게 후보로 올라왔다(2026-11-16).
+#
+# 🔴 **임계값을 낮추는 것은 답이 아니다.** 서로 다른 사건인데 표현이 겹치는
+# 경우가 0.535였다 — 위 0.534보다 높다. 코사인 하나로는 절대 못 가른다.
+#
+# 두 번째 신호로 처음엔 "같은 브랜드 묶음을 말하는가"를 썼는데 **너무 헐렁했다.**
+# 메디큐브 기사 8건(앱 다운로드·밀라노 팝업·울타 진출·나이카 입점·매출)이 전부
+# {메디큐브, 에이피알}이라 한 덩어리로 뭉갰다 — 서로 다른 사건 5개가 1개가 됐다.
+#
+# 진짜 구분점은 "같은 브랜드를 말한다"가 아니라 **"같은 브랜드를 다른 글자로
+# 적었다"**이다. 위 두 제목은 한쪽이 '셀리맥스/바렌', 다른 쪽이 'Celimax/Baren'이다.
+# 한글 기사끼리는 이 뒤집힘이 없으므로 메디큐브 8건은 영향을 받지 않는다.
+#
+# 세 조건을 **모두** 만족해야 묶는다. 하나라도 빠지면 안 묶는다.
+#   ① 의미 유사도가 _CROSSLANG_COS 이상 (완전 남남은 배제)
+#   ② 두 제목이 짚는 브랜드 묶음이 정확히 같고, 2곳 이상
+#      (1곳까지 허용하면 뷰앤디 면세점·뉴욕팝업·CES 세 사건이 뭉개진다)
+#   ③ 그중 최소 한 브랜드를 **서로 다른 글자(한글↔로마자)로** 적었다
+_CROSSLANG_COS = 0.45
+_CROSSLANG_MIN_BRANDS = 2
+
 _EMBED_CACHE: dict[str, list[float]] = {}
+_SELF = "__self__"          # 아직 등록 안 된 후보 자신을 가리키는 자리표
 
 
-def _distinct_stories(titles: list[str]) -> list[list[str]]:
+def _title_brand_scripts(title: str, extra: list[str] | None = None) -> dict:
+    """제목이 짚는 브랜드와 **어떤 글자로 적었는지**. {이름: {'hangul','latin'}}
+
+    등록 브랜드는 config 별칭표로 대조하고(셀리맥스↔Celimax), 아직 등록 안 된
+    후보는 호출자가 `extra`로 자기 표기들을 넘긴다(바렌↔Baren).
+    """
+    out: dict[str, set] = {}
+
+    def _put(key: str, name: str) -> None:
+        script = "hangul" if any("가" <= c <= "힣" for c in name) else "latin"
+        out.setdefault(key, set()).add(script)
+
+    extra_k = {(k or "").strip() for k in (extra or []) if (k or "").strip()}
+    try:
+        from config.brands import ALL_BRANDS, BRAND_KO_NAMES
+        for b in ALL_BRANDS:
+            # 후보로 들어온 이름이 마침 등록 브랜드이기도 하면(테스트·중복등록)
+            # 같은 칸에 넣는다. 안 그러면 한 브랜드가 둘로 세어져 ②를 거저 통과한다.
+            key = _SELF if b in extra_k else b
+            for nm in [b] + list(BRAND_KO_NAMES.get(b) or []):
+                if nm and _writes(title, nm):
+                    _put(key, nm)
+    except Exception as e:
+        logger.debug("브랜드 대조 실패(%s): %s", title[:30], e)
+
+    for k in extra_k:
+        if _writes(title, k):
+            _put(_SELF, k)
+    return out
+
+
+def _writes(title: str, name: str) -> bool:
+    """제목이 이 표기를 그대로 담고 있는가. 로마자만 단어 경계를 본다.
+
+    한글은 조사가 바로 붙어서(메디큐브가·메디큐브는) 뒤 경계를 둘 수 없다.
+    """
+    if any("가" <= c <= "힣" for c in name):
+        return name in title
+    return re.search(rf"(?<![0-9A-Za-z]){re.escape(name)}(?![0-9A-Za-z])",
+                     title, re.IGNORECASE) is not None
+
+
+def _distinct_stories(titles: list[str], keys: list[str] | None = None) -> list[list[str]]:
     """제목 목록을 '같은 사건'끼리 묶어서 그룹 목록으로 돌려준다.
 
     각 그룹의 첫 원소가 대표(가장 긴 제목 = 정보량이 많은 쪽).
     임베딩을 못 구하면 묶지 않고 전부 따로 돌려준다 — 묶기에 실패해서
     후보를 놓치는 것보다, 안 묶고 사람에게 보여주는 쪽이 낫다.
+
+    `keys`는 지금 보고 있는 후보의 표기들(영문·한글). 언어가 다른 같은 기사를
+    가려내는 데만 쓴다 — 위 _CROSSLANG_COS 주석 참조.
     """
     if len(titles) < 2:
         return [[t] for t in titles]
@@ -358,9 +430,24 @@ def _distinct_stories(titles: list[str]) -> list[list[str]]:
             x = parent[x]
         return x
 
+    bmap = [_title_brand_scripts(t, keys) for t in titles]
+
+    def _crosslang(a: dict, b: dict) -> bool:
+        """같은 브랜드 묶음을 서로 다른 글자로 적었는가(= 언어만 다른 같은 기사)."""
+        if len(a) < _CROSSLANG_MIN_BRANDS or a.keys() != b.keys():
+            return False
+        # 한쪽은 한글로만, 다른 쪽은 로마자로만 적은 브랜드가 하나라도 있어야
+        return any(a[k].isdisjoint(b[k]) for k in a)
+
     for i in range(len(titles)):
         for j in range(i + 1, len(titles)):
-            if _cosine(vecs[i], vecs[j]) >= _SYNDICATION_COS:
+            cos = _cosine(vecs[i], vecs[j])
+            same = cos >= _SYNDICATION_COS
+            if not same and cos >= _CROSSLANG_COS and _crosslang(bmap[i], bmap[j]):
+                same = True
+                logger.debug("언어 다른 같은 기사로 묶음(유사도 %.3f · 브랜드 %s): %s | %s",
+                             cos, sorted(bmap[i]), titles[i][:40], titles[j][:40])
+            if same:
                 ri, rj = find(i), find(j)
                 if ri != rj:
                     parent[ri] = rj
@@ -434,7 +521,7 @@ def run() -> dict:
             # 된다 — K18이 그렇게 올라왔다(싱클리 소셜지수 발표 1건이 3건으로).
             keys = [k for k in {name, ko} if k]
             mine_h = [h for h in headlines if any(k in h for k in keys)]
-            groups = _distinct_stories(mine_h)
+            groups = _distinct_stories(mine_h, keys)
             cnt = len(groups)
             if cnt < _MENTION_MIN:
                 logger.debug("   건너뜀 %s: 기사 %d건이지만 서로 다른 사건은 %d건",

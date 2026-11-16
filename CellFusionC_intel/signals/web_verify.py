@@ -104,8 +104,16 @@ verdict 중 하나:
 판정 순서: ①성분인가? → ingredient ②유통·플랫폼인가? → retailer
 ③이 이름으로 화장품을 파는가? → brand ④화장품 브랜드가 딴 이름인가? → company
 
+**beauty 는 verdict 와 따로 판단하라.** "이 이름으로 화장품·뷰티 제품(스킨케어·
+메이크업·헤어·바디·뷰티 디바이스 등)이 실제로 팔리는가"만 묻는 질문이다.
+  yes    — 검색 결과가 이 이름의 뷰티 제품·브랜드를 보여준다
+  no     — 뷰티와 무관한 회사·단체·인물이다. **"○○는 제약회사/협회/구단이고
+           화장품 브랜드는 없다"고 쓸 상황이면 반드시 no다.**
+  unsure — 검색 결과만으로는 모르겠다
+
 JSON으로만:
-{"verdict":"...", "ko_name":"한국어 표기 또는 null", "actual_brand":"company일 때만, 그 외 null",
+{"verdict":"...", "beauty":"yes|no|unsure",
+ "ko_name":"한국어 표기 또는 null", "actual_brand":"company일 때만, 그 외 null",
  "reason":"한 문장, 근거가 된 검색 결과를 인용", "confidence":"high|medium|low"}"""
 
 
@@ -163,17 +171,35 @@ def verify_brand(name: str, ko: str = "", samples: list = None) -> dict:
     if not out.get("verdict"):
         return {"verdict": "unknown", "reason": "판정 실패", "evidence": ev[:5]}
 
+    beauty = (out.get("beauty") or "unsure").strip().lower()
+
     # 'company'는 **다른** 브랜드명을 댈 수 있을 때만 탈락 사유가 된다.
     # 회사명과 브랜드명이 같으면(에스트라·아로마티카) 추적해야 할 브랜드다.
     # 백과사전이 "○○는 …전문기업이다"라고 적어 두면 LLM이 회사로 기울어서,
     # 실제로 에스트라가 탈락할 뻔했다.
-    if out["verdict"] == "company":
+    #
+    # 🔴 **단 '다른 브랜드명이 없다'에는 두 가지가 섞여 있다.**
+    #   아로마티카 — 회사명으로 화장품을 판다           → brand (맞다)
+    #   알테오젠   — 애초에 화장품을 안 판다(바이오 기업) → brand (틀렸다)
+    # 둘 다 actual_brand가 비어서 코드가 구분하지 못했고, 실제로 알테오젠·
+    # KLPGA가 후보로 올라왔다(2026-11-16). LLM은 이유 칸에 "제약 및 바이오
+    # 분야의 기업으로 화장품 브랜드는 별도로 존재하지 않는다"고 제대로 써놓고
+    # verdict만 company로 냈다 — 판단은 맞았는데 받는 쪽이 틀렸다.
+    # 그래서 '뷰티인가'를 verdict와 **별개 축**으로 받아서 여기서 쓴다.
+    if out["verdict"] == "company" and beauty != "no":
         actual = (out.get("actual_brand") or "").strip()
         if not actual or _norm(actual) == _norm(name) or _norm(actual) == _norm(ko):
             out["verdict"] = "brand"
             out["actual_brand"] = None
             out["reason"] = (out.get("reason") or "") + " (회사명=브랜드명이라 브랜드로 본다)"
 
+    # 뷰티가 아니라고 판단했으면 정체가 무엇이든 추적 대상이 아니다.
+    # unsure는 통과시킨다 — 확신 없이 거르면 진짜 신흥 브랜드를 놓친다.
+    if beauty == "no" and out["verdict"] != "unrelated":
+        out["reason"] = (out.get("reason") or "") + " (뷰티 제품을 팔지 않아 무관으로 본다)"
+        out["verdict"] = "unrelated"
+
+    out["beauty"] = beauty
     out["evidence"] = ev[:5]
     return out
 
