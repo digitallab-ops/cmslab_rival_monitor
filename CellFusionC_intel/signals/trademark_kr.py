@@ -29,7 +29,7 @@ import re
 import time
 import logging
 import xml.etree.ElementTree as ET
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import requests
 from sqlalchemy import text
@@ -109,7 +109,7 @@ def _classes(code: str) -> set:
 # ── KIPRIS 호출 ──────────────────────────────────────────────────────────────
 
 # 한도는 두 종류다. 하나는 기다리면 풀리고(초당), 하나는 내일까지 안 풀린다(일일).
-# 실측 2026-11-11: 전수수집으로 일일 한도가 바닥나자 40개 브랜드가 각각 4번씩
+# 실측 2026-11-11: 전수수집으로 월 한도가 바닥나자 40개 브랜드가 각각 4번씩
 # 물러섰다 다시 걸어 40분을 허비하고도 0건이었다. 둘을 구별하지 않은 탓이다.
 _LIMIT_SEC = "LIMITED_NUMBER_OF_SERVICE_REQUESTS_PER_SECOND_EXCEEDS"   # 코드 23
 _LIMIT_DAY = "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS"              # 코드 22
@@ -117,7 +117,69 @@ _last_call = [0.0]
 
 
 class QuotaExhausted(RuntimeError):
-    """오늘 치 호출을 다 썼다. 기다려도 안 풀리니 이번 회차는 접는다."""
+    """이번 달 치 호출을 다 썼다. 기다려도 안 풀리니 이번 회차는 접는다."""
+
+
+# ── 월 호출 예산 ─────────────────────────────────────────────────────────────
+# 🔴 **한도는 일일이 아니라 월간이다.** 코드가 오래 "일일 한도"라고 불렀는데,
+# KIPRIS 가 돌려주는 LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS 에는 일/월
+# 구분이 없다. 11-11 에 바닥난 뒤 11-12~11-16 닷새 내내 안 풀린 것으로 확인됐다.
+# 마이페이지 → 서비스 구매내역: 무료(월 1,000건 호출), 20260806~20261231.
+#
+# 한도를 때려서 멈추면 그 달 남은 날의 **다른 KIPRIS 기능까지 같이 죽는다.**
+# 그래서 우리가 먼저 센다. 50건은 수동 점검·재시도용으로 남긴다.
+_MONTHLY_CAP = 1000
+_BUDGET_KEEP = 50                       # 남겨두는 여유분
+_SERVICE = "kipris_trademark_kr"
+_budget = {"period": "", "used": 0, "cap": _MONTHLY_CAP - _BUDGET_KEEP, "on": False}
+
+
+def _period() -> str:
+    """KST 기준 'YYYY-MM'. 월말 자정 전후로 달이 어긋나지 않게 +9h 로 끊는다."""
+    from datetime import timezone
+    return (datetime.now(timezone.utc) + timedelta(hours=9)).strftime("%Y-%m")
+
+
+def budget_load(session) -> dict:
+    """이번 달 쓴 횟수를 장부에서 읽어 메모리에 올린다(회차 시작 때 1회)."""
+    p = _period()
+    try:
+        row = session.execute(text(
+            f"SELECT used FROM {DB_SCHEMA}.api_quota "
+            f"WHERE service = :s AND period = :p"), {"s": _SERVICE, "p": p}).first()
+        _budget.update(period=p, used=int(row[0]) if row else 0, on=True)
+    except Exception as e:
+        # 장부를 못 읽으면 세지 않는다 — 세다 말면 오히려 멀쩡한 회차를 막는다.
+        logger.warning("호출 예산 장부 읽기 실패(이번 회차는 집계만 생략): %s", e)
+        _budget.update(period=p, used=0, on=False)
+    return dict(_budget)
+
+
+def budget_save(session) -> None:
+    """회차 끝(또는 한도 도달)에 장부를 갱신한다."""
+    if not _budget["on"]:
+        return
+    try:
+        session.execute(text(f"""
+            INSERT INTO {DB_SCHEMA}.api_quota (service, period, used, updated_at)
+            VALUES (:s, :p, :u, NOW())
+            ON CONFLICT (service, period) DO UPDATE
+               SET used = EXCLUDED.used, updated_at = NOW()
+        """), {"s": _SERVICE, "p": _budget["period"], "u": _budget["used"]})
+        session.commit()
+    except Exception as e:
+        logger.warning("호출 예산 장부 쓰기 실패: %s", e)
+
+
+def _budget_spend() -> None:
+    """호출 1회를 장부에 긋는다. 남은 게 없으면 더 걸지 않고 접는다."""
+    if not _budget["on"]:
+        return
+    if _budget["used"] >= _budget["cap"]:
+        raise QuotaExhausted(
+            f"월 호출 예산 소진({_budget['used']}/{_budget['cap']}, "
+            f"{_budget['period']}) — 다음 달 1일에 풀립니다")
+    _budget["used"] += 1
 
 
 def _get(endpoint: str, params: dict, tries: int = 4):
@@ -129,6 +191,7 @@ def _get(endpoint: str, params: dict, tries: int = 4):
     """
     last = None
     for i in range(tries):
+        _budget_spend()          # 한도를 때리기 전에 우리가 먼저 센다
         gap = time.monotonic() - _last_call[0]
         if gap < _MIN_GAP:
             time.sleep(_MIN_GAP - gap)
@@ -147,7 +210,7 @@ def _get(endpoint: str, params: dict, tries: int = 4):
             time.sleep(wait)
             continue
         if _LIMIT_DAY in last:
-            raise QuotaExhausted("KIPRIS 일일 호출 한도 소진")   # 기다려도 안 풀린다
+            raise QuotaExhausted("KIPRIS 호출 한도 소진(월 1,000건)")  # 다음 달까지 안 풀린다
         break
     raise RuntimeError(f"KIPRIS {endpoint}: {last}")
 
@@ -261,6 +324,18 @@ def needs_mark_match(session, applicant: str, n_filings: int) -> str:
 
 
 def ensure_tables(session) -> None:
+    # 호출 예산 장부. KIPRIS Plus 무료 등급은 **월 1,000건**이고(마이페이지 →
+    # 서비스 구매내역에서 확인, 종료일 2026-12-31), 다 쓰면 다음 달 1일까지
+    # 안 풀린다. 2026-11-11 전수수집으로 바닥내고 닷새를 날렸다.
+    session.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.api_quota (
+            service   VARCHAR(40) NOT NULL,
+            period    CHAR(7)     NOT NULL,     -- 'YYYY-MM' (KST 기준)
+            used      INTEGER     NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            PRIMARY KEY (service, period)
+        )
+    """))
     session.execute(text(f"""
         CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.trademark_goods (
             country      VARCHAR(4)  NOT NULL,
@@ -553,11 +628,48 @@ def backlog(session) -> list:
     return [r[0] for r in rows]
 
 
-def run(months: int = 24, resolve: bool = True, only_backlog: bool = False) -> dict:
+# 증분 수집의 겹침 폭. **출원일과 KIPRIS 등재일은 다르다** — 11월에 낸 상표가
+# 12월에야 검색에 뜬다. "우리가 가진 최신 출원일 이후"만 긁으면 워터마크보다
+# 앞서 출원됐는데 늦게 공개된 건을 영영 놓친다. 그래서 그만큼 뒤로 겹쳐 긁는다.
+#
+# 🔴 90일은 **실측값이 아니라 넉넉히 잡은 추정치**다. 2026-11-11 에 한 번만
+# 긁어서 공개 지연을 잴 수 없었다(시차가 전부 백필 지연으로 나온다). 매주
+# 쌓이면 app_date 와 첫 fetched_at 의 차이로 진짜 지연을 잴 수 있다 — 그때 줄인다.
+_OVERLAP_DAYS = 90
+
+
+def _since_for(session, brand: str, fallback_days: int) -> "date":
+    """이 브랜드를 어디서부터 다시 볼 것인가.
+
+    과거 상표는 **백필하지 않는다.** 상표 데이터는 '앞으로 뭐가 나오나'를 보는
+    선행신호라, 수집 시작 전에 이미 출시된 제품의 상표를 사올 이유가 없다.
+    매주 긁으면 그게 그대로 히스토리가 된다.
+    (`trademark_read._NEW_MONTHS` 판정도 "과거 출원이 없는 브랜드는 새것인지
+     알 수 없으므로 적용하지 않는다"고 이미 이 전제로 쓰여 있다.)
+    """
+    try:
+        last = session.execute(text(
+            f"SELECT MAX(app_date) FROM {DB_SCHEMA}.trademark_filings "
+            f"WHERE country = 'KR' AND brand = :b"), {"b": brand}).scalar()
+    except Exception as e:
+        logger.debug("워터마크 조회 실패(%s): %s", brand, e)
+        last = None
+    if last:
+        return last - timedelta(days=_OVERLAP_DAYS)
+    # 한 번도 안 받은 브랜드 — 여기서 24개월을 긁으면 그게 백필이다. 짧게 시작한다.
+    return date.today() - timedelta(days=fallback_days)
+
+
+def run(resolve: bool = True, only_backlog: bool = False,
+        first_days: int = _OVERLAP_DAYS) -> dict:
     """국내 상표 + 지정상품 수집. 반환 {brands, filings, new, goods, pending}.
 
-    only_backlog=True면 아직 못 끝낸 브랜드만 돈다. 한도가 하루치뿐이라 매일
-    전체를 돌리면 이미 끝난 앞쪽 브랜드에서 한도를 다 쓰고 뒤쪽엔 닿지 못한다.
+    `first_days` — **한 번도 안 받은 브랜드**를 며칠치부터 볼 것인가. 기본은
+    겹침 폭과 같은 90일이다: 과거는 백필하지 않고 지금부터 쌓는다. 나중에 호출
+    건수를 사서 과거까지 채우고 싶으면 이 값만 크게 주면 된다(예: 730).
+
+    only_backlog=True면 아직 못 끝낸 브랜드만 돈다. 예산이 모자라 중간에 끊긴
+    회차의 뒤쪽 브랜드를 다음 회차에 이어 받기 위한 것이다.
     """
     if not _key():
         logger.warning("KIPRIS_KEY 미설정 — 국내상표 수집 스킵")
@@ -580,7 +692,10 @@ def run(months: int = 24, resolve: bool = True, only_backlog: bool = False) -> d
                 return stat
             logger.info("국내상표 밀린 것부터: %d개 — %s",
                         len(brands), ", ".join(b[0] for b in brands[:10]))
-        since = date.today() - timedelta(days=int(months * 30.5))
+        b0 = budget_load(session)
+        logger.info("국내상표 호출 예산: %d/%d 사용(%s)%s",
+                    b0["used"], b0["cap"], b0["period"],
+                    "" if b0["on"] else " — 장부를 못 읽어 집계 생략")
         newly_pending = []
 
         done = set()
@@ -603,6 +718,9 @@ def run(months: int = 24, resolve: bool = True, only_backlog: bool = False) -> d
 
                 stat["brands"] += 1
                 keys = _brand_keys(name, kos)
+                # 기준점은 브랜드마다 다르다 — 이미 받은 곳은 제 워터마크에서,
+                # 처음인 곳은 짧게. 전부에게 같은 24개월을 들이대면 그게 백필이다.
+                since = _since_for(session, name, first_days)
                 seen_apn, n_new = set(), 0
                 for ap in apps:
                     key = _norm_co(ap)
@@ -669,10 +787,19 @@ def run(months: int = 24, resolve: bool = True, only_backlog: bool = False) -> d
         if newly_pending:
             _notify_pending(newly_pending)
     finally:
+        # 예산 장부는 **무슨 일이 있어도** 남긴다. 여기서 빠뜨리면 다음 회차가
+        # 0부터 다시 세서, 센다는 사실 자체가 무의미해진다.
+        try:
+            budget_save(session)
+            stat["budget"] = f"{_budget['used']}/{_budget['cap']}"
+        except Exception as e:
+            logger.warning("호출 예산 저장 실패: %s", e)
         session.close()
 
-    logger.info("국내상표: 브랜드 %d · 출원 %d(신규 %d) · 지정상품 %d · 확인대기 %d",
-                stat["brands"], stat["filings"], stat["new"], stat["goods"], stat["pending"])
+    logger.info("국내상표: 브랜드 %d · 출원 %d(신규 %d) · 지정상품 %d · 확인대기 %d "
+                "· 호출 %s",
+                stat["brands"], stat["filings"], stat["new"], stat["goods"],
+                stat["pending"], stat.get("budget", "-"))
     if stat["no_applicant"]:
         logger.info("   출원인 미확인(수집 안 됨): %s", ", ".join(stat["no_applicant"]))
     if stat["incomplete"]:

@@ -558,7 +558,7 @@ def job_trademark_kr() -> None:
                     r.get("goods", 0), r.get("pending", 0))
         if r.get("quota_exhausted"):
             # 조용히 넘기면 '이 브랜드는 출원이 없구나'로 오해한다.
-            logger.warning("KIPRIS 일일 호출 한도 소진 — 남은 %d개 브랜드는 다음 회차: %s",
+            logger.warning("KIPRIS 월 호출 예산 소진 — 남은 %d개 브랜드는 다음 회차: %s",
                            len(r.get("not_reached") or []),
                            ", ".join((r.get("not_reached") or [])[:12]))
         _notify_intent(r)
@@ -567,10 +567,19 @@ def job_trademark_kr() -> None:
 
 
 def job_trademark_kr_catchup() -> None:
-    """못 끝낸 브랜드만 매일 이어받는다. 밀린 게 없으면 호출 없이 바로 끝난다.
+    """🔴 **더 이상 스케줄에 걸지 않는다**(2026-11-16). 수동 실행용으로만 남긴다.
 
-    KIPRIS는 하루 치 호출만 준다 — 58개 브랜드 전수 수집이 한 회차에 안 끝나서,
-    주1회로 두면 다 채우는 데 몇 주가 걸린다. 다 차면 이 잡은 저절로 조용해진다.
+    원래는 전수 백필을 며칠에 나눠 받으려고 만들었다. 두 가지가 틀렸다.
+
+    ① 한도가 일일이 아니라 **월간 1,000건**이었다. "내일이면 풀린다"는 전제로
+       매일 돌렸는데 11-12~11-16 닷새 내내 호출 1번씩만 버리고 끝났다.
+    ② 애초에 **과거 상표를 백필할 이유가 없다.** 상표는 '앞으로 뭐가 나오나'를
+       보는 선행신호다. 매주 긁으면 그게 그대로 히스토리가 된다.
+
+    그런데 backlog()는 '출원을 한 건도 못 받은 브랜드'를 밀린 것으로 센다 —
+    백필을 안 하면 그 브랜드들이 **영원히** 밀린 것으로 남아 매일 헛돈다.
+    그래서 끈다. 나중에 호출 건수를 사서 과거까지 채우려면 수동으로
+    `run(only_backlog=True, first_days=730)` 을 부르면 된다.
     """
     try:
         from signals.trademark_kr import run as run_kr
@@ -580,7 +589,7 @@ def job_trademark_kr_catchup() -> None:
         logger.info("=== [일간] 국내상표 밀린 수집: 브랜드 %d · 출원 %d(신규 %d) · 지정상품 %d ===",
                     r.get("brands", 0), r.get("filings", 0), r.get("new", 0), r.get("goods", 0))
         if r.get("quota_exhausted"):
-            logger.warning("KIPRIS 일일 한도 소진 — 남은 %d개는 내일: %s",
+            logger.warning("KIPRIS 월 호출 예산 소진 — 남은 %d개는 다음 회차: %s",
                            len(r.get("not_reached") or []),
                            ", ".join((r.get("not_reached") or [])[:12]))
         _notify_intent(r)
@@ -1037,12 +1046,11 @@ def create_scheduler() -> BackgroundScheduler:
         coalesce=True,
     )
 
-    scheduler.add_job(
-        job_trademark_kr_catchup,
-        # 05:00 — 한도가 자정에 풀리고 나서, 다른 아침 작업들보다 앞에.
-        trigger=CronTrigger(hour=5, minute=0),
-        id="trademark_kr_catchup", name="[일간] KIPRIS 국내상표 밀린 수집",
-        max_instances=1, coalesce=True)
+    # 🔴 [일간] KIPRIS 국내상표 밀린 수집(trademark_kr_catchup)은 **뺐다**(2026-11-16).
+    # "한도가 자정에 풀린다"는 전제로 05:00에 걸어뒀는데, 한도는 일일이 아니라
+    # 월간이었다. 게다가 과거 상표는 백필할 이유가 없어서 backlog()가 영원히
+    # 비지 않는다. 자세한 사정은 job_trademark_kr_catchup 독스트링에 적었다.
+    # 함수는 수동 실행용으로 남아 있다.
 
     # 매일 06:20 KST — 아마존 리테일 랭킹(실판매 성과·시계열). 랭킹 매일 변동 + 추세 축적.
     scheduler.add_job(
