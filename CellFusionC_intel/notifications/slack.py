@@ -29,6 +29,37 @@ ACTIVITY_EMOJI = {
 }
 
 
+# 한 채널에 여러 시스템의 알림이 섞여 들어온다. 보는 사람이 "이건 어디서 온
+# 거냐"를 매번 되묻지 않도록 모든 메시지 맨 위에 보낸 쪽 이름을 붙인다.
+# 메시지 본문은 손대지 않는다 — context 블록 하나를 앞에 끼우고, 알림 미리보기
+# (payload["text"])에만 대괄호를 두른다.
+SYSTEM_LABEL = os.getenv("SLACK_SYSTEM_LABEL", "K뷰티 모니터링").strip()
+_LABEL_EMOJI = "🧴"
+
+
+def _label(payload: dict) -> dict:
+    """payload 에 발신 시스템 이름을 얹는다(원본은 안 건드린다)."""
+    if not SYSTEM_LABEL:
+        return payload
+    out = dict(payload)
+
+    txt = str(out.get("text") or "")
+    if not txt.startswith(f"[{SYSTEM_LABEL}]"):
+        out["text"] = f"[{SYSTEM_LABEL}] {txt}".strip()
+
+    blocks = list(out.get("blocks") or [])
+    already = (blocks and blocks[0].get("type") == "context"
+               and SYSTEM_LABEL in json.dumps(blocks[0], ensure_ascii=False))
+    if blocks and not already:
+        blocks.insert(0, {
+            "type": "context",
+            "elements": [{"type": "mrkdwn",
+                          "text": f"{_LABEL_EMOJI} *{SYSTEM_LABEL}*"}],
+        })
+        out["blocks"] = blocks
+    return out
+
+
 def _get_webhook_url() -> str:
     return os.getenv("SLACK_WEBHOOK_URL", "")
 
@@ -71,12 +102,22 @@ def _post(payload: dict, secondary: bool = False) -> bool:
     primary = _get_webhook_url()
     if not primary:
         logger.debug("SLACK_WEBHOOK_URL 미설정 — 알림 스킵")
+    payload = _label(payload)      # 모든 경로가 여기를 지나므로 한 곳에서만 붙인다
     ok = _post_to(primary, payload)
     if secondary:
         url2 = os.getenv("SLACK_WEBHOOK_URL_2", "").strip()
         if url2:
             _post_to(url2, payload)
     return ok
+
+
+def send_text(text_msg: str) -> bool:
+    """mrkdwn 한 덩어리만 보내는 단순 알림(티어 조정·검색 급등·신규 상표 등).
+
+    예전엔 호출부마다 urllib 로 webhook 을 직접 쏴서, 발신 시스템 이름을 붙이려면
+    세 군데를 똑같이 고쳐야 했다. 전부 이 함수로 모은다.
+    """
+    return _post({"text": text_msg})
 
 
 def send_watchdog(title: str, body: str) -> bool:

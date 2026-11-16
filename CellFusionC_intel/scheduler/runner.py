@@ -11,7 +11,6 @@ APScheduler 스케줄
 
 import logging
 import os
-import urllib.request
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -327,6 +326,7 @@ def job_weekly_momentum() -> None:
             _notify_tier_changes(promoted, demoted, watch)
     except Exception as e:
         logger.error("모멘텀 계산 오류: %s", e)
+        _mark_failed("weekly_momentum", e)
     finally:
         session.close()
     logger.info("=== [주간] 모멘텀 계산 완료 ===")
@@ -352,16 +352,10 @@ def _notify_tier_changes(promoted: list[str], demoted: list[str],
                          f"쓸만한 건 {s.get('recent_q', 0)}건 (노이즈 {s.get('noise_pct', 0)}%)")
         lines.append("_몇 주 지켜보고 계속 이러면 강등 기준에 품질을 넣는 걸 검토하세요._")
     try:
-        import json
         # 관찰 대상이 뜬 주에는 사람이 판단해야 하므로 멘션을 붙인다(음소거해도 알림이 뜬다).
-        try:
-            from notifications.slack import mention_prefix
-            mp = mention_prefix() if watch else ""
-        except Exception:
-            mp = ""
-        data = json.dumps({"text": f"{mp}*브랜드 티어 자동 조정*\n" + "\n".join(lines)}).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
+        from notifications.slack import mention_prefix, send_text
+        mp = mention_prefix() if watch else ""
+        send_text(f"{mp}*브랜드 티어 자동 조정*\n" + "\n".join(lines))
     except Exception as e:
         logger.warning("티어 변경 Slack 알림 실패: %s", e)
 
@@ -375,6 +369,7 @@ def job_search_trends() -> None:
         logger.info("검색 트렌드 수집 완료: 그룹 %d / 행 %d", r["groups"], r["rows"])
     except Exception as e:
         logger.warning("검색 트렌드 수집 스킵(자격증명/네트워크 확인): %s", e)
+        _mark_failed("search_trends", e)
 
 
 def job_export_stats() -> None:
@@ -386,6 +381,7 @@ def job_export_stats() -> None:
         logger.info("수출통계 수집 완료: 행 %d", r["rows"])
     except Exception as e:
         logger.warning("수출통계 수집 스킵(DATA_GO_KR_KEY/네트워크 확인): %s", e)
+        _mark_failed("export_stats", e)
 
 
 def job_dart_financials() -> None:
@@ -397,6 +393,7 @@ def job_dart_financials() -> None:
         logger.info("DART 재무 수집 완료: 매칭 %d / 저장 %d행", r["resolved"], r["saved"])
     except Exception as e:
         logger.warning("DART 재무 수집 스킵(OPENDART_KEY/네트워크 확인): %s", e)
+        _mark_failed("dart_financials", e)   # 아래 NICE 재계산은 부수작업이라 안 센다
     # DART 적재 후 NICE 브랜드 매칭을 다시 계산한다. 매칭은 NICE 엑셀 적재 시점에
     # 한 번만 계산돼서, 브랜드를 새로 등록하면 그 회사가 재무 탭에서 통째로 빠진다
     # (메디큐브·제로이드·에스트라가 실제로 그랬다).
@@ -455,6 +452,7 @@ def job_google_trends() -> None:
         logger.info("구글 트렌드 수집 완료: 행 %d (실패배치 %d)", r["rows"], r["failed"])
     except Exception as e:
         logger.warning("구글 트렌드 수집 스킵(pytrends/네트워크 확인): %s", e)
+        _mark_failed("google_trends", e)     # 아래 급등 알림은 부수작업이라 안 센다
         return
     # 강한 급등만 알림(오탐 억제): 급등 2배↑ & 최근지수 30↑
     try:
@@ -480,10 +478,8 @@ def _notify_search_spikes(spikes: list) -> None:
              f"(최근 {s['recent']} ← {s['baseline']})" for s in spikes]
     text_msg = "🔺 *글로벌 검색 급등 감지* (구글 트렌드, 최근7일 vs 직전28일)\n" + "\n".join(lines)
     try:
-        import json
-        data = json.dumps({"text": text_msg}).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
+        from notifications.slack import send_text
+        send_text(text_msg)
     except Exception as e:
         logger.warning("검색 급등 Slack 전송 실패: %s", e)
 
@@ -502,10 +498,8 @@ def _notify_new_trademarks(filings: list) -> None:
                 "_경쟁사가 해당 시장에 상표를 냈습니다. 뉴스보다 앞선 진출·신제품 신호._\n"
                 + "\n".join(lines))
     try:
-        import json
-        data = json.dumps({"text": text_msg}).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=10)
+        from notifications.slack import send_text
+        send_text(text_msg)
     except Exception as e:
         logger.warning("신규 상표 Slack 전송 실패: %s", e)
 
@@ -523,6 +517,7 @@ def job_trademark() -> None:
             _notify_new_trademarks(new[:8])
     except Exception as e:
         logger.warning("해외상표 수집 스킵(KIPRIS_KEY/네트워크 확인): %s", e)
+        _mark_failed("trademark", e)
 
 
 def _notify_intent(stat: dict) -> None:
@@ -607,6 +602,7 @@ def job_score_snapshot() -> None:
             s.close()
     except Exception as e:
         logger.warning("스코어 스냅샷 스킵: %s", e)
+        _mark_failed("score_snapshot", e)
 
 
 def job_retail_ranking() -> None:
@@ -620,6 +616,7 @@ def job_retail_ranking() -> None:
         ping_dashboard_refresh()
     except Exception as e:
         logger.warning("리테일 랭킹 수집 스킵(네트워크/차단 확인): %s", e)
+        _mark_failed("retail_ranking", e)
 
 
 def job_self_oliveyoung() -> None:
@@ -657,6 +654,7 @@ def job_youtube_buzz() -> None:
                     r.get("collected", 0), r.get("skipped", 0))
     except Exception as e:
         logger.warning("유튜브 버즈 보정 스킵: %s", e)
+        _mark_failed("youtube_buzz", e)
 
 
 def job_brand_discovery() -> None:
@@ -669,6 +667,7 @@ def job_brand_discovery() -> None:
                     r.get("headlines", 0), len(r.get("new", [])))
     except Exception as e:
         logger.warning("신흥 브랜드 발견 스킵: %s", e)
+        _mark_failed("brand_discovery", e)
 
 
 def job_device_watch() -> None:
@@ -718,6 +717,7 @@ def job_oliveyoung_ranking() -> None:
         ping_dashboard_refresh()
     except Exception as e:
         logger.warning("올영 랭킹 수집 스킵(원격 MCP/네트워크 확인): %s", e)
+        _mark_failed("oliveyoung_ranking", e)
 
 
 def job_profile_sync() -> None:
@@ -768,6 +768,7 @@ def job_weekly_dedup() -> None:
         _prune_collection_runs(session)
     except Exception as e:
         logger.error("주간 중복 정리 오류: %s", e)
+        _mark_failed("weekly_dedup", e)
     finally:
         session.close()
     logger.info("=== 주간 중복 정리 완료 ===")
@@ -839,9 +840,32 @@ def _log_job_run(job_id: str, ok: bool = True, detail: str = "") -> None:
         logger.warning("잡 이력 기록 실패 [%s]: %s", job_id, e)
 
 
+# 🔴 **"돌았다"와 "됐다"는 다른 말이다.**
+#
+# 잡 함수는 전부 자기 예외를 삼키고 logger.warning 한 줄 남긴 뒤 정상 종료한다.
+# 그러면 APScheduler는 EVENT_JOB_ERROR가 아니라 EVENT_JOB_EXECUTED를 쏘고,
+# 아래 리스너가 job_runs에 ok=True를 적는다 — 실제로는 아무것도 못 했는데.
+#
+# 2026-11-10 06:00 모멘텀 잡이 그랬다. DNS가 죽어 DB에 닿지도 못했는데
+# "모멘텀 계산 완료 / executed successfully"로 끝났다. 그날은 _log_job_run
+# 자체도 DB를 못 찾아 기록이 안 남은 덕에 파수꾼이 '미실행'으로 걸렀을 뿐,
+# DB만 멀쩡했으면 ok=True가 남고 2주간 아무도 몰랐을 것이다.
+#
+# 그래서 잡이 스스로 실패를 삼킬 때는 여기에 흔적을 남긴다. 성공 이벤트가
+# 와도 이 흔적이 있으면 ok=False로 적는다.
+_JOB_FAILED: dict[str, str] = {}
+
+
+def _mark_failed(job_id: str, e: Exception) -> None:
+    """예외를 직접 삼키는 잡이 호출 — 그래도 '성공'으로 기록되지 않게."""
+    _JOB_FAILED[job_id] = str(e)[:400] or e.__class__.__name__
+
+
 def _on_job_executed(event) -> None:
     try:
-        _log_job_run(getattr(event, "job_id", "?"), ok=True)
+        jid = getattr(event, "job_id", "?")
+        why = _JOB_FAILED.pop(jid, None)
+        _log_job_run(jid, ok=(why is None), detail=why or "")
     except Exception:
         pass
 

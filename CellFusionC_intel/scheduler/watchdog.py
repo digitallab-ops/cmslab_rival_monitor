@@ -130,7 +130,8 @@ def check_collection_health(session, agg: dict | None = None) -> list[dict]:
     # 2) 아마존 리테일 신선도 — 며칠째 미갱신(스크래핑 차단/구조변경 신호)
     try:
         _r = session.execute(text(
-            f"SELECT MAX(capture_date), (now()::date - MAX(capture_date)) "
+            f"SELECT MAX(capture_date), "
+            f"       ((now() + interval '9 hours')::date - MAX(capture_date)) "
             f"FROM {DB_SCHEMA}.retail_rankings")).fetchone()
         cap = _r[0] if _r else None
         age = int(_r[1]) if _r and _r[1] is not None else None
@@ -310,8 +311,14 @@ def check_job_runs(session) -> list[dict]:
     job_runs 이력이 아직 없으면(기능 도입 직후) 조용히 넘어간다.
     """
     try:
+        # 날짜는 KST로 끊는다. ran_at 은 timestamptz 인데 DB 세션이 UTC라
+        # 그냥 ::date 를 쓰면 새벽 잡이 하루 전으로 밀려 보인다 — 11-03 06:00 에
+        # 돈 모멘텀 잡이 알림에 "마지막 2026-11-02"로 찍혔다.
         rows = session.execute(text("""
-            SELECT job_id, MAX(ran_at)::date, (CURRENT_DATE - MAX(ran_at)::date)
+            SELECT job_id,
+                   MAX(ran_at + interval '9 hours')::date,
+                   ((now() + interval '9 hours')::date
+                    - MAX(ran_at + interval '9 hours')::date)
             FROM rival_intel.job_runs WHERE ok GROUP BY job_id""")).fetchall()
     except Exception:
         return []                       # 테이블 없음 = 아직 기록 시작 전
@@ -386,7 +393,8 @@ def check_data_freshness(session) -> list[dict]:
     """
     try:
         jr = {r[0]: int(r[1] or 0) for r in session.execute(text(f"""
-            SELECT job_id, (CURRENT_DATE - MAX(ran_at)::date)
+            SELECT job_id, ((now() + interval '9 hours')::date
+                            - MAX(ran_at + interval '9 hours')::date)
             FROM {DB_SCHEMA}.job_runs WHERE ok GROUP BY job_id""")).fetchall()}
     except Exception:
         session.rollback()
@@ -396,7 +404,11 @@ def check_data_freshness(session) -> list[dict]:
     for grp, tab, col, limit, job in _DATA_MAX_AGE_DAYS:
         try:
             row = session.execute(text(
-                f"SELECT MAX({col})::date, (CURRENT_DATE - MAX({col})::date) "
+                # date 컬럼이든 timestamptz 든 +9h 를 붙이면 둘 다 KST 날짜가 된다
+                # (date 는 그날 09:00 이 될 뿐이라 날짜가 안 바뀐다).
+                f"SELECT MAX({col} + interval '9 hours')::date, "
+                f"       ((now() + interval '9 hours')::date "
+                f"        - MAX({col} + interval '9 hours')::date) "
                 f"FROM {DB_SCHEMA}.{tab}")).fetchone()
         except Exception:
             session.rollback()          # 없는 테이블/컬럼 — 트랜잭션만 되돌리고 통과
