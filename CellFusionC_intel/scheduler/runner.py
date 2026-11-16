@@ -875,10 +875,15 @@ def create_scheduler() -> BackgroundScheduler:
     scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)      # 실패 자동진단
     scheduler.add_listener(_on_job_executed, EVENT_JOB_EXECUTED)  # 실행 이력(미실행 감지용)
 
-    # 매일 09:00 & 18:00 KST — 하루 2회 수집(오전·저녁) → HIGH 속보를 오전/저녁 두 번 포착
+    # 매일 09:00 & 17:00 KST — 하루 2회 수집(오전·저녁) → HIGH 속보를 오전/저녁 두 번 포착
+    #
+    # 저녁은 원래 18:00 이었다. 한 회차가 2시간 안팎이라(29개 브랜드 기준 1h42~2h05)
+    # 20:00 주간 풀스캔과 꼬리가 겹쳤다 — 11-13 에 실제로 20:05 종료로 겹쳤다.
+    # 모멘텀 승급으로 Tier1 이 34개가 되면서 상습적으로 겹치게 돼 한 시간 당긴다.
+    # 수집 둘이 동시에 돌면 OpenAI 호출이 몰려 크레딧 소진·레이트리밋을 부른다.
     scheduler.add_job(
         job_daily_tier1,
-        trigger=CronTrigger(hour="9,18", minute=0),
+        trigger=CronTrigger(hour="9,17", minute=0),
         id="daily_tier1",
         name="[일별] Tier1 브랜드x국가 수집 (오전·저녁)",
         max_instances=1,
