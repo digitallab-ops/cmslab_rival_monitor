@@ -24,6 +24,12 @@ DATABASE_URL = URL.create(
     host=os.getenv("DB_HOST", "localhost"),
     port=int(os.getenv("DB_PORT", "5432")),
     database=os.getenv("DB_NAME", "postgres"),
+    # 🔴 **암호화는 기본값에 맡기지 않는다.**
+    # psycopg2 기본은 sslmode=prefer 다 — 서버가 받아주면 평문으로도 붙는다.
+    # 이관 대상 RDS 는 rds.force_ssl=1 이라 평문을 거부하는데, 그 사실을
+    # 컷오버 당일에야 알게 되면 수집이 통째로 선다. 지금 Supabase 도 SSL 을
+    # 받으므로 양쪽 모두에서 require 가 통한다. 환경변수로 낮출 수는 있게 둔다.
+    query={"sslmode": os.getenv("DB_SSLMODE", "require")},
 )
 
 CLASSIFIER_MODEL_FILTER = "gpt-4o-mini"
