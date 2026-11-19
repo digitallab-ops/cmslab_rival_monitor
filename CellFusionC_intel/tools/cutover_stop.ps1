@@ -72,7 +72,12 @@ if ($left) {
 Say '대사 기준값 저장 중...'
 & $py -X utf8 (Join-Path $proj 'tools\cutover.py') snapshot 2>&1 | ForEach-Object { Say "  $_" }
 
-# ⑤ 슬랙 보고
+# ⑤ 권한·소유자 기록 — Supabase 쓰기 권한을 회수하기 **전에** 떠야 한다.
+#    무엇을 회수했는지 모르면 롤백할 때 복구가 추측이 된다.
+Say '권한·소유자 기록 중...'
+& $py -X utf8 (Join-Path $proj 'tools\cutover.py') grants 2>&1 | ForEach-Object { Say "  $_" }
+
+# ⑥ 슬랙 보고
 & $py -X utf8 (Join-Path $proj 'tools\cutover.py') notify --step stopped 2>&1 | ForEach-Object { Say "  $_" }
 
 Say '=== 컷오버 정지 완료 ==='

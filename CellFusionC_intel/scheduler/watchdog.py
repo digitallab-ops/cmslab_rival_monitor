@@ -484,6 +484,51 @@ def check_credential_expiry(session) -> list[dict]:
     return out
 
 
+# 사옥 IP가 바뀌면 RDS 보안그룹에서 막힌다. 그때 증상은 '접속 거부'가 아니라
+# **수집 0건**으로만 보여서, 원인을 찾는 데 하루가 통째로 날아간다.
+# 2026-12-09 사옥 이전이 예정돼 있다 — 바뀐 IP를 위시켓에 통보해야 한다.
+_EGRESS_ALLOWED = os.getenv("EGRESS_ALLOWED_IP", "125.143.163.67")
+_EGRESS_SERVICES = ("https://checkip.amazonaws.com", "https://api.ipify.org")
+
+
+def _public_ip() -> str | None:
+    """나가는 공인 IP를 확인한다. 두 곳을 차례로 — 한 곳이 죽어도 되게."""
+    import requests
+    for url in _EGRESS_SERVICES:
+        try:
+            r = requests.get(url, timeout=5, headers={"User-Agent": "monitor/1.0"})
+            if r.ok:
+                ip = r.text.strip()
+                if ip.count(".") == 3 and all(x.isdigit() for x in ip.split(".")):
+                    return ip
+        except Exception:
+            continue
+    return None
+
+
+def check_egress_ip(session) -> list[dict]:
+    """공인 IP가 허용목록과 달라졌는지 본다.
+
+    키에 현재 IP를 넣는다 — IP가 또 바뀌면 새 키가 되어 다시 알린다.
+    같은 IP로는 쿨다운에 걸려 조용하다.
+    """
+    if not _EGRESS_ALLOWED:
+        return []
+    now = _public_ip()
+    if not now or now == _EGRESS_ALLOWED:
+        return []
+    return [{
+        "type": "egress_ip",
+        "key": f"net:egress_ip:{now}",
+        "title": f"나가는 공인 IP가 바뀌었다 — {_EGRESS_ALLOWED} → {now}",
+        "detail": ("AWS RDS 보안그룹은 등록된 IP만 받는다. 바뀐 IP가 등록돼 있지 않으면 "
+                   "DB 접속이 막히는데, 겉으로는 '수집 0건'으로만 보인다."),
+        "read": (f"위시켓에 새 IP({now}) 허용을 요청할 것. 반영 전까지 수집은 멈춘다. "
+                 f"IP가 정상적으로 바뀐 것이라면 .env 의 EGRESS_ALLOWED_IP 도 같이 고쳐야 "
+                 f"이 알림이 멎는다."),
+    }]
+
+
 def _today_kst() -> date:
     """DB가 UTC라 date.today()를 쓰면 새벽에 하루 어긋난다."""
     from datetime import timezone
@@ -723,6 +768,10 @@ def run_watchdog(agg: dict | None = None) -> int:
                 findings += check_credential_expiry(session)
             except Exception as e:
                 logger.warning("자격 만료 체크 실패: %s", e)
+            try:
+                findings += check_egress_ip(session)
+            except Exception as e:
+                logger.warning("공인 IP 체크 실패: %s", e)
         fresh = [f for f in findings if _dedup_ok(session, f["key"])]
         if not fresh:
             logger.info("watchdog: 새 이상 없음(전체 %d, 쿨다운 후 0)", len(findings))
