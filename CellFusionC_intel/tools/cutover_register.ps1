@@ -14,6 +14,8 @@ $pwsh = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 $jobs = @(
     @{ n='CMSLab_Cutover_1125_fullscan'; t='2026-11-25 19:30';
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step fullscan_defer" },
+    @{ n='CMSLab_Cutover_1206_movepause'; t='2026-12-06 20:00';
+       e=$py;   a="-X utf8 `"$proj	ools\cutover.py`" notify --step move_pause" },
     @{ n='CMSLab_Cutover_1128_tminus';   t='2026-11-28 11:25';
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step t_minus" },
     @{ n='CMSLab_Cutover_1128_stop';     t='2026-11-28 11:30';
