@@ -10,6 +10,11 @@
   python tools/cutover.py snapshot                 # 덤프 직전 기준값 저장
   python tools/cutover.py compare  --baseline <경로>
   python tools/cutover.py writetest
+  python tools/cutover.py grants                   # 권한 회수 **전에** 떠둘 것
+  python tools/cutover.py botmem --export
+
+  시험 복원본 검증(.env 를 안 건드린다):
+  python tools/cutover.py writetest --url "<RDS URL>" --schema rival_intel_test
 """
 
 from __future__ import annotations
@@ -135,10 +140,25 @@ def _collect(conn, schema: str) -> dict:
     return out
 
 
-def _open():
+def _open(args=None):
+    """접속 대상을 연다.
+
+    기본은 `.env` 의 DATABASE_URL·DB_SCHEMA 다. 시험 복원본처럼 **운영 설정을
+    건드리지 않고** 다른 곳을 봐야 할 때만 --url / --schema 로 덮어쓴다.
+    컷오버 전주에 .env 를 만지는 건 그 자체가 사고 원인이다.
+    """
     import config.settings as S
     from sqlalchemy import create_engine
-    return create_engine(S.DATABASE_URL), S.DB_SCHEMA, S.DATABASE_URL.host
+    from sqlalchemy.engine import make_url
+
+    url = make_url(args.url) if getattr(args, "url", None) else S.DATABASE_URL
+    schema = getattr(args, "schema", None) or S.DB_SCHEMA
+    return create_engine(url), schema, url.host
+
+
+def _add_target_opts(parser) -> None:
+    parser.add_argument("--url", help="접속 URL 직접 지정(기본: .env 의 DATABASE_URL)")
+    parser.add_argument("--schema", help="스키마 직접 지정(기본: .env 의 DB_SCHEMA)")
 
 
 def _latest_snapshot() -> Path | None:
@@ -149,7 +169,7 @@ def _latest_snapshot() -> Path | None:
 
 
 def cmd_snapshot(args) -> int:
-    eng, schema, host = _open()
+    eng, schema, host = _open(args)
     with eng.connect() as c:
         data = _collect(c, schema)
     data["taken_at"] = datetime.now().isoformat(timespec="seconds")
@@ -175,7 +195,7 @@ def cmd_compare(args) -> int:
         return 1
     base = json.loads(base_path.read_text(encoding="utf-8"))
 
-    eng, schema, host = _open()
+    eng, schema, host = _open(args)
     with eng.connect() as c:
         cur = _collect(c, schema)
 
@@ -222,7 +242,7 @@ def cmd_writetest(args) -> int:
     DML 뿐 아니라 **DDL 도 본다** — 수집기가 실행마다 DDL 을 돌리기 때문이다.
     """
     from sqlalchemy import text
-    eng, schema, host = _open()
+    eng, schema, host = _open(args)
     print(f"대상 호스트 : {host}  (스키마 {schema})")
     print()
 
@@ -273,6 +293,182 @@ def cmd_writetest(args) -> int:
     return 1
 
 
+# ─────────────────────────────────────────────── 권한·소유자 기록
+
+_Q_SCHEMA = """
+SELECT nspname, pg_get_userbyid(nspowner) AS owner, nspacl::text AS acl
+FROM pg_namespace WHERE nspname = :s"""
+
+_Q_OBJECTS = """
+SELECT c.relkind, c.relname,
+       pg_get_userbyid(c.relowner) AS owner, c.relacl::text AS acl
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = :s AND c.relkind IN ('r','p','v','m','S')
+ORDER BY c.relkind, c.relname"""
+
+_Q_DEFACL = """
+SELECT pg_get_userbyid(d.defaclrole) AS role,
+       d.defaclobjtype AS objtype, d.defaclacl::text AS acl
+FROM pg_default_acl d JOIN pg_namespace n ON n.oid = d.defaclnamespace
+WHERE n.nspname = :s"""
+
+_KIND = {"r": "테이블", "p": "파티션테이블", "v": "뷰", "m": "구체화뷰", "S": "시퀀스"}
+
+
+def cmd_grants(args) -> int:
+    """지금 누가 무엇을 소유하고 무슨 권한을 쥐고 있는지 파일로 남긴다.
+
+    왜 필요한가: 컷오버 직후 Supabase 쓰기 권한을 회수하는데, **무엇을
+    회수했는지 기록이 없으면 롤백할 때 복구가 추측이 된다.** 회수 전에 떠라.
+
+    이 파일은 재생 스크립트가 아니라 **기록**이다. ACL 문자열(`app=arwdDxt/owner`)
+    을 그대로 남기므로 원래 상태를 눈으로 대조할 수 있다.
+    """
+    from sqlalchemy import text
+    eng, schema, host = _open(args)
+
+    with eng.connect() as c:
+        row = c.execute(text(_Q_SCHEMA), {"s": schema}).mappings().first()
+        if row is None:
+            print(f"🔴 스키마 {schema} 가 없습니다 ({host}).")
+            return 1
+        data = {
+            "taken_at": datetime.now().isoformat(timespec="seconds"),
+            "host": host,
+            "schema": dict(row),
+            "objects": [dict(r) for r in
+                        c.execute(text(_Q_OBJECTS), {"s": schema}).mappings()],
+            "default_acl": [dict(r) for r in
+                            c.execute(text(_Q_DEFACL), {"s": schema}).mappings()],
+        }
+
+    SNAP_DIR.mkdir(parents=True, exist_ok=True)
+    out = Path(args.out) if args.out else         SNAP_DIR / f"grants_{datetime.now():%Y%m%d_%H%M%S}.json"
+    out.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    print(f"권한 기록 저장 : {out}")
+    print(f"  호스트 : {host}  /  스키마 : {schema}")
+    print(f"  스키마 소유자 : {data['schema']['owner']}")
+    print(f"  스키마 ACL    : {data['schema']['acl'] or '(기본값 — 명시 GRANT 없음)'}")
+    print()
+
+    owners: dict[str, int] = {}
+    for o in data["objects"]:
+        owners[o["owner"]] = owners.get(o["owner"], 0) + 1
+    print("=== 객체 소유자 분포 ===")
+    for who, n in sorted(owners.items(), key=lambda kv: -kv[1]):
+        print(f"  {who:30s} {n:4d}개")
+
+    granted = [o for o in data["objects"] if o["acl"]]
+    print()
+    print(f"=== 명시 GRANT 가 걸린 객체 {len(granted)}개 ===")
+    for o in granted[:15]:
+        print(f"  {_KIND.get(o['relkind'], o['relkind']):6s} "
+              f"{o['relname']:30s} {o['acl']}")
+    if len(granted) > 15:
+        print(f"  … 나머지 {len(granted) - 15}개는 파일에 있습니다")
+
+    if data["default_acl"]:
+        print()
+        print("=== 기본 권한(ALTER DEFAULT PRIVILEGES) ===")
+        for d in data["default_acl"]:
+            print(f"  {d['role']} / {d['objtype']} : {d['acl']}")
+    return 0
+
+
+# ──────────────────────────────────────────── 봇 기억 백업/복원
+
+_BOT_COLS = {
+    "bot_conversations": ("user_id", "role", "content", "created_at"),
+    "bot_user_memory": ("user_id", "mem_key", "mem_value", "source", "updated_at"),
+}
+
+
+def cmd_botmem(args) -> int:
+    """덤프에서 빠지는 2개 테이블을 우리 손으로 들고 넘어간다.
+
+    개인정보라 위시켓 덤프에서 일부러 뺐다. 그래서 RDS 에는 **아예 없다.**
+    코드(_ensure_bot_tables)가 빈 테이블을 다시 만들긴 하지만 내용은 안 돌아온다.
+    `기억해` 로 쌓인 사용자 기억은 여기서 챙기지 않으면 그대로 사라진다.
+
+    산출 파일은 logs/cutover/ 아래에 남고 .gitignore 로 막혀 있다 — 커밋되면 안 된다.
+    """
+    from sqlalchemy import text
+    eng, schema, host = _open(args)
+
+    if args.export:
+        data = {"taken_at": datetime.now().isoformat(timespec="seconds"),
+                "host": host, "schema": schema, "rows": {}}
+        with eng.connect() as c:
+            for t, cols in _BOT_COLS.items():
+                try:
+                    rs = c.execute(text(
+                        f'SELECT {", ".join(cols)} FROM "{schema}"."{t}" ORDER BY id'))
+                except Exception as e:
+                    print(f"  건너뜀 {t} : {e.__class__.__name__}")
+                    data["rows"][t] = []
+                    continue
+                data["rows"][t] = [
+                    {k: (v.isoformat() if hasattr(v, "isoformat") else v)
+                     for k, v in dict(r).items()} for r in rs.mappings()]
+
+        SNAP_DIR.mkdir(parents=True, exist_ok=True)
+        out = SNAP_DIR / f"botmem_{datetime.now():%Y%m%d_%H%M%S}.json"
+        out.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"봇 기억 백업 : {out}")
+        for t, rows in data["rows"].items():
+            print(f"  {t:20s} {len(rows):5d}행")
+        print()
+        print("🔴 개인정보입니다. 메일·슬랙에 붙이지 마세요. 커밋도 막혀 있습니다.")
+        return 0
+
+    # ── 복원
+    import config.settings as S
+    if schema != S.DB_SCHEMA:
+        print(f"🔴 복원은 운영 스키마({S.DB_SCHEMA})로만 합니다. --schema 를 빼세요.")
+        return 1
+
+    src = Path(args.restore)
+    if not src.exists():
+        print(f"🔴 파일이 없습니다 : {src}")
+        return 1
+    data = json.loads(src.read_text(encoding="utf-8"))
+    print(f"복원 원본 : {src.name}  (뜬 시각 {data['taken_at']} / {data['host']})")
+    print(f"대상      : {host}  스키마 {schema}")
+    if data["host"] == host:
+        print("⚠️  원본과 대상이 같은 호스트입니다 — .env 를 아직 안 바꿨을 수 있습니다.")
+
+    from sqlalchemy.orm import Session as _Session
+    from storage.repository import _ensure_bot_tables
+    with _Session(eng) as sess:          # 테이블이 없으면 여기서 생긴다
+        _ensure_bot_tables(sess)
+
+    total = 0
+    with eng.connect() as c:
+        for t, cols in _BOT_COLS.items():
+            rows = data["rows"].get(t, [])
+            if not rows:
+                print(f"  {t:20s} 백업에 행이 없습니다 — 건너뜁니다")
+                continue
+            have = c.execute(text(f'SELECT count(*) FROM "{schema}"."{t}"')).scalar()
+            if have and not args.force:
+                print(f"  🔴 {t} 에 이미 {have}행이 있습니다 — 중복을 막으려고 멈춥니다."
+                      f" 정말이면 --force")
+                return 1
+            conflict = (" ON CONFLICT (user_id, mem_key) DO NOTHING"
+                        if t == "bot_user_memory" else "")
+            c.execute(text(
+                f'INSERT INTO "{schema}"."{t}" ({", ".join(cols)}) '
+                f'VALUES ({", ".join(":" + x for x in cols)}){conflict}'), rows)
+            c.commit()
+            total += len(rows)
+            print(f"  {t:20s} {len(rows):5d}행 복원")
+
+    print()
+    print(f"복원 완료 — 합계 {total}행")
+    return 0
+
+
 # ───────────────────────────────────────────────────────────── main
 
 def main() -> int:
@@ -285,14 +481,31 @@ def main() -> int:
 
     s = sub.add_parser("snapshot", help="대사 기준값 저장")
     s.add_argument("--out")
+    _add_target_opts(s)
     s.set_defaults(fn=cmd_snapshot)
 
     c = sub.add_parser("compare", help="기준값과 현재 DB 대조")
     c.add_argument("--baseline")
+    _add_target_opts(c)
     c.set_defaults(fn=cmd_compare)
 
     w = sub.add_parser("writetest", help="쓰기·DDL 권한 검증")
+    _add_target_opts(w)
     w.set_defaults(fn=cmd_writetest)
+
+    g = sub.add_parser("grants", help="권한·소유자 현재 상태 기록")
+    g.add_argument("--out")
+    _add_target_opts(g)
+    g.set_defaults(fn=cmd_grants)
+
+    b = sub.add_parser("botmem", help="봇 기억 백업/복원(덤프에서 빠지는 2개 테이블)")
+    bm = b.add_mutually_exclusive_group(required=True)
+    bm.add_argument("--export", action="store_true")
+    bm.add_argument("--restore", metavar="경로")
+    b.add_argument("--force", action="store_true",
+                   help="대상 테이블이 비어 있지 않아도 복원(중복 주의)")
+    _add_target_opts(b)
+    b.set_defaults(fn=cmd_botmem)
 
     args = p.parse_args()
     return args.fn(args)
