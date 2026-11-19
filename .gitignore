@@ -20,8 +20,6 @@ env/
 
 # 로그
 *.log
-# 컷오버 대사 스냅샷 — 소스가 아니라 운영 산출물(행수·시퀀스 값)이다
-CellFusionC_intel/logs/cutover/*.json
 
 # 생성된 보고서 (소스가 아닌 산출물)
 CellFusionC_intel/rival_report*.html
@@ -45,3 +43,6 @@ CellFusionC_intel/dashboard/chartjs_cache.min.js
 .DS_Store
 Thumbs.db
 CellFusionC_intel/_server_cache.html
+
+# 컷오버 작업 산출물 — 운영 데이터(행수·권한·개인정보)와 런북. 소스가 아니다
+CellFusionC_intel/logs/cutover/
