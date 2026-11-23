@@ -15,7 +15,7 @@ $jobs = @(
     @{ n='CMSLab_Cutover_1125_fullscan'; t='2026-11-25 19:30';
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step fullscan_defer" },
     @{ n='CMSLab_Cutover_1206_movepause'; t='2026-12-06 20:00';
-       e=$py;   a="-X utf8 `"$proj	ools\cutover.py`" notify --step move_pause" },
+       e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step move_pause" },
     @{ n='CMSLab_Cutover_1128_tminus';   t='2026-11-28 11:25';
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step t_minus" },
     @{ n='CMSLab_Cutover_1128_stop';     t='2026-11-28 11:30';
@@ -25,7 +25,15 @@ $jobs = @(
     @{ n='CMSLab_Cutover_1128_restart';  t='2026-11-28 16:30';
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step restart" },
     @{ n='CMSLab_Cutover_1128_write';    t='2026-11-28 17:10';
-       e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step first_write" }
+       e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step first_write" },
+    # 11/28 알림은 전부 그날 하루짜리다. 전환을 11/29 로 미루면 **아무것도 안 울린다**.
+    # 그런데 cutover_stop.ps1 이 작업을 *비활성화* 해놔서 증상이 에러가 아니라 침묵이고,
+    # 파수꾼도 스케줄러 안에서 도니 같이 꺼져 있어 자기가 꺼진 걸 못 알린다.
+    # → 밖에서 이틀간 확인한다. 이미 살아났으면 조용히 끝난다.
+    @{ n='CMSLab_Cutover_1129_watch';    t='2026-11-29 09:00';
+       e=$pwsh; a="-NoProfile -ExecutionPolicy Bypass -File `"$proj\tools\cutover_watch.ps1`"" },
+    @{ n='CMSLab_Cutover_1130_watch';    t='2026-11-30 09:00';
+       e=$pwsh; a="-NoProfile -ExecutionPolicy Bypass -File `"$proj\tools\cutover_watch.ps1`"" }
 )
 
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' `

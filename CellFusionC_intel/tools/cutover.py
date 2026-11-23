@@ -73,7 +73,12 @@ STEPS: dict[str, tuple[str, str]] = {
         "11/28 — 5분 뒤 스케줄러를 자동 정지합니다",
         "11:30 에 `CMSLab_RivalScheduler` 작업을 *비활성화* 하고 프로세스를 내립니다.\n"
         "그 직후 34개 테이블 행수·시퀀스 기준값을 자동으로 떠둡니다.\n\n"
-        "⚠️ 지금 돌고 있는 잡이 있으면 끝나기를 기다렸다 멈춥니다.",
+        "⚠️ 지금 돌고 있는 잡이 있으면 끝나기를 기다렸다 멈춥니다.\n\n"
+        "🔴 *Render(`kbeauty-intel`) 도 지금 Suspend 하세요.* 읽기 전용이 아닙니다 — "
+        "슬랙 봇이 브랜드·출원인 승인을(`monitored_brands`·`brand_candidates`·"
+        "`brand_applicants`) 쓰고, 대시보드가 인사이트 캐시를 씁니다. 덤프(12:00) 뒤에 "
+        "들어온 승인은 복원본에 없고 *에러 없이* 사라집니다.\n"
+        "(봇 대화·기억 2개는 덤프 대상이 아닙니다 — `botmem --export` 로 따로 옮깁니다.)",
     ),
     "stopped": (
         "11/28 — 스케줄러 정지 완료 · 덤프 시작 신호를 남기세요",
@@ -94,8 +99,9 @@ STEPS: dict[str, tuple[str, str]] = {
         "① `.env` 의 DB_* 를 RDS 로 교체  ② Render 환경변수 교체 + *재배포*\n"
         "③ 작업 재활성화  ④ 대조·쓰기검증\n\n"
         "17:00 Tier1 수집이 *RDS 첫 실쓰기* 가 됩니다.\n\n"
-        "⚠️ Render 재배포를 빠뜨리지 마세요. 커밋 d4bc3d8(sslmode=require)이 "
-        "아직 Render 에 안 올라갔고, RDS 는 평문을 거부합니다.",
+        "⚠️ Render 재배포를 빠뜨리지 마세요. 커밋 d4bc3d8(sslmode=require)은 "
+        "origin·handover 양쪽에 올라가 있습니다(11/23 확인). 남은 건 Render 가 "
+        "그 커밋으로 *실제 재배포됐는지* 확인하는 것입니다 — RDS 는 평문을 거부합니다.",
     ),
     "first_write": (
         "11/28 17:10 — RDS 첫 쓰기 결과를 확인하세요",
@@ -104,6 +110,18 @@ STEPS: dict[str, tuple[str, str]] = {
         "• 권한 오류(`permission denied for schema` / `must be owner of table`)가 없는지\n\n"
         "⚠️ 우리 수집기는 실행마다 DDL(`CREATE TABLE IF NOT EXISTS` 등)을 돌립니다. "
         "앱 계정에 스키마 CREATE 권한과 테이블 소유권이 없으면 *여기서* 터집니다.",
+    ),
+    # 11/28 알림은 전부 그날 하루짜리다. 전환을 미루면 11/29 엔 아무것도 안 울린다.
+    # 그리고 cutover_stop.ps1 이 작업을 *비활성화* 해놔서 증상이 에러가 아니라 침묵이다.
+    # 파수꾼은 스케줄러 안에서 도니 같이 꺼져 있어 자기가 꺼진 걸 못 알린다.
+    "still_down": (
+        "수집이 아직 멈춰 있습니다",
+        "컷오버 때 내린 작업이 *아직 비활성화* 상태입니다. "
+        "11/28 알림은 그날로 끝났으니 이 메시지 말고는 더 울리지 않습니다.\n\n"
+        "*되살리려면* — `.env` 의 DB_* 가 RDS 로 바뀌어 있는지 먼저 보고, "
+        "`tools\\cutover_start.ps1` 을 실행하세요. 그 뒤 `cutover.py compare` 와 "
+        "`writetest` 로 확인합니다.\n\n"
+        "⚠️ 되살리기 전에 Render 환경변수 교체와 *재배포*도 끝나 있어야 합니다.",
     ),
 }
 
