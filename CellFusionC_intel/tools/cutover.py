@@ -74,10 +74,13 @@ STEPS: dict[str, tuple[str, str]] = {
         "11:30 에 `CMSLab_RivalScheduler` 작업을 *비활성화* 하고 프로세스를 내립니다.\n"
         "그 직후 34개 테이블 행수·시퀀스 기준값을 자동으로 떠둡니다.\n\n"
         "⚠️ 지금 돌고 있는 잡이 있으면 끝나기를 기다렸다 멈춥니다.\n\n"
-        "🔴 *Render(`kbeauty-intel`) 도 지금 Suspend 하세요.* 읽기 전용이 아닙니다 — "
-        "슬랙 봇이 브랜드·출원인 승인을(`monitored_brands`·`brand_candidates`·"
-        "`brand_applicants`) 쓰고, 대시보드가 인사이트 캐시를 씁니다. 덤프(12:00) 뒤에 "
-        "들어온 승인은 복원본에 없고 *에러 없이* 사라집니다.\n"
+        "Render(`cmslab_rival_monitor`) 도 11:30 에 *같이 내려갑니다* — 손대실 것 없습니다. "
+        "읽기 전용이 아니기 때문입니다: 슬랙 봇이 브랜드·출원인 승인을"
+        "(`monitored_brands`·`brand_candidates`·`brand_applicants`) 쓰고, 대시보드가 "
+        "인사이트 캐시를 씁니다. 덤프(12:00) 뒤에 들어온 승인은 복원본에 없고 "
+        "*에러 없이* 사라집니다.\n"
+        "⚠️ 자동 정지가 실패하면 11:50 보고에 «Render 자동 정지 실패» 가 찍힙니다. "
+        "그때만 대시보드에서 직접 Suspend 하세요.\n"
         "(봇 대화·기억 2개는 덤프 대상이 아닙니다 — `botmem --export` 로 따로 옮깁니다.)",
     ),
     "stopped": (
@@ -96,12 +99,15 @@ STEPS: dict[str, tuple[str, str]] = {
     "restart": (
         "11/28 16:30 — 재시작 판단 시점",
         "*끝났다면* 저와 세션에서 아래를 돌립니다.\n"
-        "① `.env` 의 DB_* 를 RDS 로 교체  ② Render 환경변수 교체 + *재배포*\n"
-        "③ 작업 재활성화  ④ 대조·쓰기검증\n\n"
+        "① `.env` 의 DB_* 를 RDS 로 교체  ② `render_ctl.py env-set` 으로 Render 교체\n"
+        "③ `render_ctl.py resume`  ④ 작업 재활성화  ⑤ 대조·쓰기검증\n\n"
         "17:00 Tier1 수집이 *RDS 첫 실쓰기* 가 됩니다.\n\n"
-        "⚠️ Render 재배포를 빠뜨리지 마세요. 커밋 d4bc3d8(sslmode=require)은 "
-        "origin·handover 양쪽에 올라가 있습니다(11/23 확인). 남은 건 Render 가 "
-        "그 커밋으로 *실제 재배포됐는지* 확인하는 것입니다 — RDS 는 평문을 거부합니다.",
+        "sslmode 는 이미 해결돼 있습니다 — 커밋 d4bc3d8 이 라이브 배포(8212085)에 "
+        "포함된 것을 확인했습니다(11/23). autoDeploy 가 켜져 있어 환경변수만 바꿔도 "
+        "재배포됩니다.\n\n"
+        "🔴 *스키마 이름을 먼저 확인하세요.* `DB_SCHEMA = \"rival_intel\"` 은 "
+        "`config/settings.py` 에 박혀 있습니다(환경변수 아님). 복원본의 스키마 이름이 "
+        "다르면 환경변수 교체만으로는 테이블을 못 찾습니다 — 코드 수정 + 재배포입니다.",
     ),
     "first_write": (
         "11/28 17:10 — RDS 첫 쓰기 결과를 확인하세요",

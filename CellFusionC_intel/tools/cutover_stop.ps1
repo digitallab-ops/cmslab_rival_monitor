@@ -35,7 +35,26 @@ foreach ($t in $tasks) {
     }
 }
 
-# ② 돌고 있는 잡이 끝나기를 기다린다 (최대 20분)
+# ② Render 웹 정지 — 수집기와 **같은 시각**에 내려야 한다.
+#    Render 는 읽기 전용이 아니다. 슬랙 봇이 브랜드·출원인 승인을 쓰고
+#    대시보드가 인사이트 캐시를 쓴다. 덤프(12:00) 뒤에 들어온 승인은
+#    복원본에 없고 에러 없이 사라진다.
+#    실패해도 여기서 멈추지 않는다 — 수집 정지가 본 작업이고, Render 는
+#    슬랙 알림을 보고 사람이 손으로 내릴 수 있다.
+Say 'Render(cmslab_rival_monitor) 정지 중...'
+$renderOk = $false
+try {
+    $out = & $py -X utf8 (Join-Path $proj 'tools\render_ctl.py') suspend 2>&1
+    $out | ForEach-Object { Say "  $_" }
+    if ($LASTEXITCODE -eq 0) { $renderOk = $true }
+} catch {
+    Say "  예외: $($_.Exception.Message)"
+}
+if (-not $renderOk) {
+    Say '⚠️ Render 자동 정지 실패 — 대시보드에서 직접 Suspend 하세요 (덤프 전까지)'
+}
+
+# ③ 돌고 있는 잡이 끝나기를 기다린다 (최대 20분)
 #    로그 마지막 줄이 2분 안에 갱신되면 아직 일하는 중으로 본다.
 $sched = Join-Path $proj 'logs\scheduler.log'
 $deadline = (Get-Date).AddMinutes(20)
@@ -47,7 +66,7 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 60
 }
 
-# ③ 프로세스 종료
+# ④ 프로세스 종료
 $procs = Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" |
          Where-Object { $_.CommandLine -like '*cli.py run*' }
 if ($procs) {
@@ -68,16 +87,16 @@ if ($left) {
     Say '정지 확인 완료'
 }
 
-# ④ 대사 기준값 — 수집이 멈춘 뒤에 떠야 값이 고정된다
+# ⑤ 대사 기준값 — 수집이 멈춘 뒤에 떠야 값이 고정된다
 Say '대사 기준값 저장 중...'
 & $py -X utf8 (Join-Path $proj 'tools\cutover.py') snapshot 2>&1 | ForEach-Object { Say "  $_" }
 
-# ⑤ 권한·소유자 기록 — Supabase 쓰기 권한을 회수하기 **전에** 떠야 한다.
+# ⑥ 권한·소유자 기록 — Supabase 쓰기 권한을 회수하기 **전에** 떠야 한다.
 #    무엇을 회수했는지 모르면 롤백할 때 복구가 추측이 된다.
 Say '권한·소유자 기록 중...'
 & $py -X utf8 (Join-Path $proj 'tools\cutover.py') grants 2>&1 | ForEach-Object { Say "  $_" }
 
-# ⑥ 슬랙 보고
+# ⑦ 슬랙 보고
 & $py -X utf8 (Join-Path $proj 'tools\cutover.py') notify --step stopped 2>&1 | ForEach-Object { Say "  $_" }
 
 Say '=== 컷오버 정지 완료 ==='
