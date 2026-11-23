@@ -20,6 +20,9 @@ $jobs = @(
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step t_minus" },
     @{ n='CMSLab_Cutover_1128_stop';     t='2026-11-28 11:30';
        e=$pwsh; a="-NoProfile -ExecutionPolicy Bypass -File `"$proj\tools\cutover_stop.ps1`"" },
+    # 11:50 정지 보고 하나로는 놓칠 수 있다. 놓치면 위시켓이 말없이 기다린다.
+    @{ n='CMSLab_Cutover_1128_dumpsig';  t='2026-11-28 12:05';
+       e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step dump_signal" },
     @{ n='CMSLab_Cutover_1128_restore';  t='2026-11-28 16:00';
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step restore_check" },
     @{ n='CMSLab_Cutover_1128_restart';  t='2026-11-28 16:30';
