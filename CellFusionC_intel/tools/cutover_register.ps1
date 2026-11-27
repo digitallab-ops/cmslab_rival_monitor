@@ -23,6 +23,12 @@ $jobs = @(
     # 11:50 정지 보고 하나로는 놓칠 수 있다. 놓치면 위시켓이 말없이 기다린다.
     @{ n='CMSLab_Cutover_1128_dumpsig';  t='2026-11-28 12:05';
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step dump_signal" },
+    # 복원이 언제 끝나는지는 위시켓만 안다(예상 12:00~16:30). 사람이 그걸 보고
+    # 있을 수 없고 토요일이다. 그래서 완료를 코드가 알아보게 한다 —
+    # 11:30 기준값과 **완전히 일치**하는 순간이 완료다(휴리스틱 아님).
+    # 🔴 h=8 : 기본 1시간 제한이면 폴링 도중에 작업이 죽는다.
+    @{ n='CMSLab_Cutover_1128_autogo';   t='2026-11-28 12:10'; h=8;
+       e=$py;   a="-X utf8 `"$proj\tools\cutover_go.py`" --until 19:00" },
     @{ n='CMSLab_Cutover_1128_restore';  t='2026-11-28 16:00';
        e=$py;   a="-X utf8 `"$proj\tools\cutover.py`" notify --step restore_check" },
     @{ n='CMSLab_Cutover_1128_restart';  t='2026-11-28 16:30';
@@ -41,8 +47,12 @@ $jobs = @(
 
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' `
                  -LogonType ServiceAccount -RunLevel Highest
-$settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable `
-                 -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+# 작업마다 실행 시간 제한이 다르다. 알림은 1시간이면 충분하지만,
+# 복원을 기다리는 autogo 는 7시간 가까이 돌 수 있다 — 1시간이면 중간에 잘린다.
+function New-Settings($hours) {
+    New-ScheduledTaskSettingsSet -StartWhenAvailable `
+        -ExecutionTimeLimit (New-TimeSpan -Hours $hours)
+}
 
 foreach ($j in $jobs) {
     $existing = Get-ScheduledTask -TaskName $j.n -ErrorAction SilentlyContinue
@@ -52,9 +62,10 @@ foreach ($j in $jobs) {
     }
     $trigger = New-ScheduledTaskTrigger -Once -At ([datetime]$j.t)
     $action  = New-ScheduledTaskAction -Execute $j.e -Argument $j.a -WorkingDirectory $proj
+    $hours = if ($j.ContainsKey('h')) { $j.h } else { 1 }
     Register-ScheduledTask -TaskName $j.n -Trigger $trigger -Action $action `
-        -Principal $principal -Settings $settings | Out-Null
-    Write-Output "  등록 : $($j.n)   $($j.t)"
+        -Principal $principal -Settings (New-Settings $hours) | Out-Null
+    Write-Output "  등록 : $($j.n)   $($j.t)   (제한 ${hours}h)"
 }
 
 Write-Output ''

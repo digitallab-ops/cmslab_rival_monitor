@@ -90,27 +90,30 @@ STEPS: dict[str, tuple[str, str]] = {
         "위시켓은 그 신호를 받고 덤프를 시작합니다.",
     ),
     "restore_check": (
-        "11/28 16:00 — 복원 진행 상황을 확인하세요",
-        "컷오버 창이 30분 남았습니다.\n\n"
-        "• 위시켓 복원이 끝났는지 슬랙 방 확인\n"
-        "• 끝났으면 저와 세션을 여세요 — `.env` 교체 → 대조 → 쓰기검증을 돌립니다\n"
-        "• 아직이면 *미루는 게 맞습니다*. 11/29(일) 05:30 로 넘기면 됩니다.",
+        "11/28 16:00 — 복원 진행 상황",
+        "• *✅ 성공* 이면 **할 것 없습니다.** 이미 RDS 로 올라가 있습니다.\n"
+        "• *대기 중* 이면 아직 복원이 안 끝난 겁니다 — 자동 전환이 19:00 까지 "
+        "계속 보고 있으니 그냥 두세요.\n"
+        "• *🔴* 가 떠 있으면 저와 세션을 여세요.\n"
+        "• 19:00 까지도 복원이 안 끝나면 *미루는 게 맞습니다*. "
+        "11/29(일) 05:30 로 넘기면 됩니다.",
     ),
     "restart": (
-        "11/28 16:30 — 재시작 판단 시점",
-        "*끝났다면* 저와 세션에서 아래를 돌립니다.\n"
-        "① `.env` 의 DB_* 를 RDS 로 교체  ② `render_ctl.py env-set` 으로 Render 교체\n"
-        "③ `render_ctl.py resume`  ④ 작업 재활성화  ⑤ 대조·쓰기검증\n\n"
+        "11/28 16:30 — 자동 전환이 안 돌았을 때만 보세요",
+        "위 상태가 *✅ 성공* 이면 **이 메시지는 무시하세요.** 이미 끝났습니다.\n\n"
+        "— 이하는 *자동 전환이 안 돌았거나 실패했을 때* 입니다 —\n\n"
+        "가장 쉬운 방법은 손으로 한 번 더 돌리는 것입니다. 같은 일을 합니다:\n"
+        "`python tools/cutover_go.py --until 23:00`\n\n"
+        "직접 하시려면 저와 세션에서 이 순서로 돌립니다.\n"
+        "① `.env` 의 DB_* 교체 (접속정보는 `logs/cutover/rds.txt`)\n"
+        "② `render_ctl.py env-set` 으로 Render 교체  ③ `render_ctl.py resume`\n"
+        "④ `cutover_start.ps1`  ⑤ `compare` · `writetest`\n\n"
         "순서를 지키세요 — *정지된 상태에서* 환경변수를 바꾸고 그다음 resume 입니다. "
         "resume 은 재빌드를 트리거하므로(11/23 실측) 새 접속정보를 물고 한 번에 뜹니다. "
         "빌드에 몇 분 걸리니 `render_ctl.py deploys` 로 `live` 가 될 때까지 봅니다.\n\n"
         "17:00 Tier1 수집이 *RDS 첫 실쓰기* 가 됩니다.\n\n"
-        "sslmode 는 이미 해결돼 있습니다 — 커밋 d4bc3d8 이 라이브 배포(8212085)에 "
-        "포함된 것을 확인했습니다(11/23). autoDeploy 가 켜져 있어 환경변수만 바꿔도 "
-        "재배포됩니다.\n\n"
-        "🔴 *스키마 이름을 먼저 확인하세요.* `DB_SCHEMA = \"rival_intel\"` 은 "
-        "`config/settings.py` 에 박혀 있습니다(환경변수 아님). 복원본의 스키마 이름이 "
-        "다르면 환경변수 교체만으로는 테이블을 못 찾습니다 — 코드 수정 + 재배포입니다.",
+        "✅ 스키마 이름은 `rival_intel` 로 확인됐습니다(11/27 시험복원본 실측) — "
+        "`settings.py` 하드코딩과 같아서 코드 수정은 필요 없습니다.",
     ),
     "first_write": (
         "11/28 17:10 — RDS 첫 쓰기 결과를 확인하세요",
@@ -146,10 +149,35 @@ STEPS: dict[str, tuple[str, str]] = {
 }
 
 
+def _autogo_note() -> str:
+    """자동 전환(cutover_go.py)이 어떻게 됐는지를 **알림 맨 위에** 붙인다.
+
+    이게 없으면 16:00·16:30 알림이 "이렇게 하세요" 라고 시키는데, 자동이 이미
+    끝냈는지 아닌지를 사람이 직접 찾아봐야 한다. 그 몇 분이 컷오버 당일엔 비싸다.
+
+    결과 파일이 **없는 경우를 따로 구분**한다. 작업이 뜨지도 않은 것이고,
+    에러가 아니라 침묵이라 아무도 이상한 줄 모르는 게 제일 위험하다.
+    """
+    p = SNAP_DIR / "go_result.json"
+    if not p.exists():
+        return ("⚠️ *자동 전환이 아직 안 돌았습니다* (결과 파일 없음).\n"
+                "복원을 기다리는 중이거나, 12:10 작업이 아예 안 떴습니다.\n\n")
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return "⚠️ *자동 전환 결과를 읽지 못했습니다* — `logs/cutover/go.log` 를 보세요.\n\n"
+
+    head = {"ok": "✅ *자동 전환 성공*", "partial": "⚠️ *자동 전환 — 부분 성공*",
+            "failed": "🔴 *자동 전환 실패*"}.get(d.get("status"), "⚠️ *자동 전환 상태 불명*")
+    return "{} ({})\n{}\n\n".format(head, d.get("at", ""), d.get("summary", ""))
+
+
 def cmd_notify(args) -> int:
     from notifications.slack import notify_ops, mention_prefix
 
     title, detail = STEPS[args.step]
+    pre = _autogo_note() if args.step in (
+        "restore_check", "restart", "first_write") else ""
     extra = ""
     if args.step == "stopped":
         latest = _latest_snapshot()
@@ -160,7 +188,7 @@ def cmd_notify(args) -> int:
                      f"`{latest}`")
         else:
             extra = "\n\n🔴 *기준값 파일을 찾지 못했습니다* — 대사를 못 합니다. 확인하세요."
-    ok = notify_ops(title, mention_prefix() + detail + extra)
+    ok = notify_ops(title, mention_prefix() + pre + detail + extra)
     print("슬랙 전송", "성공" if ok else "실패")
     return 0 if ok else 1
 
